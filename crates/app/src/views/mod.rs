@@ -50,6 +50,7 @@ impl PhotoApp {
 
         egui::CentralPanel::no_frame().show(ui, |ui| {
             let r = ui.max_rect();
+            self.central_rect = r;
             ui.painter().rect_filled(r, 0.0, pal.content_bg);
             // Hairline between sidebar and content.
             ui.painter().line_segment([r.left_top(), r.left_bottom()], egui::Stroke::new(1.0, pal.separator));
@@ -161,7 +162,10 @@ impl PhotoApp {
         let painter = ctx.layer_painter(egui::LayerId::new(egui::Order::Foreground, egui::Id::unique("overlays")));
         // Rating HUD.
         if let Some((r, _)) = self.hud {
-            let rect = Rect::from_center_size(screen.center() + vec2(SIDEBAR_W / 2.0, 0.0), vec2(230.0, 70.0));
+            let rect = Rect::from_center_size(
+                if self.central_rect.is_positive() { self.central_rect.center() } else { screen.center() },
+                vec2(230.0, 70.0),
+            );
             painter.rect_filled(rect, 14.0, Color32::from_black_alpha(190));
             if r == 0 {
                 painter.text(rect.center(), Align2::CENTER_CENTER, "별점 지움", bold(18.0), Color32::WHITE);

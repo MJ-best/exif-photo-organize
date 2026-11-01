@@ -5,6 +5,7 @@ members = ["crates/core", "crates/app", "crates/cli"]
 [workspace.package]
 version = "0.1.0"
 edition = "2021"
+rust-version = "1.95"
 license = "MIT"
 repository = "https://github.com/MJ-best/exif-photo-organize"
 

@@ -179,6 +179,8 @@ pub struct PhotoApp {
     pub maintenance: Option<Maintenance>,
     pub last_grid_cols: usize,
     pub grid_offset: f32,
+    /// Area of the central panel (for centring overlays).
+    pub central_rect: egui::Rect,
     pub focus_search: bool,
     pub library_missing_since: Option<f64>,
     /// Toast messages from background jobs: (text, is_error).
@@ -238,6 +240,7 @@ impl PhotoApp {
             maintenance: None,
             last_grid_cols: 1,
             grid_offset: 0.0,
+            central_rect: egui::Rect::NOTHING,
             focus_search: false,
             library_missing_since: None,
         };
