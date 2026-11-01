@@ -4,6 +4,7 @@
 
 mod app;
 mod app_cull;
+mod app_export;
 mod config;
 mod fonts;
 mod icon;

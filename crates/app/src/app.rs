@@ -194,6 +194,9 @@ pub struct PhotoApp {
     pub writer: Option<Sender<WriteJob>>,
     pub analysis_job: Option<crate::app_cull::AnalysisJob>,
     pub analysis_pending: bool,
+    pub export_job: Option<crate::app_export::ExportJob>,
+    /// Photos waiting in the "작게 내보내기" dialog.
+    pub export_dialog: Option<Vec<i64>>,
     pub rescore_rx: Option<Receiver<crate::app_cull::RescoreResult>>,
     pub labels_dirty_at: Option<f64>,
     pub cull_report: Option<photoorg_core::cull::Report>,
@@ -206,9 +209,6 @@ pub struct PhotoApp {
     pub central_rect: egui::Rect,
     pub focus_search: bool,
     pub library_missing_since: Option<f64>,
-    /// Toast messages from background jobs: (text, is_error).
-    msg_tx: Sender<(String, bool)>,
-    msg_rx: Receiver<(String, bool)>,
 }
 
 impl PhotoApp {
@@ -221,10 +221,7 @@ impl PhotoApp {
             let _ = vtx.send(v);
             ctx.request_repaint();
         });
-        let (msg_tx, msg_rx) = unbounded();
         let mut app = PhotoApp {
-            msg_tx,
-            msg_rx,
             pal: Palette::cream(),
             applied_look: None,
             cfg,
@@ -260,6 +257,8 @@ impl PhotoApp {
             writer: None,
             analysis_job: None,
             analysis_pending: false,
+            export_job: None,
+            export_dialog: None,
             rescore_rx: None,
             labels_dirty_at: None,
             cull_report: None,
@@ -617,29 +616,6 @@ impl PhotoApp {
         self.info.as_ref()
     }
 
-    /// Copy the files of `ids` to a folder chosen by the user (in the background).
-    pub fn export_assets(&mut self, ids: Vec<i64>, jpeg_only: bool) {
-        let Some(st) = &self.lib else { return };
-        if ids.is_empty() {
-            return;
-        }
-        let Some(dir) =
-            rfd::FileDialog::new().set_title(format!("{}개 항목을 내보낼 폴더 선택", ids.len())).pick_folder()
-        else {
-            return;
-        };
-        let lib = st.lib.clone();
-        let tx = self.msg_tx.clone();
-        self.toast(format!("{}개 항목 내보내는 중…", ids.len()), false);
-        std::thread::spawn(move || {
-            let r = lib.catalog().and_then(|c| lib.export(&c, &ids, &dir, jpeg_only));
-            let _ = tx.send(match r {
-                Ok(n) => (format!("파일 {n}개를 내보냈습니다: {}", dir.display()), false),
-                Err(e) => (format!("내보내기 실패: {e:#}"), true),
-            });
-        });
-    }
-
     pub fn toast(&mut self, text: impl Into<String>, error: bool) {
         self.toasts.push(Toast { text: text.into(), until: f64::NAN, error });
     }
@@ -893,9 +869,6 @@ impl PhotoApp {
         }
 
         // Toasts.
-        while let Ok((text, error)) = self.msg_rx.try_recv() {
-            self.toasts.push(Toast { text, until: f64::NAN, error });
-        }
         for t in &mut self.toasts {
             if t.until.is_nan() {
                 t.until = now + if t.error { 6.0 } else { 3.5 };
@@ -909,6 +882,7 @@ impl PhotoApp {
             self.hud = None;
         }
         self.poll_cull(ctx);
+        self.poll_export(ctx);
     }
 
     fn finish_import(&mut self, ctx: &egui::Context, r: Result<ImportSummary, String>) {

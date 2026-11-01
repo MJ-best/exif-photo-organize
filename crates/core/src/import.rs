@@ -945,7 +945,7 @@ pub fn generate_thumbnails(
 mod tests {
     use super::*;
     use crate::tiff::tag;
-    use crate::tiff::testutil::*;
+    use crate::tiff::writer::*;
 
     fn jpeg(model: &'static str, date: &'static str) -> Vec<u8> {
         let tiff = build_tiff(vec![
@@ -1085,25 +1085,201 @@ mod tests {
         assert!(lib.catalog().unwrap().load_index().unwrap().assets.is_empty());
     }
 
-    #[test]
-    fn export_picks() {
+    fn import_files(files: &[(&str, Vec<u8>)]) -> (tempfile::TempDir, Library) {
         let card = tempfile::tempdir().unwrap();
-        std::fs::write(card.path().join("IMG_0001.JPG"), jpeg("Canon EOS R6", "2026:08:01 10:00:00")).unwrap();
-        std::fs::write(card.path().join("IMG_0001.CR2"), raw("Canon EOS R6", "2026:08:01 10:00:00")).unwrap();
+        for (name, data) in files {
+            std::fs::write(card.path().join(name), data).unwrap();
+        }
         let libdir = tempfile::tempdir().unwrap();
         let lib = Library::open(libdir.path()).unwrap();
         let cancel = Arc::new(AtomicBool::new(false));
         let scan = scan_source(card.path(), true, &cancel, &|_, _| {}).unwrap();
         let (tx, _rx) = crossbeam_channel::unbounded();
         run_import(&lib, &scan, &ImportOptions::default(), &tx, cancel).unwrap();
+        (libdir, lib)
+    }
+
+    fn export_to(lib: &Library, kind: crate::export::ExportKind) -> (tempfile::TempDir, crate::export::ExportSummary) {
         let cat = lib.catalog().unwrap();
         let ids = cat.all_asset_ids().unwrap();
         let out = tempfile::tempdir().unwrap();
-        assert_eq!(lib.export(&cat, &ids, out.path(), true).unwrap(), 1);
-        assert!(out.path().join("IMG_0001.JPG").is_file());
-        assert_eq!(lib.export(&cat, &ids, out.path(), false).unwrap(), 2);
-        assert!(out.path().join("IMG_0001_1.JPG").is_file());
-        assert!(out.path().join("IMG_0001.CR2").is_file());
+        let sum =
+            crate::export::export(lib, &cat, &ids, out.path(), kind, &AtomicBool::new(false), &|_, _| {}).unwrap();
+        (out, sum)
+    }
+
+    fn names_in(dir: &Path) -> Vec<String> {
+        let mut v: Vec<String> =
+            std::fs::read_dir(dir).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).collect();
+        v.sort();
+        v
+    }
+
+    #[test]
+    fn export_originals_and_jpeg_only() {
+        use crate::export::ExportKind;
+        let (_d, lib) = import_files(&[
+            ("IMG_0001.JPG", jpeg("Canon EOS R6", "2026:08:01 10:00:00")),
+            ("IMG_0001.CR2", raw("Canon EOS R6", "2026:08:01 10:00:00")),
+            // A RAW-only photo (no camera JPEG): this one used to be exported as the RAW.
+            ("IMG_0002.CR2", raw("Canon EOS R6", "2026:08:01 10:05:00")),
+        ]);
+        let cat = lib.catalog().unwrap();
+        let ids = cat.all_asset_ids().unwrap();
+        assert_eq!(ids.len(), 2);
+        let mut cat = cat;
+        cat.set_rating(&ids, 4).unwrap();
+        for id in &ids {
+            lib.write_xmp(&cat, *id).unwrap();
+        }
+
+        let (out, sum) = export_to(&lib, ExportKind::JpegOnly);
+        assert_eq!(names_in(out.path()), vec!["IMG_0001.JPG", "IMG_0002.jpg"], "no RAW, no XMP in JPEG-only");
+        assert_eq!((sum.files, sum.from_raw), (2, 1));
+        let made = crate::metadata::probe(&out.path().join("IMG_0002.jpg"), FileKind::Jpeg).unwrap().meta;
+        assert_eq!(made.model.as_deref(), Some("Canon EOS R6"));
+        assert_eq!(made.captured_at.unwrap().to_string(), "2026-08-01 10:05:00");
+
+        let (out, sum) = export_to(&lib, ExportKind::Originals);
+        assert_eq!(
+            names_in(out.path()),
+            vec!["IMG_0001.CR2", "IMG_0001.JPG", "IMG_0001.xmp", "IMG_0002.CR2", "IMG_0002.xmp"]
+        );
+        assert_eq!(sum.files, 5);
+    }
+
+    #[test]
+    fn export_never_overwrites() {
+        use crate::export::ExportKind;
+        let (_d, lib) = import_files(&[("IMG_0001.JPG", jpeg("Canon EOS R6", "2026:08:01 10:00:00"))]);
+        let cat = lib.catalog().unwrap();
+        let ids = cat.all_asset_ids().unwrap();
+        let out = tempfile::tempdir().unwrap();
+        let never = AtomicBool::new(false);
+        for _ in 0..2 {
+            crate::export::export(&lib, &cat, &ids, out.path(), ExportKind::JpegOnly, &never, &|_, _| {}).unwrap();
+        }
+        assert_eq!(names_in(out.path()), vec!["IMG_0001.JPG", "IMG_0001_1.JPG"]);
+    }
+
+    #[test]
+    fn export_smaller_keeps_exif_without_gps() {
+        use crate::export::ExportKind;
+        // 1200x800 photo, rotated 90° (orientation 6), with a GPS position.
+        let big = image::RgbImage::from_fn(1200, 800, |x, y| image::Rgb([(x % 251) as u8, (y % 241) as u8, 90]));
+        let mut plain = Vec::new();
+        image::codecs::jpeg::JpegEncoder::new_with_quality(&mut plain, 90).encode_image(&big).unwrap();
+        let tiff = build_tiff(vec![
+            (tag::MAKE, Val::Ascii("SONY")),
+            (tag::MODEL, Val::Ascii("ILCE-7M4")),
+            (tag::ORIENTATION, Val::Short(vec![6])),
+            (
+                tag::EXIF_IFD,
+                Val::Ifd(vec![
+                    (tag::DATE_TIME_ORIGINAL, Val::Ascii("2026:10:03 09:15:00")),
+                    (tag::ISO, Val::Short(vec![400])),
+                    (tag::EXPOSURE_TIME, Val::Rational(vec![(1, 250)])),
+                    (tag::F_NUMBER, Val::Rational(vec![(28, 10)])),
+                    (tag::FOCAL_LENGTH, Val::Rational(vec![(85, 1)])),
+                    (tag::LENS_MODEL, Val::Ascii("FE 85mm F1.8")),
+                ]),
+            ),
+            (
+                tag::GPS_IFD,
+                Val::Ifd(vec![
+                    (tag::GPS_LAT_REF, Val::Ascii("N")),
+                    (tag::GPS_LAT, Val::Rational(vec![(37, 1), (33, 1), (0, 1)])),
+                    (tag::GPS_LON_REF, Val::Ascii("E")),
+                    (tag::GPS_LON, Val::Rational(vec![(126, 1), (58, 1), (0, 1)])),
+                ]),
+            ),
+        ]);
+        let mut src = vec![0xFF, 0xD8, 0xFF, 0xE1];
+        src.extend_from_slice(&((tiff.len() + 8) as u16).to_be_bytes());
+        src.extend_from_slice(b"Exif\0\0");
+        src.extend_from_slice(&tiff);
+        src.extend_from_slice(&plain[2..]);
+        let (_d, lib) = import_files(&[("DSC01234.JPG", src)]);
+        let original = lib.catalog().unwrap().metadata(1).unwrap();
+        assert!(original.gps.is_some(), "fixture must carry GPS");
+
+        let (out, sum) = export_to(&lib, ExportKind::Resized { long_edge: 600, quality: 85 });
+        assert_eq!(sum.files, 1);
+        let path = out.path().join("DSC01234.jpg");
+        let bytes = std::fs::read(&path).unwrap();
+        assert_eq!(&bytes[0..4], &[0xFF, 0xD8, 0xFF, 0xE1], "EXIF right after SOI");
+        let img = image::load_from_memory(&bytes).unwrap();
+        assert_eq!((img.width(), img.height()), (400, 600), "upright (rotated) and long edge 600");
+        let m = crate::metadata::probe(&path, FileKind::Jpeg).unwrap().meta;
+        assert_eq!(m.orientation, 1);
+        assert!(m.gps.is_none(), "location must not be exported");
+        assert_eq!(m.model.as_deref(), Some("ILCE-7M4"));
+        assert_eq!(m.lens.as_deref(), Some("FE 85mm F1.8"));
+        assert_eq!(m.iso, Some(400));
+        assert_eq!(m.captured_at.unwrap().to_string(), "2026-10-03 09:15:00");
+        assert!((m.exposure_time.unwrap() - 1.0 / 250.0).abs() < 1e-6);
+        assert!((m.aperture.unwrap() - 2.8).abs() < 1e-4);
+        assert!((m.focal_length.unwrap() - 85.0).abs() < 1e-4);
+        assert!(
+            bytes.len()
+                < std::fs::metadata(lib.abs(&lib.catalog().unwrap().files_for(1).unwrap()[0].rel_path)).unwrap().len()
+                    as usize
+        );
+
+        // 0 = keep the size, and a long edge above the photo's never upscales. Either the pixels
+        // are rotated upright (orientation 1) or, when re-encoding would not have been smaller,
+        // the original pixels are kept with their orientation tag — upright when displayed.
+        for long_edge in [0, 4000] {
+            let (out, _) = export_to(&lib, ExportKind::Resized { long_edge, quality: 90 });
+            let path = out.path().join("DSC01234.jpg");
+            let img = image::open(&path).unwrap();
+            let m = crate::metadata::probe(&path, FileKind::Jpeg).unwrap().meta;
+            let shown =
+                if matches!(m.orientation, 5..=8) { (img.height(), img.width()) } else { (img.width(), img.height()) };
+            assert_eq!(shown, (800, 1200), "long edge {long_edge}");
+            assert!(m.gps.is_none());
+        }
+    }
+
+    #[test]
+    fn export_keep_size_never_grows() {
+        use crate::export::ExportKind;
+        // A strongly compressed (q50) photo with GPS and orientation 6: re-encoding it at full
+        // size and quality 95 would make it bigger, so the original image data is kept and only
+        // the metadata is replaced.
+        let img = image::RgbImage::from_fn(900, 600, |x, y| {
+            image::Rgb([((x * 13 + y * 7) % 256) as u8, ((x ^ y) % 256) as u8, ((x * y) % 253) as u8])
+        });
+        let mut plain = Vec::new();
+        image::codecs::jpeg::JpegEncoder::new_with_quality(&mut plain, 50).encode_image(&img).unwrap();
+        let tiff = build_tiff(vec![
+            (tag::MAKE, Val::Ascii("FUJIFILM")),
+            (tag::MODEL, Val::Ascii("X-T5")),
+            (tag::ORIENTATION, Val::Short(vec![6])),
+            (tag::EXIF_IFD, Val::Ifd(vec![(tag::DATE_TIME_ORIGINAL, Val::Ascii("2026:10:04 12:00:00"))])),
+            (
+                tag::GPS_IFD,
+                Val::Ifd(vec![
+                    (tag::GPS_LAT_REF, Val::Ascii("N")),
+                    (tag::GPS_LAT, Val::Rational(vec![(35, 1), (0, 1), (0, 1)])),
+                ]),
+            ),
+        ]);
+        let src = crate::export::with_exif(&plain, &tiff).unwrap();
+        let src_len = src.len();
+        let (_d, lib) = import_files(&[("DSCF0001.JPG", src)]);
+        let (out, sum) = export_to(&lib, ExportKind::Resized { long_edge: 0, quality: 95 });
+        assert_eq!(sum.files, 1);
+        let path = out.path().join("DSCF0001.jpg");
+        let bytes = std::fs::read(&path).unwrap();
+        // Same image data; only the metadata block differs by a few bytes (q95 would be ~2x).
+        assert!(bytes.len() <= src_len + 512, "export grew: {} > {src_len}", bytes.len());
+        let m = crate::metadata::probe(&path, FileKind::Jpeg).unwrap().meta;
+        assert!(m.gps.is_none(), "location must not be exported");
+        assert_eq!(m.orientation, 6, "pixels untouched, so the orientation tag stays");
+        assert_eq!(m.model.as_deref(), Some("X-T5"));
+        let decoded = image::load_from_memory(&bytes).unwrap();
+        assert_eq!((decoded.width(), decoded.height()), (900, 600));
     }
 
     #[test]

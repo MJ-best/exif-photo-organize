@@ -451,10 +451,14 @@ impl PhotoApp {
         ui.label(egui::RichText::new("내보내기").font(bold(12.0)).color(pal.text2));
         ui.horizontal(|ui| {
             if widgets::secondary_button(ui, "원본 전체…", &pal).clicked() {
-                self.export_assets(ids.to_vec(), false);
+                self.export_assets(ids.to_vec(), photoorg_core::export::ExportKind::Originals);
             }
             if widgets::secondary_button(ui, "JPEG만…", &pal).clicked() {
-                self.export_assets(ids.to_vec(), true);
+                self.export_assets(ids.to_vec(), photoorg_core::export::ExportKind::JpegOnly);
+            }
+            if widgets::secondary_button(ui, "작게…", &pal).on_hover_text("크기·용량을 줄인 JPEG로 내보내기").clicked()
+            {
+                self.export_dialog = Some(ids.to_vec());
             }
         });
     }

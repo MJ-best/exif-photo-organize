@@ -81,6 +81,9 @@ impl PhotoApp {
         if self.settings_open {
             self.settings(ui);
         }
+        if self.export_dialog.is_some() {
+            self.export_dialog_ui(ui);
+        }
     }
 
     pub fn filter_active(&self) -> bool {
