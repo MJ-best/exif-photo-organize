@@ -29,7 +29,7 @@ pub use learn::{LearnSettings, Report, Score};
 pub use scene::Scene;
 
 /// Bump when the analysis changes so old results are recomputed.
-pub const ANALYSIS_VERSION: u32 = 1;
+pub const ANALYSIS_VERSION: u32 = 2;
 /// Long edge of the image the analysis runs on.
 pub const ANALYSIS_EDGE: u32 = 1600;
 

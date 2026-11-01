@@ -161,7 +161,8 @@ pub fn sharpness(g: &Gray) -> Sharpness {
 
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Exposure {
-    /// Fraction of pixels with a clipped channel (>= 250).
+    /// Fraction of blown (near-white) pixels. A single saturated channel (a red flower, an
+    /// orange sunset) is not counted: that is colour, not overexposure.
     pub clip_high: f32,
     /// Fraction of pixels that are (almost) black.
     pub clip_low: f32,
@@ -174,7 +175,8 @@ pub fn exposure(img: &RgbImage) -> Exposure {
     let n = (img.width() as u64 * img.height() as u64).max(1);
     for p in img.pixels() {
         let l = 0.299 * p[0] as f32 + 0.587 * p[1] as f32 + 0.114 * p[2] as f32;
-        if p[0] >= 250 || p[1] >= 250 || p[2] >= 250 {
+        let (mx, mn) = (p[0].max(p[1]).max(p[2]), p[0].min(p[1]).min(p[2]));
+        if mx >= 250 && mn >= 235 {
             hi += 1;
         }
         if l <= 6.0 {
@@ -291,6 +293,9 @@ pub(crate) mod tests {
         let white = RgbImage::from_pixel(100, 80, Rgb([255, 255, 255]));
         let e = exposure(&white);
         assert!(e.clip_high > 0.99 && e.brightness > 0.99);
+        // A saturated yellow sky is colour, not blown highlights.
+        let yellow = RgbImage::from_pixel(100, 80, Rgb([255, 214, 90]));
+        assert_eq!(exposure(&yellow).clip_high, 0.0);
         let img = scene(320, 200);
         let shifted = imageops::crop_imm(&scene(330, 200), 4, 0, 320, 200).to_image();
         let other = imageops::rotate180(&img);
