@@ -79,20 +79,20 @@ EXIF 를 읽어 날짜별 폴더로 정리하고 · RAW 와 JPEG 를 한 장으�
 
 Apple Silicon(M1·M2·M3·M4)과 Intel 맥 모두에서 실행되는 **유니버설 앱** 하나로 제공됩니다. macOS 11 이상.
 
-1. [Actions → build](https://github.com/MJ-best/exif-photo-organize/actions/workflows/build.yml) 에서 가장 최근의 초록색(✓) 실행을 엽니다. *(GitHub 로그인 필요)*
-2. 아래 **Artifacts** 에서 `photo-organize-macos-universal` 을 내려받아 압축을 풉니다.
-   안에 `photo-organize-macos-universal.dmg` 와 `.zip` 이 들어 있습니다. 둘 중 하나만 쓰면 됩니다.
+1. **[Releases](https://github.com/MJ-best/exif-photo-organize/releases/latest)** 에서 `photo-organize-macos-universal.dmg` 를 내려받습니다.
+2. *(최신 개발 버전을 원하면)* [Actions → build](https://github.com/MJ-best/exif-photo-organize/actions/workflows/build.yml) 에서 가장 최근의 초록색(✓) 실행 → **Artifacts** 의 `photo-organize-macos-universal` 을 받아 압축을 풉니다. *(GitHub 로그인 필요)*
 3. `.dmg` 를 열고 **Photo Organize** 를 **Applications** 폴더로 끌어 놓습니다.
 4. **처음 한 번은 우클릭 → 열기 → 열기** 로 실행합니다.
    개발자 인증서로 서명된 앱이 아니어서 그냥 더블클릭하면 macOS 가 막습니다.
    macOS 15(Sequoia) 이상에서는 한 번 실행을 시도한 뒤 **시스템 설정 → 개인정보 보호 및 보안** 맨 아래의 **"그래도 열기"** 를 누르세요.
 5. SD 카드나 외장 하드에 처음 접근할 때 *"이동식 볼륨의 파일에 접근하려고 합니다"* 창이 뜨면 **허용**을 누릅니다.
 
-> 버전 태그(`v0.1.0` 등)를 푸시하면 같은 파일이 [Releases](https://github.com/MJ-best/exif-photo-organize/releases) 에도 자동으로 올라갑니다.
+> 새 버전은 태그(`v0.2.0` 등)를 푸시하면 CI 가 빌드해서 [Releases](https://github.com/MJ-best/exif-photo-organize/releases) 에 자동으로 올립니다. 릴리스 노트는 `docs/releases/<태그>.md` 에 둡니다.
 
 ### Windows · Linux
 
-같은 빌드 페이지의 `photo-organize-windows-x86_64` (zip) / `photo-organize-linux-x86_64` (tar.gz) 를 받아 `photo-organize` 를 실행합니다.
+[Releases](https://github.com/MJ-best/exif-photo-organize/releases/latest) 의 `photo-organize-windows-x86_64.zip` / `photo-organize-linux-x86_64.tar.gz` 를 받아 `photo-organize` 를 실행합니다.
+Windows 에서 *"Windows의 PC 보호"* 창이 뜨면 **추가 정보 → 실행** 을 누르세요.
 Linux 는 X11/Wayland, Vulkan 또는 OpenGL 드라이버(Mesa), `libxkbcommon-x11` 이 필요합니다.
 
 ### 직접 빌드
