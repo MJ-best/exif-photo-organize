@@ -32,6 +32,14 @@ pub struct Config {
     pub square_tiles: bool,
     pub show_info: bool,
     pub show_filmstrip: bool,
+    /// Analyse photos for the culling assistant (B-cut detection) automatically.
+    pub cull_auto: bool,
+    /// B-cut probability (%) from which an undecided photo is a candidate.
+    pub cull_threshold: u8,
+    /// Show B-cut badges on thumbnails.
+    pub cull_badges: bool,
+    /// Which ratings count as A / B labels for learning.
+    pub learn: photoorg_core::cull::LearnSettings,
 }
 
 impl Default for Config {
@@ -49,6 +57,10 @@ impl Default for Config {
             square_tiles: true,
             show_info: false,
             show_filmstrip: true,
+            cull_auto: true,
+            cull_threshold: 60,
+            cull_badges: true,
+            learn: Default::default(),
         }
     }
 }

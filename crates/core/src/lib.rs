@@ -1,6 +1,7 @@
 //! Core of Photo Organize: EXIF parsing, RAW preview extraction, import pipeline and catalog.
 
 pub mod catalog;
+pub mod cull;
 pub mod filter;
 pub mod format;
 pub mod import;

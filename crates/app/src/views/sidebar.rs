@@ -10,8 +10,10 @@ impl PhotoApp {
         let pal = self.pal;
         let ctx = ui.ctx().clone();
         ui.add_space(titlebar_pad() + 12.0);
-        let bottom_h =
-            58.0 + if self.import_running() { 46.0 } else { 0.0 } + if self.maintenance.is_some() { 34.0 } else { 0.0 };
+        let bottom_h = 58.0
+            + if self.import_running() { 46.0 } else { 0.0 }
+            + if self.maintenance.is_some() { 34.0 } else { 0.0 }
+            + if self.analysis_job.is_some() { 34.0 } else { 0.0 };
         let avail = ui.available_height() - bottom_h;
         egui::ScrollArea::vertical().id_salt("sidebar").max_height(avail.max(50.0)).auto_shrink([false, false]).show(
             ui,
@@ -49,6 +51,38 @@ impl PhotoApp {
                         }
                         if widgets::sidebar_item(ui, icon, label, count, self.side == sel, &pal).clicked() {
                             clicked = Some(sel);
+                        }
+                    }
+
+                    // Culling assistant.
+                    let c = st.cull_counts;
+                    if st.analysed > 0 || c[1] > 0 || c[2] > 0 {
+                        widgets::section_title(ui, "셀렉 도우미", &pal);
+                        let items: Vec<(SideSel, Icon, &str, usize, &str)> = vec![
+                            (
+                                SideSel::Candidates,
+                                Icon::Suspect,
+                                "B컷 후보",
+                                c[0],
+                                "초점·흔들림·눈 감음·노출·연사 비교로 골라낸, 아직 고르지 않은 사진",
+                            ),
+                            (SideSel::Rejected, Icon::Reject, "거절 (B컷)", c[1], "X 키로 거절한 사진"),
+                            (SideSel::Picked, Icon::Flag, "픽 (A컷)", c[2], "P 키로 고른 사진"),
+                            (
+                                SideSel::BurstBest,
+                                Icon::Stack,
+                                "연사 베스트",
+                                c[4],
+                                "연사·비슷한 장면 묶음마다 가장 좋은 한 장 (단독 사진 포함)",
+                            ),
+                        ];
+                        for (sel, icon, label, count, tip) in items {
+                            if widgets::sidebar_item(ui, icon, label, Some(count), self.side == sel, &pal)
+                                .on_hover_text(tip)
+                                .clicked()
+                            {
+                                clicked = Some(sel);
+                            }
                         }
                     }
                 }
@@ -116,6 +150,25 @@ impl PhotoApp {
                 }
 
                 if let Some(st) = &self.lib {
+                    let scenes: Vec<(u8, usize)> = st.totals.scenes.iter().copied().filter(|s| s.0 != 0).collect();
+                    if !scenes.is_empty() {
+                        widgets::section_title(ui, "장면", &pal);
+                        for (s, n) in scenes {
+                            let label = photoorg_core::cull::Scene::from_u8(s).label();
+                            if widgets::sidebar_item(
+                                ui,
+                                Icon::Scene,
+                                label,
+                                Some(n),
+                                self.side == SideSel::Scene(s),
+                                &pal,
+                            )
+                            .clicked()
+                            {
+                                clicked = Some(SideSel::Scene(s));
+                            }
+                        }
+                    }
                     let cams: Vec<(u32, usize)> = st.totals.cameras.clone();
                     if !cams.is_empty() {
                         widgets::section_title(ui, "카메라", &pal);
@@ -239,6 +292,28 @@ impl PhotoApp {
             p.rect_filled(bar, 2.0, pal.control_bg);
             p.rect_filled(
                 Rect::from_min_size(bar.min, vec2(bar.width() * (d as f32 / (*total).max(1) as f32), 4.0)),
+                2.0,
+                pal.accent,
+            );
+            y += 34.0;
+        }
+        if let Some(job) = &self.analysis_job {
+            let d = job.done.load(std::sync::atomic::Ordering::Relaxed);
+            let total = job.total;
+            let r = Rect::from_min_size(pos2(rest.left(), y), vec2(rest.width(), 28.0));
+            ui.interact(r, ui.scope_id().with("analysis-progress"), Sense::hover())
+                .on_hover_text("B컷 후보를 찾기 위해 초점·흔들림·노출·얼굴·눈·장면을 분석합니다.\n사진은 바뀌지 않으며, 분석은 한 번만 합니다.");
+            p.text(
+                pos2(r.left() + 10.0, r.top() + 8.0),
+                Align2::LEFT_CENTER,
+                format!("사진 분석 중 {}/{}", format::count(d), format::count(total)),
+                font(11.0),
+                pal.text2,
+            );
+            let bar = Rect::from_min_size(pos2(r.left() + 10.0, r.top() + 18.0), vec2(r.width() - 20.0, 4.0));
+            p.rect_filled(bar, 2.0, pal.control_bg);
+            p.rect_filled(
+                Rect::from_min_size(bar.min, vec2(bar.width() * (d as f32 / total.max(1) as f32).min(1.0), 4.0)),
                 2.0,
                 pal.accent,
             );

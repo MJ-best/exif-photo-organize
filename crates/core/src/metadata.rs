@@ -62,6 +62,9 @@ pub struct Metadata {
     pub artist: Option<String>,
     /// Rating set in camera (EXIF 0x4746 or XMP), 0..=5.
     pub rating: Option<u8>,
+    /// Marked as rejected (XMP rating -1, Lightroom convention).
+    #[serde(default)]
+    pub reject: bool,
 }
 
 impl Metadata {
@@ -103,8 +106,21 @@ impl Metadata {
             artist,
             rating
         );
+        self.reject |= other.reject;
         if self.orientation <= 1 && other.orientation > 1 {
             self.orientation = other.orientation;
+        }
+    }
+
+    /// Apply an XMP rating: -1 marks the photo as rejected.
+    pub fn apply_xmp_rating(&mut self, r: Option<i8>) {
+        match r {
+            Some(r) if r < 0 => {
+                self.reject = true;
+                self.rating = Some(0);
+            }
+            Some(r) => self.rating = Some(r as u8),
+            None => {}
         }
     }
 
@@ -248,7 +264,7 @@ fn parse_jpeg<R: Read + Seek>(r: &mut R, base: u64, p: &mut Probe, collect_thumb
                     p.meta.merge_missing(&sub.meta);
                     p.previews.extend(sub.previews);
                 } else if payload.starts_with(b"http://ns.adobe.com/xap/1.0/\0") && p.meta.rating.is_none() {
-                    p.meta.rating = xmp_rating(&payload);
+                    p.meta.apply_xmp_rating(xmp_rating(&payload));
                 }
             }
             0xE2 if collect_thumb => {
@@ -345,15 +361,15 @@ pub fn jpeg_info_bytes(b: &[u8]) -> Option<(u32, u32, bool)> {
     None
 }
 
-/// Extract `xmp:Rating` from an XMP packet.
-pub fn xmp_rating(xmp: &[u8]) -> Option<u8> {
+/// Extract `xmp:Rating` (-1 = rejected, 0..=5) from an XMP packet.
+pub fn xmp_rating(xmp: &[u8]) -> Option<i8> {
     let s = String::from_utf8_lossy(xmp);
     let idx = s.find("xmp:Rating")?;
     let rest = &s[idx + "xmp:Rating".len()..];
     let rest = rest.trim_start_matches(['=', '"', '\'', '>', ' ']);
     let num: String = rest.chars().take_while(|c| c.is_ascii_digit() || *c == '-').collect();
     let v: i32 = num.parse().ok()?;
-    Some(v.clamp(0, 5) as u8)
+    Some(v.clamp(-1, 5) as i8)
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -1058,7 +1074,7 @@ mod tests {
     fn xmp() {
         assert_eq!(xmp_rating(b"<x xmp:Rating=\"4\"/>"), Some(4));
         assert_eq!(xmp_rating(b"<xmp:Rating>3</xmp:Rating>"), Some(3));
-        assert_eq!(xmp_rating(b"<x xmp:Rating=\"-1\"/>"), Some(0));
+        assert_eq!(xmp_rating(b"<x xmp:Rating=\"-1\"/>"), Some(-1));
     }
 
     #[test]

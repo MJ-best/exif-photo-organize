@@ -2,7 +2,8 @@ use crate::app::PhotoApp;
 use crate::theme::{bold, font};
 use crate::widgets;
 use eframe::egui::{self, vec2, Popup, PopupCloseBehavior, Rect, Sense, Ui};
-use photoorg_core::filter::{FormatFilter, RatingFilter};
+use photoorg_core::cull::Scene;
+use photoorg_core::filter::{CullFilter, FormatFilter, RatingFilter};
 use photoorg_core::format;
 use photoorg_core::tags;
 
@@ -185,6 +186,58 @@ impl PhotoApp {
             }
         });
 
+        // Culling (pick / reject / B-cut candidates)
+        let threshold = self.cfg.cull_threshold;
+        let r = widgets::pill(
+            ui,
+            &if self.filter.cull == CullFilter::Any { "셀렉".to_string() } else { self.filter.cull.label() },
+            self.filter.cull != CullFilter::Any,
+            &pal,
+        );
+        Popup::from_toggle_button_response(&r).show(|ui| {
+            ui.set_min_width(220.0);
+            let c = self.facets.as_ref().unwrap().cull;
+            let opts = [
+                (CullFilter::Any, "전체".to_string()),
+                (CullFilter::Candidates(threshold), format!("B컷 후보 ≥{threshold}%  ({})", format::count(c[0]))),
+                (CullFilter::Rejected, format!("거절 (B컷)  ({})", format::count(c[1]))),
+                (CullFilter::Picked, format!("픽 (A컷)  ({})", format::count(c[2]))),
+                (CullFilter::Undecided, format!("아직 안 고름  ({})", format::count(c[3]))),
+                (CullFilter::BurstBest, format!("연사 베스트만  ({})", format::count(c[4]))),
+            ];
+            for (v, l) in opts {
+                let on = std::mem::discriminant(&self.filter.cull) == std::mem::discriminant(&v);
+                if ui.selectable_label(on, l).clicked() {
+                    self.filter.cull = v;
+                    changed = true;
+                }
+            }
+        });
+
+        // Scene
+        let scene_names: Vec<String> =
+            self.filter.scenes.iter().map(|s| Scene::from_u8(*s).label().to_string()).collect();
+        let label = self.set_label("장면", &scene_names);
+        let r = widgets::pill(ui, &label, !self.filter.scenes.is_empty(), &pal);
+        Popup::from_toggle_button_response(&r).close_behavior(PopupCloseBehavior::CloseOnClickOutside).show(|ui| {
+            ui.set_min_width(200.0);
+            let fc = self.facets.as_ref().unwrap();
+            if fc.scenes.is_empty() {
+                ui.label(egui::RichText::new("아직 분석된 사진이 없습니다").color(pal.text2));
+            }
+            for (s, n) in fc.scenes.clone() {
+                let mut on = self.filter.scenes.contains(&s);
+                if ui.checkbox(&mut on, format!("{}  ({})", Scene::from_u8(s).label(), format::count(n))).changed() {
+                    if on {
+                        self.filter.scenes.insert(s);
+                    } else {
+                        self.filter.scenes.remove(&s);
+                    }
+                    changed = true;
+                }
+            }
+        });
+
         // Tags
         let tag_names: Vec<String> =
             self.filter.tags.iter().map(|t| self.lib.as_ref().unwrap().index.tag_name(*t).to_string()).collect();
@@ -239,6 +292,53 @@ impl PhotoApp {
         if changed {
             self.filter_changed();
         }
+    }
+
+    /// Bar shown while browsing B-cut candidates.
+    pub fn cull_bar(&mut self, ui: &mut Ui) {
+        let pal = self.pal;
+        let ctx = ui.ctx().clone();
+        let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), 40.0), Sense::hover());
+        ui.painter().rect_filled(rect, 0.0, pal.warning.gamma_multiply(0.14));
+        widgets::separator_h(ui, rect, &pal);
+        let mut child = ui.new_child(
+            egui::UiBuilder::new()
+                .max_rect(rect.shrink2(vec2(16.0, 6.0)))
+                .layout(egui::Layout::left_to_right(egui::Align::Center)),
+        );
+        let ui = &mut child;
+        ui.spacing_mut().item_spacing.x = 8.0;
+        widgets::paint_icon(
+            ui.painter(),
+            Rect::from_center_size(ui.cursor().min + vec2(8.0, rect.height() / 2.0 - 6.0), vec2(16.0, 16.0)),
+            widgets::Icon::Suspect,
+            pal.warning,
+        );
+        ui.add_space(22.0);
+        let n = self.filtered.len();
+        ui.label(egui::RichText::new(format!("B컷 후보 {}장", format::count(n))).font(bold(12.5)))
+            .on_hover_text("X로 거절, 잘못 걸러진 사진은 P(픽)로 표시하세요. 고를 때마다 내 기준을 다시 학습합니다.");
+        if rect.width() > 820.0 {
+            ui.label(egui::RichText::new("X 거절 · P 잘못 걸러짐").font(font(11.5)).color(pal.text2));
+        }
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            if n > 0 && widgets::secondary_button(ui, &format!("{}장 모두 거절", format::count(n)), &pal).clicked()
+            {
+                self.reject_all_candidates(&ctx);
+            }
+            ui.add_space(6.0);
+            let mut t = self.cfg.cull_threshold as f32;
+            ui.label(egui::RichText::new(format!("{t:.0}%")).font(bold(12.0)));
+            ui.spacing_mut().slider_width = 110.0;
+            if ui
+                .add(egui::Slider::new(&mut t, 30.0..=90.0).step_by(5.0).show_value(false))
+                .on_hover_text("B컷 가능성이 이 값 이상인 사진만 표시 (낮출수록 더 많이 걸러냄)")
+                .changed()
+            {
+                self.set_cull_threshold(t as u8);
+            }
+            ui.label(egui::RichText::new("기준").font(font(11.5)).color(pal.text2));
+        });
     }
 
     fn set_label(&self, name: &str, values: &[String]) -> String {

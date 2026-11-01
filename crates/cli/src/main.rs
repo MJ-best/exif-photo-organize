@@ -5,7 +5,7 @@
 use anyhow::{bail, Context, Result};
 use photoorg_core::filter::{self, Filter, FormatFilter, RatingFilter};
 use photoorg_core::import::{self, ImportEvent, ImportOptions};
-use photoorg_core::{format as fmt, metadata, preview, volumes, FileKind, Library};
+use photoorg_core::{cull, format as fmt, metadata, preview, volumes, FileKind, Library};
 use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
@@ -31,6 +31,9 @@ const HELP: &str = "photoorg — EXIF 기반 사진 정리 도구 (CLI)
   photoorg export-csv <라이브러리> <출력.csv>
   photoorg thumbs <라이브러리> [--all]       누락된(또는 전체) 썸네일 다시 만들기
   photoorg thumb <파일> <출력.jpg>           파일 하나의 썸네일 생성 (디버그)
+  photoorg analyze <라이브러리> [--all]      B컷 분석 (초점·흔들림·노출·얼굴/눈·장면·연사) + 학습
+  photoorg cull <라이브러리> [--threshold 60] B컷 후보 목록과 이유
+  photoorg analyze-file <파일>               사진 하나 분석 (디버그)
 ";
 
 fn main() {
@@ -245,7 +248,7 @@ fn run() -> Result<()> {
             let mut cat = lib.catalog()?;
             cat.set_rating(&ids, rating.min(5))?;
             for id in &ids {
-                lib.write_xmp(&cat, *id, rating.min(5))?;
+                lib.write_xmp(&cat, *id)?;
             }
             println!("{}개 사진에 별점 {} 적용", ids.len(), rating.min(5));
         }
@@ -280,10 +283,68 @@ fn run() -> Result<()> {
             std::fs::write(&out, data)?;
             println!("{w}x{h} ({:.1} ms)", t.elapsed().as_secs_f64() * 1000.0);
         }
+        "analyze" => {
+            let lib = Library::open(&PathBuf::from(rest.first().context("라이브러리 폴더가 필요합니다")?))?;
+            let all = rest.iter().any(|a| a == "--all");
+            let mut cat = lib.catalog()?;
+            let done = cat.analyzed_ids(cull::ANALYSIS_VERSION)?;
+            let ids: Vec<i64> = cat.all_asset_ids()?.into_iter().filter(|i| all || !done.contains(i)).collect();
+            let total = ids.len();
+            let t = std::time::Instant::now();
+            let n =
+                cull::analyze_assets(&lib, &ids, &AtomicBool::new(false), &|_, n| eprint!("\r분석 중 {n}/{total}"))?;
+            eprintln!();
+            println!("{n}장 분석 ({:.1}초)", t.elapsed().as_secs_f64());
+            let (_, report) = cull::rescore(&mut cat, &cull::LearnSettings::default())?;
+            print_report(&report);
+        }
+        "cull" => {
+            let lib = Library::open(&PathBuf::from(rest.first().context("라이브러리 폴더가 필요합니다")?))?;
+            let t: u8 = arg_value(rest, "--threshold").map(|v| v.parse()).transpose()?.unwrap_or(60);
+            let idx = lib.catalog()?.load_index()?;
+            let f = Filter { cull: filter::CullFilter::Candidates(t), ..Default::default() };
+            let hits = filter::apply(&idx, &f);
+            for &i in &hits {
+                let a = &idx.assets[i];
+                println!(
+                    "{}\t{}\t{}\t{:>3.0}%\t{}\t{}",
+                    a.id,
+                    a.captured().format("%Y-%m-%d %H:%M:%S"),
+                    a.name,
+                    a.b_prob * 100.0,
+                    cull::Scene::from_u8(a.scene).label(),
+                    cull::learn::reason::labels(a.reasons).join(", ")
+                );
+            }
+            eprintln!("B컷 후보 {}개 (기준 {t}%)", hits.len());
+        }
+        "analyze-file" => {
+            let src = PathBuf::from(rest.first().context("파일이 필요합니다")?);
+            let kind = FileKind::from_path(&src).context("지원하지 않는 형식")?;
+            let p = metadata::probe(&src, kind)?;
+            let t = std::time::Instant::now();
+            let a = cull::analyze_file(&src, kind, p.meta.orientation, Some(&p.previews))?;
+            println!("{:#?}\n({:.0} ms)", a, t.elapsed().as_secs_f64() * 1000.0);
+        }
         "-h" | "--help" | "help" => print!("{HELP}"),
         other => bail!("알 수 없는 명령 '{other}'\n\n{HELP}"),
     }
     Ok(())
+}
+
+fn print_report(r: &cull::Report) {
+    println!("\n학습 상태 (A컷 / B컷 라벨, 모델, 교차검증 정확도)");
+    for s in &r.scenes {
+        println!(
+            "  {:<10} A {:>4}  B {:>4}  {:<8} {}",
+            s.scene.map(|s| s.label()).unwrap_or("전체"),
+            s.a,
+            s.b,
+            s.model,
+            s.accuracy.map(|a| format!("{:.0}%", a * 100.0)).unwrap_or_else(|| "-".into())
+        );
+    }
+    println!("B컷 후보 (60% 이상, 미결정): {}장 / 분석 {}장", r.candidates_at_60, r.analysed);
 }
 
 fn crossbeam_channel_unbounded() -> (photoorg_core::import::EventSender, photoorg_core::import::EventReceiver) {

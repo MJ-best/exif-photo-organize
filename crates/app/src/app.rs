@@ -24,6 +24,17 @@ pub struct LibState {
     pub index: LibraryIndex,
     /// Facet counts over the whole library (sidebar).
     pub totals: Facets,
+    /// [B-cut candidates, rejected, picked, undecided, burst best] over the whole library.
+    pub cull_counts: [usize; 5],
+    /// Photos with a B-cut score.
+    pub analysed: usize,
+}
+
+/// Short confirmation shown in the middle of the screen.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Hud {
+    Rating(u8),
+    Flag(i8),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -45,6 +56,11 @@ pub enum SideSel {
     Lens(u32),
     Import(i64),
     Device(PathBuf),
+    Candidates,
+    Rejected,
+    Picked,
+    BurstBest,
+    Scene(u8),
     None,
 }
 
@@ -82,6 +98,8 @@ pub struct InfoCache {
     pub meta: Metadata,
     pub files: Vec<FileRecord>,
     pub tags: Vec<(u32, String, TagKind)>,
+    pub analysis: Option<photoorg_core::cull::Analysis>,
+    pub scene_user: Option<u8>,
 }
 
 pub enum ImportPhase {
@@ -166,14 +184,19 @@ pub struct PhotoApp {
     pub show_filters: bool,
     pub settings_open: bool,
     pub toasts: Vec<Toast>,
-    pub hud: Option<(u8, f64)>,
+    pub hud: Option<(Hud, f64)>,
     pub grid_layout: Option<GridLayout>,
     pub card_layout: Option<CardLayout>,
     pub scroll_req: Option<ScrollReq>,
     pub info: Option<InfoCache>,
     pub tag_input: String,
     pub search: String,
-    writer: Option<Sender<WriteJob>>,
+    pub writer: Option<Sender<WriteJob>>,
+    pub analysis_job: Option<crate::app_cull::AnalysisJob>,
+    pub analysis_pending: bool,
+    pub rescore_rx: Option<Receiver<crate::app_cull::RescoreResult>>,
+    pub labels_dirty_at: Option<f64>,
+    pub cull_report: Option<photoorg_core::cull::Report>,
     pub xmp_enabled: Arc<AtomicBool>,
     pub refilter_needed: bool,
     pub maintenance: Option<Maintenance>,
@@ -235,6 +258,11 @@ impl PhotoApp {
             tag_input: String::new(),
             search: String::new(),
             writer: None,
+            analysis_job: None,
+            analysis_pending: false,
+            rescore_rx: None,
+            labels_dirty_at: None,
+            cull_report: None,
             xmp_enabled: Arc::new(AtomicBool::new(true)),
             refilter_needed: false,
             maintenance: None,
@@ -257,6 +285,7 @@ impl PhotoApp {
 
     pub fn open_library(&mut self, ctx: &egui::Context, path: PathBuf, create: bool) {
         self.cancel_maintenance();
+        self.cancel_analysis();
         if !create && !path.exists() {
             self.lib_error = Some(format!(
                 "라이브러리를 찾을 수 없습니다: {}\n외장 하드가 연결되어 있는지 확인하세요.",
@@ -281,8 +310,13 @@ impl PhotoApp {
                 self.view = MainView::Library;
                 self.sel = Selection::default();
                 self.viewer = None;
+                if let Some(st) = &mut self.lib {
+                    crate::app_cull::refresh_totals(st, self.cfg.cull_threshold);
+                }
+                self.cull_report = None;
                 self.select_side(SideSel::All);
                 self.ensure_missing_thumbnails(ctx);
+                self.ensure_analysis(ctx);
             }
             Err(e) => {
                 self.lib_error = Some(format!("라이브러리를 열 수 없습니다: {e:#}"));
@@ -296,7 +330,7 @@ impl PhotoApp {
         let catalog = lib.catalog()?;
         let index = catalog.load_index()?;
         let totals = filter::facets(&index, &Filter::default());
-        Ok(LibState { lib, catalog, index, totals })
+        Ok(LibState { lib, catalog, index, totals, cull_counts: [0; 5], analysed: 0 })
     }
 
     pub fn choose_library(&mut self, ctx: &egui::Context) {
@@ -375,7 +409,7 @@ impl PhotoApp {
             let st = self.lib.as_ref()?;
             let mut f = self.filter.clone();
             f.text = self.search.clone();
-            self.facets = Some(filter::facets(&st.index, &f));
+            self.facets = Some(filter::facets_with(&st.index, &f, self.cfg.cull_threshold));
         }
         self.facets.as_ref()
     }
@@ -407,6 +441,15 @@ impl PhotoApp {
                 self.filter.lenses.insert(*l);
             }
             SideSel::Import(id) => self.filter.import_id = Some(*id),
+            SideSel::Candidates => {
+                self.filter.cull = photoorg_core::filter::CullFilter::Candidates(self.cfg.cull_threshold)
+            }
+            SideSel::Rejected => self.filter.cull = photoorg_core::filter::CullFilter::Rejected,
+            SideSel::Picked => self.filter.cull = photoorg_core::filter::CullFilter::Picked,
+            SideSel::BurstBest => self.filter.cull = photoorg_core::filter::CullFilter::BurstBest,
+            SideSel::Scene(s) => {
+                self.filter.scenes.insert(*s);
+            }
             SideSel::Device(_) | SideSel::None => {}
         }
         if !matches!(s, SideSel::All) && matches!(self.mode, GridMode::Years | GridMode::Months) {
@@ -501,32 +544,14 @@ impl PhotoApp {
                 a.rating = rating;
             }
         }
-        st.totals = filter::facets(&st.index, &Filter::default());
+        crate::app_cull::refresh_totals(st, self.cfg.cull_threshold);
         if let Some(w) = &self.writer {
             let _ = w.send(WriteJob::Rating(ids.clone(), rating));
         }
-        self.hud = Some((rating, ctx.input(|i| i.time) + 0.9));
+        self.hud = Some((Hud::Rating(rating), ctx.input(|i| i.time) + 0.9));
         self.facets = None;
-        if self.filter.rating != RatingFilter::Any {
-            if self.viewer.is_some() {
-                self.refilter_needed = true;
-            } else {
-                let focus = self.focus_pos();
-                self.refilter();
-                if let Some(p) = focus {
-                    let p = p.min(self.filtered.len().saturating_sub(1));
-                    if let Some(id) = self.asset_at(p).map(|a| a.id) {
-                        self.sel.focus = Some(id);
-                        if self.sel.ids.is_empty() {
-                            self.sel.ids.insert(id);
-                        }
-                    }
-                }
-            }
-        }
-        if self.viewer.is_some() && self.cfg.auto_advance && ids.len() == 1 {
-            self.viewer_step(1);
-        }
+        self.labels_dirty_at = Some(ctx.input(|i| i.time));
+        self.after_label_change(ids.len());
     }
 
     pub fn add_tag(&mut self, ids: Vec<i64>, name: &str) {
@@ -545,7 +570,7 @@ impl PhotoApp {
                     }
                 }
                 st.index.tags.entry(tag.id).or_insert(tag);
-                st.totals = filter::facets(&st.index, &Filter::default());
+                crate::app_cull::refresh_totals(st, self.cfg.cull_threshold);
                 if let Some(w) = &self.writer {
                     let _ = w.send(WriteJob::Xmp(ids));
                 }
@@ -564,7 +589,7 @@ impl PhotoApp {
                     a.tags.retain(|t| *t != tag);
                 }
             }
-            st.totals = filter::facets(&st.index, &Filter::default());
+            crate::app_cull::refresh_totals(st, self.cfg.cull_threshold);
             if let Some(w) = &self.writer {
                 let _ = w.send(WriteJob::Xmp(ids));
             }
@@ -585,7 +610,9 @@ impl PhotoApp {
                 .filter_map(|t| st.index.tags.get(t).map(|ti| (ti.id, ti.name.clone(), ti.kind)))
                 .collect();
             tags.sort_by(|a, b| b.2.cmp(&a.2).then(a.1.cmp(&b.1)));
-            self.info = Some(InfoCache { id, meta, files, tags });
+            let analysis = st.catalog.analysis(id).ok().flatten();
+            let scene_user = st.catalog.scene_user(id).ok().flatten();
+            self.info = Some(InfoCache { id, meta, files, tags, analysis, scene_user });
         }
         self.info.as_ref()
     }
@@ -844,7 +871,7 @@ impl PhotoApp {
                 if let Ok(imps) = st.catalog.imports() {
                     st.index.imports = imps;
                 }
-                st.totals = filter::facets(&st.index, &Filter::default());
+                crate::app_cull::refresh_totals(st, self.cfg.cull_threshold);
             }
             for id in &new_rows {
                 if let Some(t) = &mut self.thumbs {
@@ -891,14 +918,16 @@ impl PhotoApp {
         if self.hud.is_some_and(|(_, until)| until < now) {
             self.hud = None;
         }
+        self.poll_cull(ctx);
     }
 
-    fn finish_import(&mut self, _ctx: &egui::Context, r: Result<ImportSummary, String>) {
+    fn finish_import(&mut self, ctx: &egui::Context, r: Result<ImportSummary, String>) {
+        self.ensure_analysis(ctx);
         if let Some(st) = &mut self.lib {
             if let Ok(imps) = st.catalog.imports() {
                 st.index.imports = imps;
             }
-            st.totals = filter::facets(&st.index, &Filter::default());
+            crate::app_cull::refresh_totals(st, self.cfg.cull_threshold);
         }
         let Some(sess) = &mut self.import else { return };
         sess.run_rx = None;
@@ -989,6 +1018,12 @@ impl PhotoApp {
                 continue;
             }
             match key {
+                Key::X if !cmd => self.toggle_flag(ctx, -1),
+                Key::P if !cmd => self.toggle_flag(ctx, 1),
+                Key::U if !cmd => {
+                    let ids = self.target_ids();
+                    self.set_flag(ctx, ids, 0);
+                }
                 Key::Num1 if cmd => self.set_mode(GridMode::Years),
                 Key::Num2 if cmd => self.set_mode(GridMode::Months),
                 Key::Num3 if cmd => self.set_mode(GridMode::Days),
@@ -1197,7 +1232,7 @@ fn spawn_writer(lib: Library, rx: Receiver<WriteJob>, write_xmp: Arc<AtomicBool>
                         }
                         if write_xmp.load(Ordering::Relaxed) {
                             for id in &ids {
-                                if let Err(e) = lib.write_xmp(&cat, *id, r) {
+                                if let Err(e) = lib.write_xmp(&cat, *id) {
                                     log::warn!("xmp {id}: {e:#}");
                                 }
                             }
@@ -1206,11 +1241,7 @@ fn spawn_writer(lib: Library, rx: Receiver<WriteJob>, write_xmp: Arc<AtomicBool>
                     WriteJob::Xmp(ids) => {
                         if write_xmp.load(Ordering::Relaxed) {
                             for id in &ids {
-                                let r: u8 = cat
-                                    .conn()
-                                    .query_row("SELECT rating FROM assets WHERE id=?1", [id], |r| r.get(0))
-                                    .unwrap_or(0);
-                                let _ = lib.write_xmp(&cat, *id, r);
+                                let _ = lib.write_xmp(&cat, *id);
                             }
                         }
                     }

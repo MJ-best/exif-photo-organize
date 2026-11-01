@@ -25,6 +25,8 @@ pub struct Palette {
     pub placeholder: Color32,
     pub danger: Color32,
     pub success: Color32,
+    /// B-cut candidates.
+    pub warning: Color32,
     pub shadow: Color32,
 }
 
@@ -52,6 +54,7 @@ impl Palette {
             placeholder: Color32::from_rgb(0x2C, 0x2C, 0x2E),
             danger: Color32::from_rgb(0xFF, 0x45, 0x3A),
             success: Color32::from_rgb(0x30, 0xD1, 0x58),
+            warning: Color32::from_rgb(0xFF, 0x9F, 0x0A),
             shadow: Color32::from_black_alpha(110),
         }
     }
@@ -79,6 +82,7 @@ impl Palette {
             placeholder: Color32::from_rgb(0xEC, 0xEC, 0xF0),
             danger: Color32::from_rgb(0xFF, 0x3B, 0x30),
             success: Color32::from_rgb(0x34, 0xC7, 0x59),
+            warning: Color32::from_rgb(0xFF, 0x95, 0x00),
             shadow: Color32::from_black_alpha(40),
         }
     }

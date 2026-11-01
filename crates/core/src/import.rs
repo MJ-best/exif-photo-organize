@@ -288,7 +288,7 @@ pub fn scan_source(
                 let p = dir.join(format!("{}.{ext}", g.stem));
                 if p.is_file() {
                     if g.meta.rating.is_none() {
-                        g.meta.rating = std::fs::read(&p).ok().and_then(|b| metadata::xmp_rating(&b));
+                        g.meta.apply_xmp_rating(std::fs::read(&p).ok().and_then(|b| metadata::xmp_rating(&b)));
                     }
                     g.sidecar = Some(p);
                     break 'find;
@@ -1123,7 +1123,7 @@ mod tests {
         let mut cat = lib.catalog().unwrap();
         let id = cat.all_asset_ids().unwrap()[0];
         cat.set_rating(&[id], 4).unwrap();
-        lib.write_xmp(&cat, id, 4).unwrap();
+        lib.write_xmp(&cat, id).unwrap();
         assert!(lib.root.join("2026/2026-09-01/RAW/IMG_0001.xmp").is_file());
 
         // Lose the catalog, then adopt the folder again.

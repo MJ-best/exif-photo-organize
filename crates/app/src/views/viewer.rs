@@ -68,6 +68,16 @@ impl PhotoApp {
                 v.zoom = if v.zoom.is_some() { None } else { Some(vec2(0.5, 0.5)) };
             }
         }
+        let mut flag_to = None;
+        if !a.is_video() {
+            if widgets::icon_button(&mut rui, Icon::Reject, a.flag < 0, &pal, "거절 — B컷 (X)").clicked() {
+                flag_to = Some(if a.flag < 0 { 0 } else { -1 });
+            }
+            if widgets::icon_button(&mut rui, Icon::Flag, a.flag > 0, &pal, "픽 — A컷 (P)").clicked() {
+                flag_to = Some(if a.flag > 0 { 0 } else { 1 });
+            }
+            rui.add_space(4.0);
+        }
         let rate_to = widgets::stars(&mut rui, a.rating, 18.0, &pal);
 
         // Image area.
@@ -185,8 +195,43 @@ impl PhotoApp {
             self.close_viewer();
             return;
         }
+        // Pick / reject / B-cut candidate status.
+        let status = if a.flag < 0 {
+            Some((Icon::Reject, "거절 (B컷)".to_string(), pal.danger))
+        } else if a.flag > 0 {
+            Some((Icon::Flag, "픽 (A컷)".to_string(), pal.success))
+        } else if self.cfg.cull_badges
+            && photoorg_core::filter::CullFilter::Candidates(self.cfg.cull_threshold).matches(&a)
+        {
+            let why = photoorg_core::cull::learn::reason::labels(a.reasons);
+            let mut t = format!("B컷 후보 {:.0}%", a.b_prob * 100.0);
+            if !why.is_empty() {
+                t.push_str(" · ");
+                t.push_str(&why.join(", "));
+            }
+            Some((Icon::Suspect, t, pal.warning))
+        } else {
+            None
+        };
+        if let Some((icon, text, color)) = status {
+            let y = if zoom.is_some() { 40.0 } else { 12.0 };
+            let g = ui.painter().layout_no_wrap(text, bold(11.5), Color32::WHITE);
+            let r = Rect::from_min_size(area.left_top() + vec2(14.0, y), vec2(g.size().x + 38.0, 26.0));
+            let p = ui.painter_at(area);
+            p.rect_filled(r, 13.0, Color32::from_black_alpha(160));
+            widgets::paint_icon(
+                &p,
+                Rect::from_center_size(pos2(r.left() + 16.0, r.center().y), vec2(14.0, 14.0)),
+                icon,
+                color,
+            );
+            p.galley(pos2(r.left() + 30.0, r.center().y - g.size().y / 2.0), g, Color32::WHITE);
+        }
         if let Some(r) = rate_to {
             self.rate(&ctx, vec![id], r);
+        }
+        if let Some(f) = flag_to {
+            self.set_flag(&ctx, vec![id], f);
         }
         // Prev / next hover arrows.
         let hover = resp.hover_pos();
@@ -236,6 +281,12 @@ impl PhotoApp {
                     pp.rect_filled(r, 4.0, pal.placeholder);
                     if let Some(t) = thumbs.get(a2.id) {
                         super::grid::paint_tex_rounded(&pp, &t, r, super::grid::cover_uv(t.size(), r.size()), 4.0);
+                    }
+                    if a2.flag < 0 {
+                        pp.rect_filled(r, 4.0, Color32::from_black_alpha(150));
+                        pp.circle_filled(r.left_top() + vec2(6.0, 6.0), 3.5, pal.danger);
+                    } else if a2.flag > 0 {
+                        pp.circle_filled(r.left_top() + vec2(6.0, 6.0), 3.5, pal.success);
                     }
                     if a2.rating > 0 {
                         widgets::paint_stars(&pp, r.left_bottom() + vec2(3.0, -3.0), a2.rating, 7.0, pal.star, true);

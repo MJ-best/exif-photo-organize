@@ -17,7 +17,7 @@ fn esc(s: &str) -> String {
     s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;")
 }
 
-fn fresh(rating: u8, keywords: &[String]) -> String {
+fn fresh(rating: i8, keywords: &[String]) -> String {
     let mut kw = String::new();
     if !keywords.is_empty() {
         kw.push_str("   <dc:subject>\n    <rdf:Bag>\n");
@@ -47,7 +47,7 @@ fn fresh(rating: u8, keywords: &[String]) -> String {
 }
 
 /// Replace or insert `xmp:Rating` in a foreign XMP document.
-fn patch_rating(doc: &str, rating: u8) -> Option<String> {
+fn patch_rating(doc: &str, rating: i8) -> Option<String> {
     if let Some(i) = doc.find("xmp:Rating=\"") {
         let start = i + "xmp:Rating=\"".len();
         let end = start + doc[start..].find('"')?;
@@ -65,7 +65,7 @@ fn patch_rating(doc: &str, rating: u8) -> Option<String> {
 }
 
 /// Write (or update) the sidecar for `file`.
-pub fn write_sidecar(file: &Path, rating: u8, keywords: &[String]) -> Result<()> {
+pub fn write_sidecar(file: &Path, rating: i8, keywords: &[String]) -> Result<()> {
     let path = sidecar_path(file);
     let content = match std::fs::read_to_string(&path) {
         Ok(existing) if !existing.contains("xmlns:photoorg=") => match patch_rating(&existing, rating) {
@@ -81,7 +81,7 @@ pub fn write_sidecar(file: &Path, rating: u8, keywords: &[String]) -> Result<()>
 }
 
 /// Rating from an existing sidecar, if any.
-pub fn read_sidecar_rating(file: &Path) -> Option<u8> {
+pub fn read_sidecar_rating(file: &Path) -> Option<i8> {
     let s = std::fs::read(sidecar_path(file)).ok()?;
     crate::metadata::xmp_rating(&s)
 }
@@ -115,5 +115,7 @@ mod tests {
         assert_eq!(read_sidecar_rating(&raw), Some(5));
         write_sidecar(&raw, 1, &[]).unwrap();
         assert_eq!(read_sidecar_rating(&raw), Some(1));
+        write_sidecar(&raw, -1, &[]).unwrap();
+        assert_eq!(read_sidecar_rating(&raw), Some(-1), "reject is stored as -1");
     }
 }
