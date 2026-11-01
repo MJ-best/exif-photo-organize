@@ -73,17 +73,23 @@ impl PhotoApp {
         let r = ui.available_rect_before_wrap();
         let c = r.center();
         let p = ui.painter();
-        widgets::paint_icon(
-            p,
-            Rect::from_center_size(c - vec2(0.0, 50.0), egui::Vec2::splat(54.0)),
-            Icon::Photos,
-            pal.text3,
-        );
+        crate::icon::paint_mascot(ui.ctx(), p, Rect::from_center_size(c - vec2(0.0, 62.0), egui::Vec2::splat(96.0)));
         let total = self.lib.as_ref().map(|s| s.index.assets.len()).unwrap_or(0);
+        use photoorg_core::filter::CullFilter;
         let (t, s) = if total == 0 {
             ("사진이 없습니다", "SD 카드를 연결하거나 왼쪽의 ‘폴더에서 가져오기…’를 사용하세요.")
         } else {
-            ("일치하는 사진이 없습니다", "필터를 바꾸거나 지워 보세요.")
+            match self.filter.cull {
+                CullFilter::Candidates(_) if self.analysis_job.is_some() => {
+                    ("사진을 살펴보는 중이에요", "분석이 끝나는 대로 B컷 후보가 여기에 모입니다.")
+                }
+                CullFilter::Candidates(_) => {
+                    ("B컷 후보가 없습니다", "기준을 넘는 사진이 없어요. 기준을 낮추면 더 찾아봅니다.")
+                }
+                CullFilter::Rejected => ("거절한 사진이 없습니다", "X 키로 B컷을 거절하면 여기에 모입니다."),
+                CullFilter::Picked => ("고른 사진이 없습니다", "P 키로 A컷을 고르면 여기에 모입니다."),
+                _ => ("일치하는 사진이 없습니다", "필터를 바꾸거나 지워 보세요."),
+            }
         };
         p.text(c + vec2(0.0, 6.0), Align2::CENTER_CENTER, t, bold(18.0), pal.text2);
         p.text(c + vec2(0.0, 32.0), Align2::CENTER_CENTER, s, font(13.0), pal.text3);
@@ -93,12 +99,15 @@ impl PhotoApp {
         let pal = self.pal;
         let width = ui.available_width() - 2.0;
         let target = self.cfg.tile_size;
-        let key = (self.filter_gen, width as u32, target as u32, self.mode);
+        // Rounded tiles need a little air between them.
+        let gap = if pal.tile_radius > 0.0 { 5.0 } else { GAP };
+        let key = (self.filter_gen, width as u32, target as u32, self.mode, gap as u32);
         if self.grid_layout.as_ref().map(|l| l.key) != Some(key) {
             let st = self.lib.as_ref().unwrap();
             self.grid_layout =
-                Some(GridLayout::build(&st.index, &self.filtered, width, target, self.mode, self.filter_gen));
+                Some(GridLayout::build(&st.index, &self.filtered, width, target, self.mode, self.filter_gen, gap));
         }
+        let radius = pal.tile_radius;
         let layout = self.grid_layout.take().unwrap();
         self.last_grid_cols = layout.cols;
         let view_h = ui.available_height();
@@ -169,16 +178,17 @@ impl PhotoApp {
                         egui::Vec2::splat(layout.tile),
                     );
                     let resp = ui.interact(rect, Id::unique(("tile", a.id)), Sense::click());
-                    p.rect_filled(rect, 0.0, pal.placeholder);
+                    p.rect_filled(rect, radius, pal.placeholder);
                     if let Some(tex) = thumbs.get(a.id) {
                         if self.cfg.square_tiles {
-                            p.image(tex.id(), rect, cover_uv(tex.size(), rect.size()), Color32::WHITE);
+                            paint_tex_rounded(&p, &tex, rect, cover_uv(tex.size(), rect.size()), radius);
                         } else {
-                            p.image(
-                                tex.id(),
+                            paint_tex_rounded(
+                                &p,
+                                &tex,
                                 contain_rect(tex.size(), rect.shrink(2.0)),
                                 Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)),
-                                Color32::WHITE,
+                                (radius - 2.0).max(0.0),
                             );
                         }
                     } else if a.is_video() {
@@ -215,12 +225,15 @@ impl PhotoApp {
                             );
                         }
                         if a.rating > 0 {
-                            gradient(
-                                &p,
-                                Rect::from_min_max(pos2(rect.left(), rect.bottom() - 24.0), rect.right_bottom()),
-                                Color32::TRANSPARENT,
-                                Color32::from_black_alpha(90),
-                            );
+                            // (Square gradient corners would poke out of rounded tiles.)
+                            if radius == 0.0 {
+                                gradient(
+                                    &p,
+                                    Rect::from_min_max(pos2(rect.left(), rect.bottom() - 24.0), rect.right_bottom()),
+                                    Color32::TRANSPARENT,
+                                    Color32::from_black_alpha(90),
+                                );
+                            }
                             widgets::paint_stars(
                                 &p,
                                 rect.left_bottom() + vec2(5.0, -5.0),
@@ -236,7 +249,7 @@ impl PhotoApp {
                     // Culling overlays.
                     let candidate = cull_badges && photoorg_core::filter::CullFilter::Candidates(threshold).matches(a);
                     let resp = if a.flag < 0 {
-                        p.rect_filled(rect, 0.0, Color32::from_black_alpha(150));
+                        p.rect_filled(rect, radius, Color32::from_black_alpha(150));
                         flag_badge(&p, rect, layout.tile, Icon::Reject, pal.danger);
                         resp
                     } else if a.flag > 0 {
@@ -288,18 +301,23 @@ impl PhotoApp {
                     }
                     let selected = self.sel.ids.contains(&a.id);
                     if selected {
-                        p.rect_stroke(rect, 0.0, Stroke::new(3.0, pal.accent), StrokeKind::Inside);
+                        p.rect_stroke(rect, radius, Stroke::new(3.0, pal.accent), StrokeKind::Inside);
                         p.rect_stroke(
                             rect.shrink(3.0),
-                            0.0,
+                            (radius - 3.0).max(0.0),
                             Stroke::new(1.0, Color32::from_white_alpha(160)),
                             StrokeKind::Inside,
                         );
                     } else if resp.hovered() {
-                        p.rect_filled(rect, 0.0, Color32::from_white_alpha(18));
+                        p.rect_filled(rect, radius, Color32::from_white_alpha(18));
                     }
                     if self.sel.focus == Some(a.id) && self.sel.ids.len() > 1 {
-                        p.rect_stroke(rect.shrink(5.0), 0.0, Stroke::new(1.5, Color32::WHITE), StrokeKind::Inside);
+                        p.rect_stroke(
+                            rect.shrink(5.0),
+                            (radius - 5.0).max(0.0),
+                            Stroke::new(1.5, Color32::WHITE),
+                            StrokeKind::Inside,
+                        );
                     }
                     if resp.double_clicked() {
                         double = Some(a.id);

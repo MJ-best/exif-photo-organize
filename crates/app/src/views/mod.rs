@@ -105,7 +105,7 @@ impl PhotoApp {
         let ctx = ui.ctx().clone();
         let rect = ui.max_rect();
         let n_recent = self.cfg.recent_libraries.len().min(6);
-        let h = 330.0
+        let h = 342.0
             + if self.lib_error.is_some() { 48.0 } else { 0.0 }
             + if n_recent > 0 { 34.0 + 24.0 * n_recent as f32 } else { 0.0 };
         let card = Rect::from_center_size(rect.center(), vec2(480.0_f32.min(rect.width() - 40.0), h));
@@ -115,10 +115,9 @@ impl PhotoApp {
         );
         let ui = &mut child;
         ui.add_space(6.0);
-        let (ir, _) = ui.allocate_exact_size(vec2(64.0, 64.0), Sense::hover());
-        ui.painter().rect_filled(ir, 16.0, pal.accent);
-        widgets::paint_icon(ui.painter(), ir.shrink(14.0), Icon::Photos, Color32::WHITE);
-        ui.add_space(10.0);
+        let (ir, _) = ui.allocate_exact_size(vec2(112.0, 112.0), Sense::hover());
+        crate::icon::paint_mascot(&ctx, ui.painter(), ir);
+        ui.add_space(8.0);
         ui.label(egui::RichText::new("Photo Organize").font(bold(24.0)));
         ui.add_space(4.0);
         ui.label(
@@ -170,7 +169,7 @@ impl PhotoApp {
                 if self.central_rect.is_positive() { self.central_rect.center() } else { screen.center() },
                 vec2(230.0, 70.0),
             );
-            painter.rect_filled(rect, 14.0, Color32::from_black_alpha(190));
+            painter.rect_filled(rect, 14.0, pal.hud_bg);
             match hud {
                 Hud::Rating(0) => {
                     painter.text(rect.center(), Align2::CENTER_CENTER, "별점 지움", bold(18.0), Color32::WHITE);
@@ -269,7 +268,13 @@ impl PhotoApp {
                     if widgets::segmented(
                         ui,
                         &mut t,
-                        &[(ThemePref::Dark, "다크"), (ThemePref::Light, "라이트"), (ThemePref::System, "시스템")],
+                        &[
+                            (ThemePref::Cream, "크림"),
+                            (ThemePref::Cocoa, "코코아"),
+                            (ThemePref::System, "시스템"),
+                            (ThemePref::Dark, "클래식 다크"),
+                            (ThemePref::Light, "클래식 라이트"),
+                        ],
                         &pal,
                     ) {
                         self.set_theme(&ctx, t);

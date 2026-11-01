@@ -161,7 +161,7 @@ pub enum Maintenance {
 pub struct PhotoApp {
     pub cfg: Config,
     pub pal: Palette,
-    pub applied_dark: Option<bool>,
+    pub applied_look: Option<theme::Look>,
     pub lib: Option<LibState>,
     pub lib_error: Option<String>,
     pub volumes: Vec<Volume>,
@@ -225,8 +225,8 @@ impl PhotoApp {
         let mut app = PhotoApp {
             msg_tx,
             msg_rx,
-            pal: Palette::dark(),
-            applied_dark: None,
+            pal: Palette::cream(),
+            applied_look: None,
             cfg,
             lib: None,
             lib_error: None,
@@ -750,30 +750,20 @@ impl PhotoApp {
     // ------------------------------------------------------------------------------------------
     // Frame
 
-    fn apply_theme(&mut self, ctx: &egui::Context) {
-        let dark = match self.cfg.theme {
-            ThemePref::Dark => true,
-            ThemePref::Light => false,
-            ThemePref::System => ctx.global_style().visuals.dark_mode,
-        };
-        if self.applied_dark != Some(dark) {
-            self.pal = if dark { Palette::dark() } else { Palette::light() };
+    /// Apply the configured look (re-evaluated every frame for `System`).
+    pub fn apply_theme(&mut self, ctx: &egui::Context) {
+        let sys_dark = ctx.input(|i| i.raw.system_theme).map(|t| t == egui::Theme::Dark).unwrap_or(false);
+        let look = self.cfg.theme.look(sys_dark);
+        if self.applied_look != Some(look) {
+            self.pal = Palette::for_look(look);
             theme::apply(ctx, &self.pal);
-            self.applied_dark = Some(dark);
+            self.applied_look = Some(look);
         }
     }
 
     pub fn set_theme(&mut self, ctx: &egui::Context, t: ThemePref) {
         self.cfg.theme = t;
-        self.applied_dark = None;
-        if t == ThemePref::System {
-            let sys_dark = ctx.input(|i| i.raw.system_theme).map(|t| t == egui::Theme::Dark).unwrap_or(true);
-            self.pal = if sys_dark { Palette::dark() } else { Palette::light() };
-            theme::apply(ctx, &self.pal);
-            self.applied_dark = Some(sys_dark);
-        } else {
-            self.apply_theme(ctx);
-        }
+        self.apply_theme(ctx);
         self.cfg.save();
     }
 
@@ -1106,14 +1096,7 @@ impl PhotoApp {
 impl eframe::App for PhotoApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
-        if self.cfg.theme == ThemePref::System {
-            let sys_dark = ctx.input(|i| i.raw.system_theme).map(|t| t == egui::Theme::Dark).unwrap_or(true);
-            if self.applied_dark != Some(sys_dark) {
-                self.pal = if sys_dark { Palette::dark() } else { Palette::light() };
-                theme::apply(&ctx, &self.pal);
-                self.applied_dark = Some(sys_dark);
-            }
-        }
+        self.apply_theme(&ctx);
         self.poll(&ctx);
         if let Some(t) = &mut self.thumbs {
             t.begin_frame(&ctx);

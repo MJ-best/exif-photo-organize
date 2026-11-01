@@ -6,15 +6,46 @@ use std::path::PathBuf;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum ThemePref {
+    /// Warm paper look of the app icon.
     #[default]
+    Cream,
+    /// Dark warm look.
+    Cocoa,
+    /// Follow the OS: Cream when light, Cocoa when dark.
+    System,
+    /// Classic macOS Photos look.
     Dark,
     Light,
-    System,
 }
+
+impl ThemePref {
+    pub fn look(self, system_dark: bool) -> crate::theme::Look {
+        use crate::theme::Look;
+        match self {
+            ThemePref::Cream => Look::Cream,
+            ThemePref::Cocoa => Look::Cocoa,
+            ThemePref::System => {
+                if system_dark {
+                    Look::Cocoa
+                } else {
+                    Look::Cream
+                }
+            }
+            ThemePref::Dark => Look::Dark,
+            ThemePref::Light => Look::Light,
+        }
+    }
+}
+
+/// Bumped when a setting's meaning changes; see [`Config::load`].
+const CONFIG_VERSION: u32 = 2;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Config {
+    /// 0 for configs written before versioning (v0.1.x).
+    #[serde(default)]
+    pub config_version: u32,
     pub library: Option<PathBuf>,
     pub recent_libraries: Vec<PathBuf>,
     pub import: ImportOptions,
@@ -45,10 +76,11 @@ pub struct Config {
 impl Default for Config {
     fn default() -> Self {
         Config {
+            config_version: CONFIG_VERSION,
             library: None,
             recent_libraries: Vec::new(),
             import: ImportOptions::default(),
-            theme: ThemePref::Dark,
+            theme: ThemePref::Cream,
             write_xmp: true,
             auto_advance: false,
             auto_open_import: true,
@@ -72,7 +104,20 @@ impl Config {
 
     pub fn load() -> Config {
         let Some(p) = Self::path() else { return Config::default() };
-        std::fs::read(&p).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default()
+        let mut cfg: Config = std::fs::read(&p).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
+        cfg.migrate();
+        cfg
+    }
+
+    fn migrate(&mut self) {
+        if self.config_version < 2 {
+            // v0.1 saved its default (classic dark) explicitly; move those users to the new
+            // default look once. An explicit Light / System choice is kept.
+            if self.theme == ThemePref::Dark {
+                self.theme = ThemePref::Cream;
+            }
+        }
+        self.config_version = CONFIG_VERSION;
     }
 
     pub fn save(&self) {
@@ -93,5 +138,28 @@ impl Config {
         self.recent_libraries.insert(0, p.clone());
         self.recent_libraries.truncate(8);
         self.library = Some(p);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn old_default_theme_moves_to_cream_once() {
+        let mut old: Config = serde_json::from_str(r#"{"theme":"Dark","tile_size":150.0}"#).unwrap();
+        assert_eq!(old.config_version, 0);
+        old.migrate();
+        assert_eq!(old.theme, ThemePref::Cream);
+        assert_eq!(old.config_version, CONFIG_VERSION);
+        // A later explicit choice of the classic look is respected.
+        let mut new: Config =
+            serde_json::from_str(&format!(r#"{{"theme":"Dark","config_version":{CONFIG_VERSION}}}"#)).unwrap();
+        new.migrate();
+        assert_eq!(new.theme, ThemePref::Dark);
+        let mut light: Config = serde_json::from_str(r#"{"theme":"Light"}"#).unwrap();
+        light.migrate();
+        assert_eq!(light.theme, ThemePref::Light);
+        assert_eq!(Config::default().theme, ThemePref::Cream);
     }
 }
