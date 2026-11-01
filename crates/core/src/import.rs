@@ -212,6 +212,24 @@ fn walk(source: &Path, include_videos: bool, cancel: &AtomicBool) -> (Vec<Source
     (files, errors)
 }
 
+/// Folder a file is paired in. RAW files kept in a `RAW` sub folder (as this app does with the
+/// "RAW sub folder" option, and many photographers do by hand) pair with the JPEGs one level up.
+fn pairing_dir(path: &Path, kind: FileKind) -> PathBuf {
+    let dir = path.parent().map(Path::to_path_buf).unwrap_or_default();
+    if kind == FileKind::Raw {
+        let is_raw_dir = dir
+            .file_name()
+            .and_then(|n| n.to_str())
+            .is_some_and(|n| matches!(n.to_ascii_lowercase().as_str(), "raw" | "raws"));
+        if is_raw_dir {
+            if let Some(up) = dir.parent() {
+                return up.to_path_buf();
+            }
+        }
+    }
+    dir
+}
+
 /// Scan a folder or card: find media, pair RAW+JPEG and read metadata (in parallel).
 /// `progress(done, total)` is called while metadata is read.
 pub fn scan_source(
@@ -227,7 +245,7 @@ pub fn scan_source(
     let (files, errors) = walk(source, include_videos, cancel);
     let mut map: HashMap<(PathBuf, String, bool), Vec<SourceFile>> = HashMap::new();
     for f in files {
-        let dir = f.path.parent().map(Path::to_path_buf).unwrap_or_default();
+        let dir = pairing_dir(&f.path, f.kind);
         let stem = f.path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
         map.entry((dir, stem.to_uppercase(), f.kind.is_video())).or_default().push(f);
     }
@@ -261,15 +279,20 @@ pub fn scan_source(
                 }
             }
         }
-        let dir = primary.path.parent().unwrap_or(Path::new(""));
-        for ext in ["xmp", "XMP"] {
-            let p = dir.join(format!("{}.{ext}", g.stem));
-            if p.is_file() {
-                if g.meta.rating.is_none() {
-                    g.meta.rating = std::fs::read(&p).ok().and_then(|b| metadata::xmp_rating(&b));
+        // Sidecar next to the RAW (Lightroom convention) or next to any other file of the group.
+        let mut dirs: Vec<&Path> =
+            g.files.iter().filter(|f| f.kind == FileKind::Raw).filter_map(|f| f.path.parent()).collect();
+        dirs.extend(g.files.iter().filter_map(|f| f.path.parent()));
+        'find: for dir in dirs {
+            for ext in ["xmp", "XMP"] {
+                let p = dir.join(format!("{}.{ext}", g.stem));
+                if p.is_file() {
+                    if g.meta.rating.is_none() {
+                        g.meta.rating = std::fs::read(&p).ok().and_then(|b| metadata::xmp_rating(&b));
+                    }
+                    g.sidecar = Some(p);
+                    break 'find;
                 }
-                g.sidecar = Some(p);
-                break;
             }
         }
         let n = done.fetch_add(1, Ordering::Relaxed) + 1;
@@ -1081,6 +1104,41 @@ mod tests {
         assert_eq!(lib.export(&cat, &ids, out.path(), false).unwrap(), 2);
         assert!(out.path().join("IMG_0001_1.JPG").is_file());
         assert!(out.path().join("IMG_0001.CR2").is_file());
+    }
+
+    #[test]
+    fn recatalog_raw_subfolder_library() {
+        // A library organised with RAW sub folders, re-catalogued in place (catalog lost):
+        // pairs must stay pairs and ratings come back from the XMP sidecars.
+        let card = tempfile::tempdir().unwrap();
+        std::fs::write(card.path().join("IMG_0001.JPG"), jpeg("Canon EOS R6", "2026:09:01 10:00:00")).unwrap();
+        std::fs::write(card.path().join("IMG_0001.CR2"), raw("Canon EOS R6", "2026:09:01 10:00:00")).unwrap();
+        let libdir = tempfile::tempdir().unwrap();
+        let lib = Library::open(libdir.path()).unwrap();
+        let cancel = Arc::new(AtomicBool::new(false));
+        let scan = scan_source(card.path(), true, &cancel, &|_, _| {}).unwrap();
+        let (tx, _rx) = crossbeam_channel::unbounded();
+        let opts = ImportOptions { raw_subfolder: "RAW".into(), ..Default::default() };
+        run_import(&lib, &scan, &opts, &tx, cancel.clone()).unwrap();
+        let mut cat = lib.catalog().unwrap();
+        let id = cat.all_asset_ids().unwrap()[0];
+        cat.set_rating(&[id], 4).unwrap();
+        lib.write_xmp(&cat, id, 4).unwrap();
+        assert!(lib.root.join("2026/2026-09-01/RAW/IMG_0001.xmp").is_file());
+
+        // Lose the catalog, then adopt the folder again.
+        drop(cat);
+        std::fs::remove_dir_all(lib.data_dir()).unwrap();
+        let lib = Library::open(libdir.path()).unwrap();
+        let scan = scan_source(&lib.root, true, &cancel, &|_, _| {}).unwrap();
+        assert_eq!(scan.groups.len(), 1, "RAW in RAW/ must pair with the JPEG one level up");
+        let sum = run_import(&lib, &scan, &opts, &tx, cancel).unwrap();
+        assert_eq!(sum.assets_added, 1);
+        assert_eq!(sum.files_copied, 0, "in-place: nothing is copied");
+        let idx = lib.catalog().unwrap().load_index().unwrap();
+        assert_eq!(idx.assets.len(), 1);
+        assert_eq!(idx.assets[0].formats, crate::media::formats::RAW | crate::media::formats::JPEG);
+        assert_eq!(idx.assets[0].rating, 4);
     }
 
     #[test]
