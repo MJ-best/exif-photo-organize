@@ -601,7 +601,8 @@ PHOTOORG_TEST_IMAGES=<폴더> cargo test -p photoorg-core faces -- --ignored  # 
 
 ### CI
 
-`.github/workflows/build.yml` 이 PR · `main` 푸시 · `v*` 태그마다 실행됩니다. 첫 `plan` 작업이 릴리스 여부를 정합니다: `v*` 태그 푸시, *Run workflow* 의 `release_tag`, 또는 main 푸시 중 새 버전의 릴리스 노트(`docs/releases/v<버전>.md`)가 있고 그 태그가 아직 없을 때.
+`.github/workflows/build.yml` 이 PR · `main` 푸시 · `v*` 태그마다 실행됩니다. 첫 `plan` 작업이 릴리스 여부를 정합니다: `v*` 태그 푸시, *Run workflow* 의 `release_tag`, 또는 main 푸시 중 새 버전의 릴리스 노트(`docs/releases/v<버전>.md`)가 있고 그 태그가 아직 없을 때. 그 버전의 릴리스에 파일 4개(dmg · zip · Windows zip · Linux tar.gz) 중 빠진 것이 있으면 다음 main 푸시에서 다시 만들어 채웁니다.
+각 빌드 작업은 `scripts/release-upload.sh` 로 릴리스가 없으면 만들고 파일만 올립니다 (기존 릴리스를 수정하지 않음).
 **macOS 를 먼저** 빌드(arm64 + x86_64 → `lipo` 유니버설 → `.app` → 서명(`scripts/macos-sign.sh`) → `.dmg`/`.zip`)하고, 이어서 Windows · Linux 를 빌드합니다. 태그 푸시 시 Releases 에 자동 업로드합니다.
 
 ### macOS 공증: 경고 없이 열리게 하기

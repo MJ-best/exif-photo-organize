@@ -29,6 +29,8 @@ jobs:
   #  - manual run with release_tag           -> that tag (created through the API)
   #  - push to main with a new version whose release notes exist
   #    (docs/releases/v<Cargo version>.md) -> v<version>, created automatically
+  #  - push to main whose version's release exists but lacks some of the 4 files (an upload
+  #    failed)                               -> v<version> again, to finish it
   plan:
     runs-on: ubuntu-latest
     outputs:
@@ -43,6 +45,8 @@ jobs:
         env:
           INPUT_TAG: ${{ inputs.release_tag }}
           INPUT_TARGET: ${{ inputs.release_target }}
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
         run: |
           tag=""
           target="$GITHUB_SHA"
@@ -53,8 +57,17 @@ jobs:
             target="${INPUT_TARGET:-$GITHUB_SHA}"
           elif [[ "$GITHUB_EVENT_NAME" == "push" && "$GITHUB_REF" == "refs/heads/main" ]]; then
             version="$(grep -m1 '^version' Cargo.toml | sed -E 's/.*"(.*)".*/\1/')"
-            if [[ -f "docs/releases/v$version.md" ]] && ! git rev-parse -q --verify "refs/tags/v$version" >/dev/null; then
-              tag="v$version"
+            if [[ -f "docs/releases/v$version.md" ]]; then
+              if ! git rev-parse -q --verify "refs/tags/v$version" >/dev/null; then
+                tag="v$version"
+              else
+                # dmg + zip (macOS), Windows zip, Linux tar.gz. Unknown -> assume complete.
+                assets="$(gh release view "v$version" --json assets --jq '.assets | length' 2>/dev/null || echo 4)"
+                if (( assets < 4 )); then
+                  echo "release v$version has only $assets of 4 files: finishing it"
+                  tag="v$version"
+                fi
+              fi
             fi
           fi
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
@@ -118,16 +131,12 @@ jobs:
             photo-organize-macos-universal.zip
       - name: Release
         if: needs.plan.outputs.tag != ''
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ needs.plan.outputs.tag }}
-          target_commitish: ${{ needs.plan.outputs.target }}
-          name: Photo Organize ${{ needs.plan.outputs.tag }}
-          body_path: docs/releases/${{ needs.plan.outputs.tag }}.md
-          fail_on_unmatched_files: true
-          files: |
-            photo-organize-macos-universal.dmg
-            photo-organize-macos-universal.zip
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          ./scripts/release-upload.sh "${{ needs.plan.outputs.tag }}" "${{ needs.plan.outputs.target }}" \
+            photo-organize-macos-universal.dmg photo-organize-macos-universal.zip
 
   # Windows / Linux run after the macOS build (even if it failed).
   others:
@@ -168,11 +177,10 @@ jobs:
           path: photo-organize-${{ matrix.name }}.*
       - name: Release
         if: needs.plan.outputs.tag != ''
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ needs.plan.outputs.tag }}
-          target_commitish: ${{ needs.plan.outputs.target }}
-          name: Photo Organize ${{ needs.plan.outputs.tag }}
-          body_path: docs/releases/${{ needs.plan.outputs.tag }}.md
-          fail_on_unmatched_files: true
-          files: photo-organize-${{ matrix.name }}.*
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          ./scripts/release-upload.sh "${{ needs.plan.outputs.tag }}" "${{ needs.plan.outputs.target }}" \
+            photo-organize-${{ matrix.name }}.*
