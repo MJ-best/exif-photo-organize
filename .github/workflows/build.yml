@@ -90,11 +90,19 @@ jobs:
           done
           lipo -info target/universal/photo-organize
       - name: Bundle .app, zip and dmg
+        env:
+          # Optional (README "macOS 공증"): without them the app is only ad-hoc signed and macOS
+          # asks the user to allow it once.
+          MACOS_CERTIFICATE_P12: ${{ secrets.MACOS_CERTIFICATE_P12 }}
+          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
         run: |
           ./scripts/macos-bundle.sh target/universal/photo-organize dist
-          # Ad-hoc signature so Apple Silicon accepts the merged binary.
-          codesign --force --deep --sign - "dist/Photo Organize.app"
-          codesign --verify --verbose "dist/Photo Organize.app"
+          # Developer ID signature + notarization when the secrets exist, ad-hoc otherwise
+          # (ad-hoc is still needed so Apple Silicon accepts the merged binary).
+          ./scripts/macos-sign.sh "dist/Photo Organize.app"
           cp target/universal/photoorg dist/
           ditto -c -k --keepParent "dist/Photo Organize.app" photo-organize-macos-universal.zip
           mkdir dmg && cp -R "dist/Photo Organize.app" dmg/ && ln -s /Applications dmg/Applications
