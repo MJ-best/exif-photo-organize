@@ -1,0 +1,17 @@
+[package]
+name = "photoorg-cli"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "photoorg"
+path = "src/main.rs"
+
+[dependencies]
+photoorg-core.workspace = true
+anyhow.workspace = true
+log.workspace = true
+env_logger.workspace = true
+chrono.workspace = true
