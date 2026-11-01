@@ -71,9 +71,14 @@ pub struct Config {
     pub cull_badges: bool,
     /// Which ratings count as A / B labels for learning.
     pub learn: photoorg_core::cull::LearnSettings,
-    /// "작게 내보내기": long edge in pixels (0 = keep the size) and JPEG quality.
+    /// Export dialog: last format, "작게" long edge (0 = keep the size) and JPEG quality,
+    /// ZIP packing (split size in MB, 0 = one archive) and capture-time file names.
+    pub export_mode: crate::app_export::ExportMode,
     pub export_edge: u32,
     pub export_quality: u8,
+    pub export_zip: bool,
+    pub export_split_mb: u32,
+    pub export_date_names: bool,
 }
 
 impl Default for Config {
@@ -96,8 +101,12 @@ impl Default for Config {
             cull_threshold: 60,
             cull_badges: true,
             learn: Default::default(),
+            export_mode: Default::default(),
             export_edge: 2048,
             export_quality: 88,
+            export_zip: false,
+            export_split_mb: 0,
+            export_date_names: false,
         }
     }
 }

@@ -1103,8 +1103,9 @@ mod tests {
         let cat = lib.catalog().unwrap();
         let ids = cat.all_asset_ids().unwrap();
         let out = tempfile::tempdir().unwrap();
+        let opts = crate::export::ExportOptions::files(kind);
         let sum =
-            crate::export::export(lib, &cat, &ids, out.path(), kind, &AtomicBool::new(false), &|_, _| {}).unwrap();
+            crate::export::export(lib, &cat, &ids, out.path(), &opts, &AtomicBool::new(false), &|_, _| {}).unwrap();
         (out, sum)
     }
 
@@ -1156,8 +1157,9 @@ mod tests {
         let ids = cat.all_asset_ids().unwrap();
         let out = tempfile::tempdir().unwrap();
         let never = AtomicBool::new(false);
+        let opts = crate::export::ExportOptions::files(ExportKind::JpegOnly);
         for _ in 0..2 {
-            crate::export::export(&lib, &cat, &ids, out.path(), ExportKind::JpegOnly, &never, &|_, _| {}).unwrap();
+            crate::export::export(&lib, &cat, &ids, out.path(), &opts, &never, &|_, _| {}).unwrap();
         }
         assert_eq!(names_in(out.path()), vec!["IMG_0001.JPG", "IMG_0001_1.JPG"]);
     }
@@ -1239,6 +1241,87 @@ mod tests {
             assert_eq!(shown, (800, 1200), "long edge {long_edge}");
             assert!(m.gps.is_none());
         }
+    }
+
+    #[test]
+    fn export_many_as_zip_parts_in_shooting_order() {
+        use crate::export::{ExportKind, ExportOptions, ZipOptions};
+        // Two cameras that both produced IMG_0001 (on different days, so the library keeps both
+        // names), plus a RAW-only shot, imported out of order.
+        let card = tempfile::tempdir().unwrap();
+        let a = card.path().join("A");
+        let b = card.path().join("B");
+        std::fs::create_dir_all(&a).unwrap();
+        std::fs::create_dir_all(&b).unwrap();
+        std::fs::write(a.join("IMG_0001.JPG"), jpeg("Canon EOS R6", "2026:08:02 12:00:00")).unwrap();
+        std::fs::write(a.join("IMG_0001.CR2"), raw("Canon EOS R6", "2026:08:02 12:00:00")).unwrap();
+        std::fs::write(b.join("IMG_0001.JPG"), jpeg("Canon EOS R5", "2026:08:01 09:30:00")).unwrap();
+        std::fs::write(b.join("IMG_0002.CR2"), raw("Canon EOS R5", "2026:08:01 10:15:00")).unwrap();
+        let libdir = tempfile::tempdir().unwrap();
+        let lib = Library::open(libdir.path()).unwrap();
+        let cancel = Arc::new(AtomicBool::new(false));
+        let scan = scan_source(card.path(), true, &cancel, &|_, _| {}).unwrap();
+        let (tx, _rx) = crossbeam_channel::unbounded();
+        run_import(&lib, &scan, &ImportOptions::default(), &tx, cancel).unwrap();
+        let cat = lib.catalog().unwrap();
+        let ids = cat.all_asset_ids().unwrap();
+        assert_eq!(ids.len(), 3);
+        let never = AtomicBool::new(false);
+
+        // Loose files without date names, in shooting order: the two IMG_0001 must not collide,
+        // and the later pair keeps one stem for its RAW and JPEG.
+        let out = tempfile::tempdir().unwrap();
+        let opts = ExportOptions::files(ExportKind::Originals);
+        crate::export::export(&lib, &cat, &ids, out.path(), &opts, &never, &|_, _| {}).unwrap();
+        assert_eq!(names_in(out.path()), vec!["IMG_0001.JPG", "IMG_0001_1.CR2", "IMG_0001_1.JPG", "IMG_0002.CR2"]);
+
+        // ZIP split into small parts, names prefixed with the capture time, shooting order.
+        let out = tempfile::tempdir().unwrap();
+        let opts = ExportOptions {
+            kind: ExportKind::JpegOnly,
+            date_names: true,
+            zip: Some(ZipOptions { name: "여행 사진".into(), part_bytes: 1 }),
+        };
+        let seen = std::sync::Mutex::new(Vec::new());
+        let sum = crate::export::export(&lib, &cat, &ids, out.path(), &opts, &never, &|d, t| {
+            seen.lock().unwrap().push((d, t))
+        })
+        .unwrap_or_else(|e| panic!("{e:#}"));
+        assert_eq!((sum.files, sum.from_raw), (3, 1));
+        assert_eq!(sum.archives.len(), 3, "a 1-byte limit puts every photo in its own archive");
+        assert_eq!(names_in(out.path()), vec!["여행 사진 (1).zip", "여행 사진 (2).zip", "여행 사진 (3).zip"]);
+        let entries: Vec<String> = sum
+            .archives
+            .iter()
+            .flat_map(|p| crate::zip::read_stored(&std::fs::read(p).unwrap()).unwrap())
+            .map(|(n, data)| {
+                assert_eq!(&data[0..2], &[0xFF, 0xD8], "{n} is a JPEG");
+                n
+            })
+            .collect();
+        assert_eq!(
+            entries,
+            vec!["2026-08-01_093000_IMG_0001.JPG", "2026-08-01_101500_IMG_0002.jpg", "2026-08-02_120000_IMG_0001.JPG"]
+        );
+        assert_eq!(seen.lock().unwrap().len(), 3);
+
+        // Without a limit everything goes into one archive named without a number.
+        let out = tempfile::tempdir().unwrap();
+        let opts = ExportOptions {
+            kind: ExportKind::Resized { long_edge: 320, quality: 80 },
+            date_names: false,
+            zip: Some(ZipOptions { name: "공유".into(), part_bytes: 0 }),
+        };
+        let sum = crate::export::export(&lib, &cat, &ids, out.path(), &opts, &never, &|_, _| {}).unwrap();
+        assert_eq!(names_in(out.path()), vec!["공유.zip"]);
+        let entries = crate::zip::read_stored(&std::fs::read(&sum.archives[0]).unwrap()).unwrap();
+        let names: Vec<&str> = entries.iter().map(|e| e.0.as_str()).collect();
+        assert_eq!(names, vec!["IMG_0001.jpg", "IMG_0002.jpg", "IMG_0001_1.jpg"]);
+        for (n, data) in &entries {
+            let img = image::load_from_memory(data).unwrap();
+            assert!(img.width().max(img.height()) <= 320, "{n}");
+        }
+        assert_eq!(sum.bytes, std::fs::metadata(&sum.archives[0]).unwrap().len());
     }
 
     #[test]

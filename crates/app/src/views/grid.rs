@@ -1,12 +1,11 @@
 use crate::app::{PhotoApp, ScrollReq};
-use crate::app_export::ExportAction;
+use crate::app_export::ExportMode;
 use crate::layout::{CardLayout, GridLayout, GridMode, GAP, HEADER_H, SIDE_PAD};
 use crate::theme::{bold, font};
 use crate::widgets::{self, Icon};
 use eframe::egui::{
     self, epaint, pos2, vec2, Align2, Color32, Id, Mesh, Pos2, Rect, Sense, Stroke, StrokeKind, TextureHandle, Ui,
 };
-use photoorg_core::export::ExportKind;
 use photoorg_core::format;
 
 /// UV rectangle that crops a texture to fill `target` (cover) .
@@ -143,7 +142,7 @@ impl PhotoApp {
         let mut context_flag: Option<(Vec<i64>, i8)> = None;
         let threshold = self.cfg.cull_threshold;
         let cull_badges = self.cfg.cull_badges;
-        let mut export: Option<(Vec<i64>, ExportAction)> = None;
+        let mut export: Option<(Vec<i64>, ExportMode)> = None;
         let mut top_date: Option<chrono::NaiveDate> = None;
         let out = sa.show_viewport(ui, |ui, viewport| {
             ui.set_height(layout.height);
@@ -366,17 +365,17 @@ impl PhotoApp {
                             reveal = Some(id);
                             ui.close();
                         }
-                        if ui.button("내보내기… (원본 전체)").clicked() {
-                            export = Some((sel_ids.clone(), ExportAction::Run(ExportKind::Originals)));
-                            ui.close();
-                        }
-                        if ui.button("내보내기… (JPEG만)").clicked() {
-                            export = Some((sel_ids.clone(), ExportAction::Run(ExportKind::JpegOnly)));
-                            ui.close();
-                        }
-                        if ui.button("작게 내보내기… (용량 줄이기)").clicked() {
-                            export = Some((sel_ids.clone(), ExportAction::Smaller));
-                            ui.close();
+                        let n = sel_ids.len();
+                        let what = if n > 1 { format!("{n}장 ") } else { String::new() };
+                        for (mode, label) in [
+                            (ExportMode::Originals, "내보내기… (원본 전체)"),
+                            (ExportMode::JpegOnly, "내보내기… (JPEG만)"),
+                            (ExportMode::Smaller, "작게 내보내기… (용량 줄이기 · ZIP)"),
+                        ] {
+                            if ui.button(format!("{what}{label}")).clicked() {
+                                export = Some((sel_ids.clone(), mode));
+                                ui.close();
+                            }
                         }
                     });
                 }
@@ -456,8 +455,8 @@ impl PhotoApp {
         if let Some(id) = reveal {
             self.reveal_asset(id);
         }
-        if let Some((ids, action)) = export {
-            self.export_action(ids, action);
+        if let Some((ids, mode)) = export {
+            self.open_export(ids, mode);
         }
     }
 

@@ -3072,6 +3072,7 @@ dependencies = [
  "anyhow",
  "blake3",
  "chrono",
+ "crc32fast",
  "crossbeam-channel",
  "dirs",
  "image",

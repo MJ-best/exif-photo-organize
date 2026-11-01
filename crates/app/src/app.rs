@@ -195,8 +195,7 @@ pub struct PhotoApp {
     pub analysis_job: Option<crate::app_cull::AnalysisJob>,
     pub analysis_pending: bool,
     pub export_job: Option<crate::app_export::ExportJob>,
-    /// Photos waiting in the "작게 내보내기" dialog.
-    pub export_dialog: Option<Vec<i64>>,
+    pub export_dialog: Option<crate::app_export::ExportDialog>,
     pub rescore_rx: Option<Receiver<crate::app_cull::RescoreResult>>,
     pub labels_dirty_at: Option<f64>,
     pub cull_report: Option<photoorg_core::cull::Report>,

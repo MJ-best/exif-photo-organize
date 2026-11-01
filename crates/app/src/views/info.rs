@@ -448,17 +448,22 @@ impl PhotoApp {
             self.add_tag(ids.to_vec(), &t);
         }
         ui.add_space(14.0);
-        ui.label(egui::RichText::new("내보내기").font(bold(12.0)).color(pal.text2));
-        ui.horizontal(|ui| {
+        ui.label(
+            egui::RichText::new(format!("{}장 내보내기", format::count(ids.len()))).font(bold(12.0)).color(pal.text2),
+        );
+        ui.horizontal_wrapped(|ui| {
+            use crate::app_export::ExportMode;
             if widgets::secondary_button(ui, "원본 전체…", &pal).clicked() {
-                self.export_assets(ids.to_vec(), photoorg_core::export::ExportKind::Originals);
+                self.open_export(ids.to_vec(), ExportMode::Originals);
             }
             if widgets::secondary_button(ui, "JPEG만…", &pal).clicked() {
-                self.export_assets(ids.to_vec(), photoorg_core::export::ExportKind::JpegOnly);
+                self.open_export(ids.to_vec(), ExportMode::JpegOnly);
             }
-            if widgets::secondary_button(ui, "작게…", &pal).on_hover_text("크기·용량을 줄인 JPEG로 내보내기").clicked()
+            if widgets::secondary_button(ui, "작게 · ZIP…", &pal)
+                .on_hover_text("크기·용량을 줄인 JPEG로, 한 번에 보내기 좋게 ZIP 으로 묶을 수도 있습니다")
+                .clicked()
             {
-                self.export_dialog = Some(ids.to_vec());
+                self.open_export(ids.to_vec(), ExportMode::Smaller);
             }
         });
     }
