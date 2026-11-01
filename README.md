@@ -77,10 +77,12 @@ crates/
 
 ## 설치
 
-- **빌드된 앱 받기**: GitHub Actions(`.github/workflows/build.yml`)가 macOS(arm64/x86_64) · Windows · Linux 용 실행 파일을 만듭니다.
+- **빌드된 앱 받기**: GitHub Actions(`.github/workflows/build.yml`)가 macOS 를 먼저 빌드하고, 이어서 Windows · Linux 를 빌드합니다.
   저장소의 *Actions* 탭에서 최신 실행의 아티팩트를 받거나, `v0.1.0` 같은 태그를 푸시하면 *Releases* 에 자동으로 올라갑니다.
-- macOS: 압축을 풀어 `Photo Organize.app` 을 응용 프로그램 폴더로 옮기세요. 서명되지 않은 앱이라 처음 한 번은
-  **우클릭 → 열기** 로 실행해야 합니다. SD 카드를 처음 읽을 때 "이동식 볼륨 접근" 허용 창이 뜨면 허용하세요.
+- **macOS (맥북)**: `photo-organize-macos-universal.dmg` 하나로 Apple Silicon(M1~M4)과 Intel 맥 모두에서 실행됩니다.
+  DMG 를 열고 `Photo Organize.app` 을 `Applications` 로 끌어 놓으세요. 개발자 서명이 없는 앱이라 처음 한 번은
+  **우클릭 → 열기 → 열기** 로 실행해야 합니다 (macOS 15 이상: 시스템 설정 → 개인정보 보호 및 보안 → "그래도 열기").
+  SD 카드를 처음 읽을 때 "이동식 볼륨 접근" 허용 창이 뜨면 허용하세요.
 
 ## 빌드 & 실행
 
