@@ -6,11 +6,20 @@ on:
     tags: ["v*"]
   pull_request:
   workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "릴리스로 만들 태그 (예: v0.1.0). 비워 두면 빌드만 합니다. 릴리스 노트는 docs/releases/<태그>.md"
+        required: false
+        default: ""
+      release_target:
+        description: "태그를 붙일 커밋 SHA 또는 브랜치 (비워 두면 실행한 커밋)"
+        required: false
+        default: ""
 
 env:
   CARGO_TERM_COLOR: always
 
-# Needed to create the GitHub release on tag pushes.
+# Needed to create the GitHub release (tag push, or manual run with a release tag).
 permissions:
   contents: write
 
@@ -59,11 +68,13 @@ jobs:
             photo-organize-macos-universal.dmg
             photo-organize-macos-universal.zip
       - name: Release
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: startsWith(github.ref, 'refs/tags/v') || inputs.release_tag != ''
         uses: softprops/action-gh-release@v2
         with:
-          name: Photo Organize ${{ github.ref_name }}
-          body_path: docs/releases/${{ github.ref_name }}.md
+          tag_name: ${{ inputs.release_tag || github.ref_name }}
+          target_commitish: ${{ inputs.release_target || github.sha }}
+          name: Photo Organize ${{ inputs.release_tag || github.ref_name }}
+          body_path: docs/releases/${{ inputs.release_tag || github.ref_name }}.md
           fail_on_unmatched_files: true
           files: |
             photo-organize-macos-universal.dmg
@@ -107,10 +118,12 @@ jobs:
           name: photo-organize-${{ matrix.name }}
           path: photo-organize-${{ matrix.name }}.*
       - name: Release
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: startsWith(github.ref, 'refs/tags/v') || inputs.release_tag != ''
         uses: softprops/action-gh-release@v2
         with:
-          name: Photo Organize ${{ github.ref_name }}
-          body_path: docs/releases/${{ github.ref_name }}.md
+          tag_name: ${{ inputs.release_tag || github.ref_name }}
+          target_commitish: ${{ inputs.release_target || github.sha }}
+          name: Photo Organize ${{ inputs.release_tag || github.ref_name }}
+          body_path: docs/releases/${{ inputs.release_tag || github.ref_name }}.md
           fail_on_unmatched_files: true
           files: photo-organize-${{ matrix.name }}.*
