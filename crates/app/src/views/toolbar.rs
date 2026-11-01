@@ -20,6 +20,11 @@ impl PhotoApp {
             SideSel::Pairs => "RAW+JPEG".into(),
             SideSel::Camera(c) => st.index.cameras.name(*c).to_string(),
             SideSel::Lens(l) => st.index.lenses.name(*l).to_string(),
+            SideSel::Candidates => "B컷 후보".into(),
+            SideSel::Rejected => "거절 (B컷)".into(),
+            SideSel::Picked => "픽 (A컷)".into(),
+            SideSel::BurstBest => "연사 베스트".into(),
+            SideSel::Scene(s) => photoorg_core::cull::Scene::from_u8(*s).label().into(),
             SideSel::Import(id) => st
                 .index
                 .imports

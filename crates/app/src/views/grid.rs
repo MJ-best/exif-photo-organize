@@ -20,6 +20,17 @@ pub fn cover_uv(tex: [usize; 2], target: egui::Vec2) -> Rect {
     }
 }
 
+/// Round pick / reject marker in the top-left corner of a tile.
+fn flag_badge(p: &egui::Painter, rect: Rect, tile: f32, icon: Icon, color: Color32) {
+    if tile < 70.0 {
+        p.circle_filled(rect.left_top() + vec2(6.0, 6.0), 3.5, color);
+        return;
+    }
+    let c = rect.left_top() + vec2(15.0, 15.0);
+    p.circle_filled(c, 10.0, color);
+    widgets::paint_icon(p, Rect::from_center_size(c, egui::Vec2::splat(13.0)), icon, Color32::WHITE);
+}
+
 /// Rect of an image fitted (contain) into `outer`.
 pub fn contain_rect(tex: [usize; 2], outer: Rect) -> Rect {
     let ta = tex[0] as f32 / tex[1].max(1) as f32;
@@ -62,17 +73,23 @@ impl PhotoApp {
         let r = ui.available_rect_before_wrap();
         let c = r.center();
         let p = ui.painter();
-        widgets::paint_icon(
-            p,
-            Rect::from_center_size(c - vec2(0.0, 50.0), egui::Vec2::splat(54.0)),
-            Icon::Photos,
-            pal.text3,
-        );
+        crate::icon::paint_mascot(ui.ctx(), p, Rect::from_center_size(c - vec2(0.0, 62.0), egui::Vec2::splat(96.0)));
         let total = self.lib.as_ref().map(|s| s.index.assets.len()).unwrap_or(0);
+        use photoorg_core::filter::CullFilter;
         let (t, s) = if total == 0 {
             ("사진이 없습니다", "SD 카드를 연결하거나 왼쪽의 ‘폴더에서 가져오기…’를 사용하세요.")
         } else {
-            ("일치하는 사진이 없습니다", "필터를 바꾸거나 지워 보세요.")
+            match self.filter.cull {
+                CullFilter::Candidates(_) if self.analysis_job.is_some() => {
+                    ("사진을 살펴보는 중이에요", "분석이 끝나는 대로 B컷 후보가 여기에 모입니다.")
+                }
+                CullFilter::Candidates(_) => {
+                    ("B컷 후보가 없습니다", "기준을 넘는 사진이 없어요. 기준을 낮추면 더 찾아봅니다.")
+                }
+                CullFilter::Rejected => ("거절한 사진이 없습니다", "X 키로 B컷을 거절하면 여기에 모입니다."),
+                CullFilter::Picked => ("고른 사진이 없습니다", "P 키로 A컷을 고르면 여기에 모입니다."),
+                _ => ("일치하는 사진이 없습니다", "필터를 바꾸거나 지워 보세요."),
+            }
         };
         p.text(c + vec2(0.0, 6.0), Align2::CENTER_CENTER, t, bold(18.0), pal.text2);
         p.text(c + vec2(0.0, 32.0), Align2::CENTER_CENTER, s, font(13.0), pal.text3);
@@ -82,12 +99,15 @@ impl PhotoApp {
         let pal = self.pal;
         let width = ui.available_width() - 2.0;
         let target = self.cfg.tile_size;
-        let key = (self.filter_gen, width as u32, target as u32, self.mode);
+        // Rounded tiles need a little air between them.
+        let gap = if pal.tile_radius > 0.0 { 5.0 } else { GAP };
+        let key = (self.filter_gen, width as u32, target as u32, self.mode, gap as u32);
         if self.grid_layout.as_ref().map(|l| l.key) != Some(key) {
             let st = self.lib.as_ref().unwrap();
             self.grid_layout =
-                Some(GridLayout::build(&st.index, &self.filtered, width, target, self.mode, self.filter_gen));
+                Some(GridLayout::build(&st.index, &self.filtered, width, target, self.mode, self.filter_gen, gap));
         }
+        let radius = pal.tile_radius;
         let layout = self.grid_layout.take().unwrap();
         self.last_grid_cols = layout.cols;
         let view_h = ui.available_height();
@@ -118,6 +138,9 @@ impl PhotoApp {
         let mut double: Option<i64> = None;
         let mut context_rate: Option<(Vec<i64>, u8)> = None;
         let mut reveal: Option<i64> = None;
+        let mut context_flag: Option<(Vec<i64>, i8)> = None;
+        let threshold = self.cfg.cull_threshold;
+        let cull_badges = self.cfg.cull_badges;
         let mut export: Option<(Vec<i64>, bool)> = None;
         let mut top_date: Option<chrono::NaiveDate> = None;
         let out = sa.show_viewport(ui, |ui, viewport| {
@@ -155,16 +178,17 @@ impl PhotoApp {
                         egui::Vec2::splat(layout.tile),
                     );
                     let resp = ui.interact(rect, Id::unique(("tile", a.id)), Sense::click());
-                    p.rect_filled(rect, 0.0, pal.placeholder);
+                    p.rect_filled(rect, radius, pal.placeholder);
                     if let Some(tex) = thumbs.get(a.id) {
                         if self.cfg.square_tiles {
-                            p.image(tex.id(), rect, cover_uv(tex.size(), rect.size()), Color32::WHITE);
+                            paint_tex_rounded(&p, &tex, rect, cover_uv(tex.size(), rect.size()), radius);
                         } else {
-                            p.image(
-                                tex.id(),
+                            paint_tex_rounded(
+                                &p,
+                                &tex,
                                 contain_rect(tex.size(), rect.shrink(2.0)),
                                 Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)),
-                                Color32::WHITE,
+                                (radius - 2.0).max(0.0),
                             );
                         }
                     } else if a.is_video() {
@@ -201,12 +225,15 @@ impl PhotoApp {
                             );
                         }
                         if a.rating > 0 {
-                            gradient(
-                                &p,
-                                Rect::from_min_max(pos2(rect.left(), rect.bottom() - 24.0), rect.right_bottom()),
-                                Color32::TRANSPARENT,
-                                Color32::from_black_alpha(90),
-                            );
+                            // (Square gradient corners would poke out of rounded tiles.)
+                            if radius == 0.0 {
+                                gradient(
+                                    &p,
+                                    Rect::from_min_max(pos2(rect.left(), rect.bottom() - 24.0), rect.right_bottom()),
+                                    Color32::TRANSPARENT,
+                                    Color32::from_black_alpha(90),
+                                );
+                            }
                             widgets::paint_stars(
                                 &p,
                                 rect.left_bottom() + vec2(5.0, -5.0),
@@ -219,20 +246,78 @@ impl PhotoApp {
                     } else if a.rating > 0 {
                         p.circle_filled(rect.left_bottom() + vec2(6.0, -6.0), 3.0, pal.star);
                     }
+                    // Culling overlays.
+                    let candidate = cull_badges && photoorg_core::filter::CullFilter::Candidates(threshold).matches(a);
+                    let resp = if a.flag < 0 {
+                        p.rect_filled(rect, radius, Color32::from_black_alpha(150));
+                        flag_badge(&p, rect, layout.tile, Icon::Reject, pal.danger);
+                        resp
+                    } else if a.flag > 0 {
+                        flag_badge(&p, rect, layout.tile, Icon::Flag, pal.success);
+                        resp
+                    } else if candidate {
+                        let pct = format!("B {:.0}%", a.b_prob * 100.0);
+                        let likely = format!("B컷 가능성 {:.0}%", a.b_prob * 100.0);
+                        if layout.tile >= 70.0 {
+                            widgets::badge(
+                                &p,
+                                rect.left_top() + vec2(5.0, 5.0),
+                                Align2::LEFT_TOP,
+                                &pct,
+                                8.5,
+                                pal.warning,
+                                Color32::BLACK,
+                            );
+                        } else {
+                            p.circle_filled(rect.left_top() + vec2(6.0, 6.0), 3.5, pal.warning);
+                        }
+                        let why = photoorg_core::cull::learn::reason::labels(a.reasons);
+                        resp.on_hover_text(if why.is_empty() {
+                            format!("{likely} — 내 셀렉 기준으로 학습한 결과")
+                        } else {
+                            format!("{likely}: {}", why.join(", "))
+                        })
+                    } else {
+                        resp
+                    };
+                    if a.burst_size >= 2 && cull_badges && layout.tile >= 110.0 && !a.is_video() {
+                        let best = a.burst_rank == 0;
+                        let label = format!("{}/{}", a.burst_rank + 1, a.burst_size);
+                        let br = widgets::badge(
+                            &p,
+                            rect.right_bottom() + vec2(-5.0, -5.0),
+                            Align2::RIGHT_BOTTOM,
+                            &label,
+                            8.5,
+                            if best { pal.accent } else { Color32::from_black_alpha(150) },
+                            Color32::WHITE,
+                        );
+                        widgets::paint_icon(
+                            &p,
+                            Rect::from_center_size(pos2(br.left() - 8.0, br.center().y), egui::Vec2::splat(12.0)),
+                            Icon::Stack,
+                            Color32::WHITE,
+                        );
+                    }
                     let selected = self.sel.ids.contains(&a.id);
                     if selected {
-                        p.rect_stroke(rect, 0.0, Stroke::new(3.0, pal.accent), StrokeKind::Inside);
+                        p.rect_stroke(rect, radius, Stroke::new(3.0, pal.accent), StrokeKind::Inside);
                         p.rect_stroke(
                             rect.shrink(3.0),
-                            0.0,
+                            (radius - 3.0).max(0.0),
                             Stroke::new(1.0, Color32::from_white_alpha(160)),
                             StrokeKind::Inside,
                         );
                     } else if resp.hovered() {
-                        p.rect_filled(rect, 0.0, Color32::from_white_alpha(18));
+                        p.rect_filled(rect, radius, Color32::from_white_alpha(18));
                     }
                     if self.sel.focus == Some(a.id) && self.sel.ids.len() > 1 {
-                        p.rect_stroke(rect.shrink(5.0), 0.0, Stroke::new(1.5, Color32::WHITE), StrokeKind::Inside);
+                        p.rect_stroke(
+                            rect.shrink(5.0),
+                            (radius - 5.0).max(0.0),
+                            Stroke::new(1.5, Color32::WHITE),
+                            StrokeKind::Inside,
+                        );
                     }
                     if resp.double_clicked() {
                         double = Some(a.id);
@@ -241,6 +326,7 @@ impl PhotoApp {
                     }
                     let id = a.id;
                     let rating = a.rating;
+                    let flag = a.flag;
                     let sel_ids: Vec<i64> = if selected { self.sel.ids.iter().copied().collect() } else { vec![id] };
                     resp.context_menu(|ui| {
                         ui.label(
@@ -259,6 +345,17 @@ impl PhotoApp {
                             };
                             if ui.selectable_label(sel_ids.len() == 1 && rating == r && r > 0, label).clicked() {
                                 context_rate = Some((sel_ids.clone(), r));
+                                ui.close();
+                            }
+                        }
+                        ui.separator();
+                        for (f, label) in [(1i8, "픽 — A컷  (P)"), (-1, "거절 — B컷  (X)"), (0, "픽/거절 해제  (U)")]
+                        {
+                            if f == 0 && flag == 0 && sel_ids.len() == 1 {
+                                continue;
+                            }
+                            if ui.selectable_label(sel_ids.len() == 1 && flag == f && f != 0, label).clicked() {
+                                context_flag = Some((sel_ids.clone(), f));
                                 ui.close();
                             }
                         }
@@ -345,6 +442,10 @@ impl PhotoApp {
         if let Some((ids, r)) = context_rate {
             let ctx = ui.ctx().clone();
             self.rate(&ctx, ids, r);
+        }
+        if let Some((ids, f)) = context_flag {
+            let ctx = ui.ctx().clone();
+            self.set_flag(&ctx, ids, f);
         }
         if let Some(id) = reveal {
             self.reveal_asset(id);

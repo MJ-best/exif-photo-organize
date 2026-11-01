@@ -80,8 +80,11 @@ impl Library {
         p.starts_with(&self.root)
     }
 
-    /// Write the XMP sidecar of an asset (next to its RAW file, or its primary file).
-    pub fn write_xmp(&self, catalog: &Catalog, asset_id: i64, rating: u8) -> Result<()> {
+    /// Write the XMP sidecar of an asset (next to its RAW file, or its primary file) with its
+    /// current rating (rejected photos get -1, the Lightroom convention) and tags.
+    pub fn write_xmp(&self, catalog: &Catalog, asset_id: i64) -> Result<()> {
+        let (rating, flag) = catalog.rating_and_flag(asset_id)?;
+        let rating: i8 = if flag < 0 { -1 } else { rating as i8 };
         let files = catalog.files_for(asset_id)?;
         let target = files
             .iter()

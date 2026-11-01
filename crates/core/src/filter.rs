@@ -64,6 +64,44 @@ impl FormatFilter {
     }
 }
 
+/// Culling state filter.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum CullFilter {
+    #[default]
+    Any,
+    /// Undecided photos whose B-cut probability is at least this many percent.
+    Candidates(u8),
+    Rejected,
+    Picked,
+    Undecided,
+    /// Photos that are not a weaker frame of a burst.
+    BurstBest,
+}
+
+impl CullFilter {
+    pub fn label(self) -> String {
+        match self {
+            CullFilter::Any => "전체".into(),
+            CullFilter::Candidates(_) => "B컷 후보".into(),
+            CullFilter::Rejected => "거절 (B컷)".into(),
+            CullFilter::Picked => "픽 (A컷)".into(),
+            CullFilter::Undecided => "아직 안 고름".into(),
+            CullFilter::BurstBest => "연사 베스트만".into(),
+        }
+    }
+
+    pub fn matches(self, a: &AssetRecord) -> bool {
+        match self {
+            CullFilter::Any => true,
+            CullFilter::Candidates(t) => a.flag == 0 && a.b_prob.is_finite() && a.b_prob * 100.0 >= t as f32,
+            CullFilter::Rejected => a.flag < 0,
+            CullFilter::Picked => a.flag > 0,
+            CullFilter::Undecided => a.flag == 0,
+            CullFilter::BurstBest => a.burst_size < 2 || a.burst_rank == 0,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum Facet {
     Camera = 0,
@@ -78,6 +116,8 @@ pub enum Facet {
     Date,
     Import,
     Text,
+    Cull,
+    Scene,
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -97,6 +137,9 @@ pub struct Filter {
     pub date: Option<(NaiveDate, NaiveDate)>,
     pub import_id: Option<i64>,
     pub text: String,
+    pub cull: CullFilter,
+    /// Any of these scenes (see `cull::Scene`).
+    pub scenes: BTreeSet<u8>,
 }
 
 fn in_range_f(v: f32, r: (f32, f32)) -> bool {
@@ -122,6 +165,8 @@ impl Filter {
             !self.tags.is_empty(),
             self.date.is_some(),
             !self.text.trim().is_empty(),
+            self.cull != CullFilter::Any,
+            !self.scenes.is_empty(),
         ]
         .iter()
         .filter(|b| **b)
@@ -187,6 +232,12 @@ impl Filter {
         if !text.is_empty() && !text_match(a, idx, text) {
             fail(Facet::Text);
         }
+        if !self.cull.matches(a) {
+            fail(Facet::Cull);
+        }
+        if !self.scenes.is_empty() && !self.scenes.contains(&a.scene) {
+            fail(Facet::Scene);
+        }
         m
     }
 
@@ -227,6 +278,9 @@ pub struct Facets {
     pub formats: Vec<(FormatFilter, usize)>,
     pub tags: Vec<(u32, usize)>,
     pub total: usize,
+    /// [B-cut candidates (at the filter's threshold, default 60 %), rejected, picked, undecided, burst best]
+    pub cull: [usize; 5],
+    pub scenes: Vec<(u8, usize)>,
 }
 
 #[derive(Default)]
@@ -241,6 +295,8 @@ struct Acc {
     formats: [usize; 6],
     tags: BTreeMap<u32, usize>,
     total: usize,
+    cull: [usize; 5],
+    scenes: BTreeMap<u8, usize>,
 }
 
 impl Acc {
@@ -257,6 +313,10 @@ impl Acc {
         m(&mut self.apertures, o.apertures);
         m(&mut self.shutters, o.shutters);
         m(&mut self.tags, o.tags);
+        m(&mut self.scenes, o.scenes);
+        for i in 0..5 {
+            self.cull[i] += o.cull[i];
+        }
         for i in 0..6 {
             self.ratings[i] += o.ratings[i];
             self.formats[i] += o.formats[i];
@@ -267,7 +327,17 @@ impl Acc {
 }
 
 pub fn facets(idx: &LibraryIndex, f: &Filter) -> Facets {
+    facets_with(idx, f, 60)
+}
+
+/// Like [`facets`], counting B-cut candidates from `candidate_threshold` percent
+/// (unless the filter itself selects candidates with its own threshold).
+pub fn facets_with(idx: &LibraryIndex, f: &Filter, candidate_threshold: u8) -> Facets {
     let text = f.text.trim().to_lowercase();
+    let threshold = match f.cull {
+        CullFilter::Candidates(t) => t,
+        _ => candidate_threshold,
+    };
     let acc = idx
         .assets
         .par_iter()
@@ -305,6 +375,23 @@ pub fn facets(idx: &LibraryIndex, f: &Filter) -> Facets {
                     }
                 }
             }
+            if ok_except(Facet::Cull) {
+                let kinds = [
+                    CullFilter::Candidates(threshold),
+                    CullFilter::Rejected,
+                    CullFilter::Picked,
+                    CullFilter::Undecided,
+                    CullFilter::BurstBest,
+                ];
+                for (k, c) in kinds.iter().enumerate() {
+                    if c.matches(a) {
+                        acc.cull[k] += 1;
+                    }
+                }
+            }
+            if ok_except(Facet::Scene) && a.scene != 0 {
+                *acc.scenes.entry(a.scene).or_default() += 1;
+            }
             if fail == 0 || ok_except(Facet::Tag) {
                 for t in &a.tags {
                     *acc.tags.entry(*t).or_default() += 1;
@@ -330,6 +417,8 @@ pub fn facets(idx: &LibraryIndex, f: &Filter) -> Facets {
         formats: FormatFilter::ALL.iter().copied().zip(acc.formats).collect(),
         tags: sorted_by_count(acc.tags),
         total: acc.total,
+        cull: acc.cull,
+        scenes: acc.scenes.into_iter().collect(),
     }
 }
 
@@ -361,6 +450,13 @@ mod tests {
             import_id: 1,
             tags: vec![],
             name: format!("IMG_{id:04}"),
+            flag: 0,
+            scene: 0,
+            b_prob: f32::NAN,
+            reasons: 0,
+            burst: 0,
+            burst_rank: 0,
+            burst_size: 0,
         }
     }
 
@@ -412,6 +508,22 @@ mod tests {
     }
 
     #[test]
+    fn cull_filter() {
+        let mut idx = index();
+        idx.get_mut(1).unwrap().b_prob = 0.9;
+        idx.get_mut(2).unwrap().b_prob = 0.2;
+        idx.get_mut(3).unwrap().flag = -1;
+        idx.get_mut(3).unwrap().b_prob = 0.95;
+        let f = Filter { cull: CullFilter::Candidates(60), ..Default::default() };
+        assert_eq!(apply(&idx, &f).len(), 1, "rejected photos are no longer candidates");
+        let f = Filter { cull: CullFilter::Rejected, ..Default::default() };
+        assert_eq!(apply(&idx, &f).len(), 1);
+        let fc = facets(&idx, &Filter::default());
+        assert_eq!(fc.cull[0], 1);
+        assert_eq!(fc.cull[1], 1);
+    }
+
+    #[test]
     fn facet_counts() {
         let idx = index();
         let canon = idx.cameras.intern_lookup("Canon EOS R5");
@@ -460,6 +572,13 @@ mod bench {
                     import_id: i / 1000,
                     tags: vec![(i % 20) as u32, 20 + (i % 7) as u32],
                     name: format!("IMG_{:05}", i % 10000),
+                    flag: 0,
+                    scene: 1 + (i % 7) as u8,
+                    b_prob: (i % 100) as f32 / 100.0,
+                    reasons: 0,
+                    burst: 0,
+                    burst_rank: 0,
+                    burst_size: 0,
                 },
                 camera: cams[(i % 5) as usize].into(),
                 lens: lenses[(i % 7) as usize].into(),

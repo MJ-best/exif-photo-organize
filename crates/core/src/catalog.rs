@@ -9,7 +9,7 @@ use rusqlite::{params, Connection, OptionalExtension};
 use std::collections::{BTreeMap, HashMap};
 use std::path::Path;
 
-const SCHEMA_VERSION: i64 = 1;
+const SCHEMA_VERSION: i64 = 2;
 
 const SCHEMA: &str = r#"
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);
@@ -68,6 +68,22 @@ CREATE TABLE IF NOT EXISTS asset_tags (
     PRIMARY KEY (asset_id, tag_id)
 ) WITHOUT ROWID;
 CREATE INDEX IF NOT EXISTS asset_tags_tag ON asset_tags(tag_id);
+CREATE TABLE IF NOT EXISTS analysis (
+    asset_id INTEGER PRIMARY KEY REFERENCES assets(id) ON DELETE CASCADE,
+    version INTEGER NOT NULL,
+    scene INTEGER NOT NULL DEFAULT 0,
+    data TEXT NOT NULL,
+    b_prob REAL,
+    reasons INTEGER NOT NULL DEFAULT 0,
+    burst INTEGER NOT NULL DEFAULT 0,
+    burst_rank INTEGER NOT NULL DEFAULT 0,
+    burst_size INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS ml_models (
+    key TEXT PRIMARY KEY,
+    data TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
 "#;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -144,6 +160,18 @@ pub struct AssetRecord {
     pub import_id: i64,
     pub tags: Vec<u32>,
     pub name: String,
+    /// -1 rejected (B-cut), 0 undecided, 1 picked (A-cut).
+    pub flag: i8,
+    /// Effective scene (user choice, else analysis), see [`crate::cull::Scene`].
+    pub scene: u8,
+    /// Probability of being a B-cut (NaN = not analysed yet).
+    pub b_prob: f32,
+    /// Reason bits, see [`crate::cull::learn::reason`].
+    pub reasons: u16,
+    /// Burst id (asset id of its first frame), 0 when not part of a burst.
+    pub burst: i64,
+    pub burst_rank: u16,
+    pub burst_size: u16,
 }
 
 impl AssetRecord {
@@ -311,6 +339,18 @@ impl Catalog {
         }
         conn.execute_batch("PRAGMA synchronous=NORMAL; PRAGMA foreign_keys=ON; PRAGMA temp_store=MEMORY;")?;
         conn.execute_batch(SCHEMA)?;
+        // v2: pick/reject flag and user-chosen scene.
+        let cols: Vec<String> = conn
+            .prepare("PRAGMA table_info(assets)")?
+            .query_map([], |r| r.get::<_, String>(1))?
+            .collect::<rusqlite::Result<_>>()?;
+        if !cols.iter().any(|c| c == "flag") {
+            conn.execute_batch("ALTER TABLE assets ADD COLUMN flag INTEGER NOT NULL DEFAULT 0;")?;
+        }
+        if !cols.iter().any(|c| c == "scene_user") {
+            conn.execute_batch("ALTER TABLE assets ADD COLUMN scene_user INTEGER;")?;
+        }
+        conn.execute("UPDATE meta SET value=?1 WHERE key='schema_version'", [SCHEMA_VERSION.to_string()])?;
         let version: Option<String> =
             conn.query_row("SELECT value FROM meta WHERE key='schema_version'", [], |r| r.get(0)).optional()?;
         if version.is_none() {
@@ -361,8 +401,8 @@ impl Catalog {
             "INSERT INTO assets(captured_at, captured_ms, date_source, utc_offset, make, model, camera, lens, lens_make,
                 focal_length, focal_35mm, aperture, exposure_time, iso, exposure_bias, flash, exposure_program,
                 metering_mode, white_balance, width, height, orientation, gps_lat, gps_lon, gps_alt, serial,
-                software, artist, formats, name, rating, import_id, imported_at)
-             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,?24,?25,?26,?27,?28,?29,?30,?31,?32,
+                software, artist, formats, name, rating, import_id, flag, imported_at)
+             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,?24,?25,?26,?27,?28,?29,?30,?31,?32,?33,
                      datetime('now','localtime'))",
             params![
                 meta.captured_at.map(|t| t.format("%Y-%m-%d %H:%M:%S%.3f").to_string()),
@@ -397,6 +437,7 @@ impl Catalog {
                 name,
                 rating,
                 import_id,
+                if meta.reject { -1i64 } else { 0 },
             ],
         )?;
         let id = tx.last_insert_rowid();
@@ -460,6 +501,147 @@ impl Catalog {
 
     pub fn path_exists(&self, rel_path: &str) -> Result<bool> {
         Ok(self.conn.query_row("SELECT 1 FROM files WHERE rel_path=?1", [rel_path], |_| Ok(())).optional()?.is_some())
+    }
+
+    /// -1 reject (B-cut), 0 none, 1 pick (A-cut).
+    pub fn set_flag(&mut self, ids: &[i64], flag: i8) -> Result<()> {
+        let tx = self.conn.transaction()?;
+        {
+            let mut stmt = tx.prepare_cached("UPDATE assets SET flag=?2 WHERE id=?1")?;
+            for id in ids {
+                stmt.execute(params![id, flag as i64])?;
+            }
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// Override (or with `None` reset) the detected scene.
+    pub fn set_scene_user(&mut self, ids: &[i64], scene: Option<u8>) -> Result<()> {
+        let tx = self.conn.transaction()?;
+        {
+            let mut stmt = tx.prepare_cached("UPDATE assets SET scene_user=?2 WHERE id=?1")?;
+            for id in ids {
+                stmt.execute(params![id, scene.map(|s| s as i64)])?;
+            }
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// Scene set by the user (None = automatic).
+    pub fn scene_user(&self, id: i64) -> Result<Option<u8>> {
+        Ok(self.conn.query_row("SELECT scene_user FROM assets WHERE id=?1", [id], |r| {
+            Ok(r.get::<_, Option<i64>>(0)?.map(|v| v as u8))
+        })?)
+    }
+
+    pub fn rating_and_flag(&self, id: i64) -> Result<(u8, i8)> {
+        Ok(self.conn.query_row("SELECT rating, flag FROM assets WHERE id=?1", [id], |r| {
+            Ok((r.get::<_, u8>(0)?, r.get::<_, i64>(1)? as i8))
+        })?)
+    }
+
+    pub fn put_analysis(&self, id: i64, a: &crate::cull::Analysis) -> Result<()> {
+        let json = serde_json::to_string(a)?;
+        self.conn.execute(
+            "INSERT INTO analysis(asset_id, version, scene, data) VALUES (?1,?2,?3,?4)
+             ON CONFLICT(asset_id) DO UPDATE SET version=excluded.version, scene=excluded.scene, data=excluded.data",
+            params![id, a.version, a.scene as u8, json],
+        )?;
+        Ok(())
+    }
+
+    pub fn analysis(&self, id: i64) -> Result<Option<crate::cull::Analysis>> {
+        let s: Option<String> =
+            self.conn.query_row("SELECT data FROM analysis WHERE asset_id=?1", [id], |r| r.get(0)).optional()?;
+        Ok(s.and_then(|s| serde_json::from_str(&s).ok()))
+    }
+
+    /// Assets analysed with the given analysis version.
+    pub fn analyzed_ids(&self, version: u32) -> Result<std::collections::HashSet<i64>> {
+        let mut stmt = self.conn.prepare("SELECT asset_id FROM analysis WHERE version=?1")?;
+        let v = stmt.query_map([version], |r| r.get(0))?.collect::<rusqlite::Result<_>>()?;
+        Ok(v)
+    }
+
+    /// Inputs for training / scoring the culling model.
+    pub fn cull_items(&self) -> Result<Vec<crate::cull::learn::Item>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT a.id, a.captured_ms, COALESCE(a.camera, ''), a.exposure_time, COALESCE(a.focal_35mm, a.focal_length),
+                    a.iso, a.rating, a.flag, a.scene_user, an.data
+             FROM assets a JOIN analysis an ON an.asset_id = a.id",
+        )?;
+        let rows = stmt.query_map([], |r| {
+            Ok((
+                r.get::<_, i64>(0)?,
+                r.get::<_, i64>(1)?,
+                r.get::<_, String>(2)?,
+                r.get::<_, Option<f64>>(3)?,
+                r.get::<_, Option<f64>>(4)?,
+                r.get::<_, Option<u32>>(5)?,
+                r.get::<_, u8>(6)?,
+                r.get::<_, i64>(7)?,
+                r.get::<_, Option<i64>>(8)?,
+                r.get::<_, String>(9)?,
+            ))
+        })?;
+        let mut items = Vec::new();
+        for row in rows {
+            let (id, ms, camera, shutter, focal, iso, rating, flag, scene_user, data) = row?;
+            let Ok(a) = serde_json::from_str::<crate::cull::Analysis>(&data) else { continue };
+            let scene = scene_user.map(|s| crate::cull::Scene::from_u8(s as u8)).unwrap_or(a.scene);
+            items.push(crate::cull::learn::Item {
+                id,
+                captured_ms: ms,
+                camera,
+                shutter: shutter.unwrap_or(0.0) as f32,
+                focal35: focal.unwrap_or(0.0) as f32,
+                iso: iso.unwrap_or(0),
+                rating,
+                flag: flag as i8,
+                scene,
+                sharp_peak: a.sharp_peak,
+                sharp_global: a.sharp_global,
+                motion: a.motion,
+                clip_high: a.clip_high,
+                clip_low: a.clip_low,
+                brightness: a.brightness,
+                face_area: a.face_area(),
+                face_sharp: a.face_sharp(),
+                eyes: a.eyes(),
+                dhash: a.dhash,
+            });
+        }
+        Ok(items)
+    }
+
+    pub fn put_scores(&mut self, scores: &[crate::cull::Score]) -> Result<()> {
+        let tx = self.conn.transaction()?;
+        {
+            let mut stmt = tx.prepare_cached(
+                "UPDATE analysis SET b_prob=?2, reasons=?3, burst=?4, burst_rank=?5, burst_size=?6 WHERE asset_id=?1",
+            )?;
+            for s in scores {
+                stmt.execute(params![s.id, s.b_prob as f64, s.reasons, s.burst, s.burst_rank, s.burst_size])?;
+            }
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
+    pub fn put_models(&mut self, models: &[(Option<crate::cull::Scene>, crate::cull::learn::Model)]) -> Result<()> {
+        let tx = self.conn.transaction()?;
+        tx.execute("DELETE FROM ml_models", [])?;
+        for (scene, m) in models {
+            let key = scene.map(|s| s.label().to_string()).unwrap_or_else(|| "전체".into());
+            tx.execute(
+                "INSERT INTO ml_models(key, data, updated_at) VALUES (?1, ?2, datetime('now','localtime'))",
+                params![key, serde_json::to_string(m)?],
+            )?;
+        }
+        tx.commit()?;
+        Ok(())
     }
 
     pub fn set_rating(&mut self, ids: &[i64], rating: u8) -> Result<()> {
@@ -567,6 +749,7 @@ impl Catalog {
                         software: r.get(24)?,
                         artist: r.get(25)?,
                         rating: None,
+                        reject: false,
                     })
                 },
             )
@@ -624,6 +807,13 @@ impl Catalog {
             import_id: r.get::<_, Option<i64>>(18)?.unwrap_or(0),
             tags: Vec::new(),
             name: r.get(19)?,
+            flag: r.get::<_, i64>(20)? as i8,
+            scene: r.get::<_, i64>(21)? as u8,
+            b_prob: opt_f32(r.get(22)?),
+            reasons: r.get::<_, Option<i64>>(23)?.unwrap_or(0) as u16,
+            burst: r.get::<_, Option<i64>>(24)?.unwrap_or(0),
+            burst_rank: r.get::<_, Option<i64>>(25)?.unwrap_or(0) as u16,
+            burst_size: r.get::<_, Option<i64>>(26)?.unwrap_or(0) as u16,
         };
         Ok((
             rec,
@@ -632,8 +822,11 @@ impl Catalog {
         ))
     }
 
-    const ROW_SQL: &'static str = "SELECT id, captured_ms, camera, lens, focal_length, focal_35mm, aperture, exposure_time, iso,
-        exposure_bias, width, height, orientation, rating, formats, flash, gps_lat, date_source, import_id, name FROM assets";
+    const ROW_SQL: &'static str = "SELECT a.id, a.captured_ms, a.camera, a.lens, a.focal_length, a.focal_35mm, a.aperture,
+        a.exposure_time, a.iso, a.exposure_bias, a.width, a.height, a.orientation, a.rating, a.formats, a.flash, a.gps_lat,
+        a.date_source, a.import_id, a.name, a.flag, COALESCE(a.scene_user, an.scene, 0), an.b_prob, an.reasons, an.burst,
+        an.burst_rank, an.burst_size
+        FROM assets a LEFT JOIN analysis an ON an.asset_id = a.id";
 
     /// Load the whole library into memory.
     pub fn load_index(&self) -> Result<LibraryIndex> {
@@ -681,7 +874,7 @@ impl Catalog {
 
     /// Load one asset with resolved names.
     pub fn load_row(&self, id: i64) -> Result<Option<AssetRow>> {
-        let sql = format!("{} WHERE id=?1", Self::ROW_SQL);
+        let sql = format!("{} WHERE a.id=?1", Self::ROW_SQL);
         let Some((mut rec, camera, lens)) = self.conn.query_row(&sql, [id], Self::row_from).optional()? else {
             return Ok(None);
         };
@@ -731,15 +924,15 @@ impl Catalog {
         }
         writeln!(
             w,
-            "id,captured_at,camera,lens,focal_mm,focal_35mm,aperture,shutter_s,iso,ev,width,height,rating,format,files,tags,gps_lat,gps_lon"
+            "id,captured_at,camera,lens,focal_mm,focal_35mm,aperture,shutter_s,iso,ev,width,height,rating,format,files,tags,gps_lat,gps_lon,flag,scene,b_cut_probability"
         )?;
         let mut stmt = self.conn.prepare(
             "SELECT a.id, a.captured_at, a.camera, a.lens, a.focal_length, a.focal_35mm, a.aperture, a.exposure_time,
                     a.iso, a.exposure_bias, a.width, a.height, a.rating, a.formats,
                     (SELECT group_concat(rel_path, ' | ') FROM files f WHERE f.asset_id=a.id),
                     (SELECT group_concat(t.name, ' | ') FROM asset_tags at JOIN tags t ON t.id=at.tag_id WHERE at.asset_id=a.id),
-                    a.gps_lat, a.gps_lon
-             FROM assets a ORDER BY a.captured_ms",
+                    a.gps_lat, a.gps_lon, a.flag, COALESCE(a.scene_user, an.scene, 0), an.b_prob
+             FROM assets a LEFT JOIN analysis an ON an.asset_id = a.id ORDER BY a.captured_ms",
         )?;
         let mut rows = stmt.query([])?;
         let mut n = 0;
@@ -748,7 +941,7 @@ impl Catalog {
             let s = |i: usize| -> rusqlite::Result<String> { Ok(r.get::<_, Option<String>>(i)?.unwrap_or_default()) };
             writeln!(
                 w,
-                "{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{}",
+                "{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{}",
                 r.get::<_, i64>(0)?,
                 q(&s(1)?),
                 q(&s(2)?),
@@ -767,6 +960,16 @@ impl Catalog {
                 q(&s(15)?),
                 num(r.get(16)?),
                 num(r.get(17)?),
+                match r.get::<_, i64>(18)? {
+                    x if x < 0 => "reject",
+                    x if x > 0 => "pick",
+                    _ => "",
+                },
+                match r.get::<_, i64>(19)? {
+                    0 => "",
+                    v => crate::cull::Scene::from_u8(v as u8).label(),
+                },
+                r.get::<_, Option<f64>>(20)?.map(|p| format!("{:.3}", p)).unwrap_or_default(),
             )?;
             n += 1;
         }

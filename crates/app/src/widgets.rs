@@ -30,6 +30,16 @@ pub enum Icon {
     Library,
     Plus,
     Minus,
+    /// Pick (A-cut) flag.
+    Flag,
+    /// Reject (B-cut).
+    Reject,
+    /// Burst stack.
+    Stack,
+    /// B-cut candidate (eye with a question).
+    Suspect,
+    /// Scene (mountains).
+    Scene,
 }
 
 /// Paint an icon centred in `rect` (designed on a 16×16 grid).
@@ -130,6 +140,32 @@ pub fn paint_icon(p: &egui::Painter, rect: Rect, icon: Icon, color: Color32) {
             line(&[(3.0, 8.0), (13.0, 8.0)]);
         }
         Icon::Minus => line(&[(3.0, 8.0), (13.0, 8.0)]),
+        Icon::Flag => {
+            line(&[(4.0, 14.5), (4.0, 1.5)]);
+            p.add(Shape::convex_polygon(
+                vec![at(4.0, 2.0), at(13.0, 2.0), at(10.5, 5.0), at(13.0, 8.0), at(4.0, 8.0)],
+                color,
+                Stroke::NONE,
+            ));
+        }
+        Icon::Reject => {
+            p.circle_stroke(c, 6.2 * s, st);
+            line(&[(3.6, 12.4), (12.4, 3.6)]);
+        }
+        Icon::Stack => {
+            p.rect_stroke(r(1.5, 5.5, 11.5, 14.5), 1.5 * s, st, StrokeKind::Middle);
+            line(&[(4.0, 3.5), (13.5, 3.5), (13.5, 12.0)]);
+            line(&[(6.5, 1.5), (14.5, 1.5)]);
+        }
+        Icon::Suspect => {
+            p.circle_stroke(at(7.0, 7.0), 5.0 * s, st);
+            line(&[(10.6, 10.6), (14.5, 14.5)]);
+            p.text(at(7.0, 7.2), Align2::CENTER_CENTER, "B", bold(6.5 * s), color);
+        }
+        Icon::Scene => {
+            line(&[(1.5, 13.5), (6.0, 6.0), (9.0, 10.0), (11.0, 7.5), (14.5, 13.5), (1.5, 13.5)]);
+            p.circle_filled(at(11.5, 3.5), 1.5 * s, color);
+        }
     }
 }
 

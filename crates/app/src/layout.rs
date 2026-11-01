@@ -13,6 +13,7 @@ pub enum GridMode {
     All,
 }
 
+/// Gap between tiles in the flush (classic) look.
 pub const GAP: f32 = 2.0;
 pub const SIDE_PAD: f32 = 2.0;
 pub const HEADER_H: f32 = 58.0;
@@ -34,9 +35,10 @@ pub struct Header {
 
 #[derive(Clone, Debug)]
 pub struct GridLayout {
-    pub key: (u64, u32, u32, GridMode),
+    pub key: (u64, u32, u32, GridMode, u32),
     pub cols: usize,
     pub tile: f32,
+    pub gap: f32,
     pub rows: Vec<TileRow>,
     pub headers: Vec<Header>,
     pub height: f32,
@@ -52,10 +54,11 @@ impl GridLayout {
         target: f32,
         mode: GridMode,
         gen: u64,
+        gap: f32,
     ) -> GridLayout {
         let usable = (width - SIDE_PAD * 2.0).max(50.0);
-        let cols = (((usable + GAP) / (target + GAP)).round() as usize).max(1);
-        let tile = ((usable - GAP * (cols as f32 - 1.0)) / cols as f32).floor();
+        let cols = (((usable + gap) / (target + gap)).round() as usize).max(1);
+        let tile = ((usable - gap * (cols as f32 - 1.0)) / cols as f32).floor();
         let mut rows = Vec::new();
         let mut headers = Vec::new();
         let mut row_of = vec![0u32; filtered.len()];
@@ -68,7 +71,7 @@ impl GridLayout {
                     *r = rows.len() as u32;
                 }
                 rows.push(TileRow { y: *y, start: s, end: e });
-                *y += tile + GAP;
+                *y += tile + gap;
                 s = e;
             }
         };
@@ -109,9 +112,10 @@ impl GridLayout {
             }
         }
         GridLayout {
-            key: (gen, width as u32, target as u32, mode),
+            key: (gen, width as u32, target as u32, mode, gap as u32),
             cols,
             tile,
+            gap,
             rows,
             headers,
             height: y + 24.0,
@@ -120,7 +124,7 @@ impl GridLayout {
     }
 
     pub fn tile_rect_x(&self, col: usize) -> f32 {
-        SIDE_PAD + col as f32 * (self.tile + GAP)
+        SIDE_PAD + col as f32 * (self.tile + self.gap)
     }
 
     /// Rows intersecting [y0, y1].

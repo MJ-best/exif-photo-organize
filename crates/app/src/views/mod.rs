@@ -8,7 +8,7 @@ mod sidebar;
 mod toolbar;
 mod viewer;
 
-use crate::app::{MainView, PhotoApp};
+use crate::app::{Hud, MainView, PhotoApp};
 use crate::config::ThemePref;
 use crate::theme::{bold, font};
 use crate::widgets::{self, Icon};
@@ -68,6 +68,9 @@ impl PhotoApp {
                         if self.show_filters || self.filter_active() {
                             self.filter_bar(ui);
                         }
+                        if matches!(self.filter.cull, photoorg_core::filter::CullFilter::Candidates(_)) {
+                            self.cull_bar(ui);
+                        }
                         self.browse(ui);
                     }
                 }
@@ -92,6 +95,7 @@ impl PhotoApp {
         use crate::app::SideSel::*;
         match self.side {
             Rated | Unrated | Videos | Pairs | Camera(_) | Lens(_) => 1,
+            Candidates | Rejected | Picked | BurstBest | Scene(_) => 1,
             _ => 0,
         }
     }
@@ -101,7 +105,7 @@ impl PhotoApp {
         let ctx = ui.ctx().clone();
         let rect = ui.max_rect();
         let n_recent = self.cfg.recent_libraries.len().min(6);
-        let h = 330.0
+        let h = 342.0
             + if self.lib_error.is_some() { 48.0 } else { 0.0 }
             + if n_recent > 0 { 34.0 + 24.0 * n_recent as f32 } else { 0.0 };
         let card = Rect::from_center_size(rect.center(), vec2(480.0_f32.min(rect.width() - 40.0), h));
@@ -111,10 +115,9 @@ impl PhotoApp {
         );
         let ui = &mut child;
         ui.add_space(6.0);
-        let (ir, _) = ui.allocate_exact_size(vec2(64.0, 64.0), Sense::hover());
-        ui.painter().rect_filled(ir, 16.0, pal.accent);
-        widgets::paint_icon(ui.painter(), ir.shrink(14.0), Icon::Photos, Color32::WHITE);
-        ui.add_space(10.0);
+        let (ir, _) = ui.allocate_exact_size(vec2(112.0, 112.0), Sense::hover());
+        crate::icon::paint_mascot(&ctx, ui.painter(), ir);
+        ui.add_space(8.0);
         ui.label(egui::RichText::new("Photo Organize").font(bold(24.0)));
         ui.add_space(4.0);
         ui.label(
@@ -160,29 +163,49 @@ impl PhotoApp {
         let ctx = ui.ctx().clone();
         let screen = ctx.content_rect();
         let painter = ctx.layer_painter(egui::LayerId::new(egui::Order::Foreground, egui::Id::unique("overlays")));
-        // Rating HUD.
-        if let Some((r, _)) = self.hud {
+        // Rating / flag HUD.
+        if let Some((hud, _)) = self.hud {
             let rect = Rect::from_center_size(
                 if self.central_rect.is_positive() { self.central_rect.center() } else { screen.center() },
                 vec2(230.0, 70.0),
             );
-            painter.rect_filled(rect, 14.0, Color32::from_black_alpha(190));
-            if r == 0 {
-                painter.text(rect.center(), Align2::CENTER_CENTER, "별점 지움", bold(18.0), Color32::WHITE);
-            } else {
-                for i in 0..5u8 {
-                    let c = pos2(rect.center().x + (i as f32 - 2.0) * 38.0, rect.center().y);
-                    if i < r {
-                        widgets::star_shape(&painter, c, 15.0, Some(pal.star), None);
-                    } else {
-                        widgets::star_shape(
-                            &painter,
-                            c,
-                            15.0,
-                            None,
-                            Some(egui::Stroke::new(1.2, Color32::from_white_alpha(120))),
-                        );
+            painter.rect_filled(rect, 14.0, pal.hud_bg);
+            match hud {
+                Hud::Rating(0) => {
+                    painter.text(rect.center(), Align2::CENTER_CENTER, "별점 지움", bold(18.0), Color32::WHITE);
+                }
+                Hud::Rating(r) => {
+                    for i in 0..5u8 {
+                        let c = pos2(rect.center().x + (i as f32 - 2.0) * 38.0, rect.center().y);
+                        if i < r {
+                            widgets::star_shape(&painter, c, 15.0, Some(pal.star), None);
+                        } else {
+                            widgets::star_shape(
+                                &painter,
+                                c,
+                                15.0,
+                                None,
+                                Some(egui::Stroke::new(1.2, Color32::from_white_alpha(120))),
+                            );
+                        }
                     }
+                }
+                Hud::Flag(f) => {
+                    let (icon, text, color) = match f {
+                        -1 => (Icon::Reject, "B컷 (거절)", pal.danger),
+                        1 => (Icon::Flag, "A컷 (픽)", pal.success),
+                        _ => (Icon::Close, "표시 해제", Color32::WHITE),
+                    };
+                    let g = painter.layout_no_wrap(text.into(), bold(18.0), Color32::WHITE);
+                    let total = 26.0 + 10.0 + g.size().x;
+                    let x0 = rect.center().x - total / 2.0;
+                    widgets::paint_icon(
+                        &painter,
+                        Rect::from_center_size(pos2(x0 + 13.0, rect.center().y), vec2(26.0, 26.0)),
+                        icon,
+                        color,
+                    );
+                    painter.galley(pos2(x0 + 36.0, rect.center().y - g.size().y / 2.0), g, Color32::WHITE);
                 }
             }
         }
@@ -245,7 +268,13 @@ impl PhotoApp {
                     if widgets::segmented(
                         ui,
                         &mut t,
-                        &[(ThemePref::Dark, "다크"), (ThemePref::Light, "라이트"), (ThemePref::System, "시스템")],
+                        &[
+                            (ThemePref::Cream, "크림"),
+                            (ThemePref::Cocoa, "코코아"),
+                            (ThemePref::System, "시스템"),
+                            (ThemePref::Dark, "클래식 다크"),
+                            (ThemePref::Light, "클래식 라이트"),
+                        ],
                         &pal,
                     ) {
                         self.set_theme(&ctx, t);
@@ -268,6 +297,9 @@ impl PhotoApp {
                 {
                     self.xmp_enabled.store(self.cfg.write_xmp, std::sync::atomic::Ordering::Relaxed);
                 }
+                ui.add_space(12.0);
+
+                self.cull_settings(ui);
                 ui.add_space(12.0);
 
                 ui.label(egui::RichText::new("가져오기").font(bold(13.0)).color(pal.text2));
@@ -296,6 +328,9 @@ impl PhotoApp {
                 for (k, d) in [
                     ("F1–F5  /  1–5", "별점 1–5개"),
                     ("0  /  F6", "별점 지우기"),
+                    ("P", "픽 — A컷 (다시 누르면 해제)"),
+                    ("X", "거절 — B컷 (다시 누르면 해제)"),
+                    ("U", "픽/거절 해제"),
                     ("Space / Enter", "사진 크게 보기 / 돌아가기"),
                     ("← → ↑ ↓", "이동 (Shift: 범위 선택)"),
                     ("Z", "100% 확대 (사진 보기)"),
@@ -324,6 +359,110 @@ impl PhotoApp {
         if !self.settings_open {
             self.cfg.save();
         }
+    }
+
+    fn cull_settings(&mut self, ui: &mut Ui) {
+        let pal = self.pal;
+        let ctx = ui.ctx().clone();
+        ui.label(egui::RichText::new("셀렉 도우미 (B컷 찾기)").font(bold(13.0)).color(pal.text2));
+        ui.label(
+            egui::RichText::new(
+                "초점·흔들림·눈 감음·노출·연사를 분석해 B컷 후보를 표시하고, 내가 고른 픽(P)·거절(X)·별점에서 \
+                 장면(인물/풍경/정물…)별 기준을 학습합니다. 사진은 절대 지우지 않습니다.",
+            )
+            .font(font(11.5))
+            .color(pal.text3),
+        );
+        ui.add_space(4.0);
+        if widgets::switch(ui, &mut self.cfg.cull_auto, "새로 가져온 사진을 자동으로 분석", &pal).changed()
+            && self.cfg.cull_auto
+        {
+            self.ensure_analysis(&ctx);
+        }
+        widgets::switch(ui, &mut self.cfg.cull_badges, "썸네일에 B컷 후보 · 픽 · 거절 · 연사 순위 표시", &pal);
+        ui.horizontal(|ui| {
+            ui.label(egui::RichText::new("B컷 후보 기준").font(font(12.5)));
+            let mut t = self.cfg.cull_threshold as f32;
+            ui.spacing_mut().slider_width = 180.0;
+            if ui
+                .add(egui::Slider::new(&mut t, 30.0..=90.0).step_by(5.0).fixed_decimals(0).suffix("%"))
+                .on_hover_text("낮추면 더 많이 걸러내고(놓치는 B컷 감소), 높이면 확실한 것만 표시합니다")
+                .changed()
+            {
+                self.set_cull_threshold(t as u8);
+            }
+        });
+        ui.add_space(4.0);
+        ui.label(egui::RichText::new("학습에 쓰는 내 셀렉").font(font(12.5)));
+        let before = self.cfg.learn;
+        widgets::switch(ui, &mut self.cfg.learn.one_star_is_b, "★1개는 B컷으로 학습", &pal);
+        ui.horizontal(|ui| {
+            ui.label(egui::RichText::new("A컷으로 학습할 별점").font(font(12.0)).color(pal.text2));
+            let mut v = self.cfg.learn.a_min_rating;
+            if widgets::segmented(ui, &mut v, &[(2, "★2+"), (3, "★3+"), (4, "★4+"), (0, "픽만")], &pal) {
+                self.cfg.learn.a_min_rating = v;
+            }
+        });
+        if self.cfg.learn != before {
+            self.labels_dirty_at = Some(ctx.input(|i| i.time) - 10.0);
+        }
+        ui.label(
+            egui::RichText::new("픽(P)은 항상 A컷, 거절(X)은 항상 B컷으로 학습합니다.")
+                .font(font(11.0))
+                .color(pal.text3),
+        );
+        // Learning status per scene.
+        ui.add_space(6.0);
+        if let Some(rep) = &self.cull_report {
+            let analysed = self.lib.as_ref().map(|s| s.analysed).unwrap_or(0);
+            ui.label(
+                egui::RichText::new(format!("분석된 사진 {}장 · 학습 현황", format::count(analysed))).font(bold(12.0)),
+            );
+            egui::Grid::new("learn-report").num_columns(5).spacing(vec2(14.0, 3.0)).striped(true).show(ui, |ui| {
+                for h in ["장면", "A컷", "B컷", "기준", "검증 정확도"] {
+                    ui.label(egui::RichText::new(h).font(font(11.0)).color(pal.text3));
+                }
+                ui.end_row();
+                for s in &rep.scenes {
+                    let name = s.scene.map(|x| x.label()).unwrap_or("전체");
+                    ui.label(egui::RichText::new(name).font(if s.scene.is_none() { bold(11.5) } else { font(11.5) }));
+                    ui.label(egui::RichText::new(s.a.to_string()).font(font(11.5)));
+                    ui.label(egui::RichText::new(s.b.to_string()).font(font(11.5)));
+                    let c = match s.model {
+                        "장면별 학습" => pal.success,
+                        "전체 학습" => pal.accent,
+                        _ => pal.text2,
+                    };
+                    ui.label(egui::RichText::new(s.model).font(font(11.5)).color(c));
+                    ui.label(
+                        egui::RichText::new(s.accuracy.map(|a| format!("{:.0}%", a * 100.0)).unwrap_or("–".into()))
+                            .font(font(11.5)),
+                    );
+                    ui.end_row();
+                }
+            });
+            ui.label(
+                egui::RichText::new(
+                    "A·B컷이 각각 6장 이상이면 내 기준으로, 한 장면에서 각각 10장 이상이면 그 장면만의 기준으로 학습합니다.",
+                )
+                .font(font(11.0))
+                .color(pal.text3),
+            );
+        } else if self.analysis_job.is_some() {
+            ui.label(egui::RichText::new("분석 중…").font(font(11.5)).color(pal.text3));
+        }
+        ui.add_space(4.0);
+        ui.horizontal(|ui| {
+            if widgets::secondary_button(ui, "지금 다시 학습", &pal).clicked() {
+                self.start_rescore(&ctx, false);
+            }
+            if widgets::secondary_button(ui, "모든 사진 다시 분석", &pal).clicked() {
+                self.reanalyse_all(&ctx);
+            }
+            if self.analysis_job.is_some() && widgets::secondary_button(ui, "분석 중지", &pal).clicked() {
+                self.cancel_analysis();
+            }
+        });
     }
 
     pub fn export_csv(&mut self) {
