@@ -17,39 +17,48 @@ jobs:
       matrix:
         include:
           - os: macos-latest
+            target: aarch64-apple-darwin
             name: macos-arm64
-          - os: macos-13
+          - os: macos-latest
+            target: x86_64-apple-darwin
             name: macos-x86_64
           - os: windows-latest
+            target: x86_64-pc-windows-msvc
             name: windows-x86_64
           - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
             name: linux-x86_64
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
       - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
       - name: Test
+        if: matrix.target != 'x86_64-apple-darwin'
         run: cargo test --workspace
       - name: Build
-        run: cargo build --release --workspace
+        run: cargo build --release --workspace --target ${{ matrix.target }}
       - name: Package (macOS)
         if: runner.os == 'macOS'
         run: |
-          ./scripts/macos-bundle.sh target/release/photo-organize dist
-          cp target/release/photoorg dist/
+          ./scripts/macos-bundle.sh target/${{ matrix.target }}/release/photo-organize dist
+          cp target/${{ matrix.target }}/release/photoorg dist/
           cd dist && zip -qry "../photo-organize-${{ matrix.name }}.zip" .
       - name: Package (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
           New-Item -ItemType Directory dist | Out-Null
-          Copy-Item target/release/photo-organize.exe, target/release/photoorg.exe dist/
+          Copy-Item target/${{ matrix.target }}/release/photo-organize.exe, target/${{ matrix.target }}/release/photoorg.exe dist/
           Compress-Archive -Path dist/* -DestinationPath "photo-organize-${{ matrix.name }}.zip"
       - name: Package (Linux)
         if: runner.os == 'Linux'
         run: |
-          mkdir dist && cp target/release/photo-organize target/release/photoorg dist/
+          mkdir dist && cp target/${{ matrix.target }}/release/photo-organize target/${{ matrix.target }}/release/photoorg dist/
           tar -czf "photo-organize-${{ matrix.name }}.tar.gz" -C dist .
       - uses: actions/upload-artifact@v4
         with:
