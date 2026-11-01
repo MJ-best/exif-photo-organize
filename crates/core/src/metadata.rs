@@ -1044,7 +1044,7 @@ pub(crate) mod tests_support {
 mod tests {
     use super::tests_support::jpeg_with_exif;
     use super::*;
-    use crate::tiff::testutil::*;
+    use crate::tiff::writer::*;
 
     #[test]
     fn camera_names() {

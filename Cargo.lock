@@ -3036,7 +3036,7 @@ dependencies = [
 
 [[package]]
 name = "photoorg-app"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "anyhow",
  "chrono",
@@ -3056,7 +3056,7 @@ dependencies = [
 
 [[package]]
 name = "photoorg-cli"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "anyhow",
  "chrono",
@@ -3067,11 +3067,12 @@ dependencies = [
 
 [[package]]
 name = "photoorg-core"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "anyhow",
  "blake3",
  "chrono",
+ "crc32fast",
  "crossbeam-channel",
  "dirs",
  "image",

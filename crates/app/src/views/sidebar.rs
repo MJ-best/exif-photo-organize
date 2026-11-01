@@ -13,7 +13,8 @@ impl PhotoApp {
         let bottom_h = 58.0
             + if self.import_running() { 46.0 } else { 0.0 }
             + if self.maintenance.is_some() { 34.0 } else { 0.0 }
-            + if self.analysis_job.is_some() { 34.0 } else { 0.0 };
+            + if self.analysis_job.is_some() { 34.0 } else { 0.0 }
+            + if self.export_job.is_some() { 34.0 } else { 0.0 };
         let avail = ui.available_height() - bottom_h;
         egui::ScrollArea::vertical().id_salt("sidebar").max_height(avail.max(50.0)).auto_shrink([false, false]).show(
             ui,
@@ -295,6 +296,35 @@ impl PhotoApp {
                 2.0,
                 pal.accent,
             );
+            y += 34.0;
+        }
+        if let Some(job) = &self.export_job {
+            let d = job.done.load(std::sync::atomic::Ordering::Relaxed);
+            let total = job.total.load(std::sync::atomic::Ordering::Relaxed);
+            let r = Rect::from_min_size(pos2(rest.left(), y), vec2(rest.width(), 28.0));
+            let resp = ui
+                .interact(r, ui.scope_id().with("export-progress"), Sense::click())
+                .on_hover_text(format!("{}\n클릭하면 내보내기를 중지합니다", job.dir.display()));
+            if resp.hovered() {
+                p.rect_filled(r, 6.0, pal.hover);
+            }
+            p.text(
+                pos2(r.left() + 10.0, r.top() + 8.0),
+                Align2::LEFT_CENTER,
+                format!("내보내는 중 {}/{}", format::count(d), format::count(total)),
+                font(11.0),
+                pal.text2,
+            );
+            let bar = Rect::from_min_size(pos2(r.left() + 10.0, r.top() + 18.0), vec2(r.width() - 20.0, 4.0));
+            p.rect_filled(bar, 2.0, pal.control_bg);
+            p.rect_filled(
+                Rect::from_min_size(bar.min, vec2(bar.width() * (d as f32 / total.max(1) as f32).min(1.0), 4.0)),
+                2.0,
+                pal.accent,
+            );
+            if resp.clicked() {
+                self.cancel_export();
+            }
             y += 34.0;
         }
         if let Some(job) = &self.analysis_job {

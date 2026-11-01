@@ -96,45 +96,6 @@ impl Library {
         crate::xmp::write_sidecar(&self.abs(&target.rel_path), rating, &keywords)
     }
 
-    /// Copy the files of `ids` into `dest` (e.g. to hand over picks). With `jpeg_only`, RAW files
-    /// are skipped when the asset also has a JPEG/HEIF. Existing files are never overwritten.
-    /// Returns the number of files copied.
-    pub fn export(&self, catalog: &Catalog, ids: &[i64], dest: &Path, jpeg_only: bool) -> Result<usize> {
-        std::fs::create_dir_all(dest)?;
-        let mut n = 0;
-        for id in ids {
-            let files = catalog.files_for(*id)?;
-            let has_dev = files.iter().any(|f| matches!(f.kind, FileKind::Jpeg | FileKind::Heif));
-            for f in &files {
-                if jpeg_only && has_dev && f.kind == FileKind::Raw {
-                    continue;
-                }
-                let src = self.abs(&f.rel_path);
-                let name = src.file_name().map(|s| s.to_os_string()).unwrap_or_default();
-                let mut target = dest.join(&name);
-                let mut k = 1;
-                while target.exists() {
-                    let stem =
-                        Path::new(&name).file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
-                    let ext =
-                        Path::new(&name).extension().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
-                    target = dest.join(format!("{stem}_{k}.{ext}"));
-                    k += 1;
-                }
-                std::fs::copy(&src, &target).with_context(|| format!("복사 실패 {}", src.display()))?;
-                n += 1;
-            }
-            // Keep ratings/keywords with the exported files.
-            if let Some(raw) = files.iter().find(|f| f.kind == FileKind::Raw) {
-                let sc = crate::xmp::sidecar_path(&self.abs(&raw.rel_path));
-                if sc.exists() && !(jpeg_only && has_dev) {
-                    let _ = std::fs::copy(&sc, dest.join(sc.file_name().unwrap_or_default()));
-                }
-            }
-        }
-        Ok(n)
-    }
-
     /// Add a user tag and refresh sidecars.
     pub fn tag_assets(&self, catalog: &mut Catalog, ids: &[i64], name: &str) -> Result<crate::catalog::TagInfo> {
         catalog.add_tag(ids, name, TagKind::User)

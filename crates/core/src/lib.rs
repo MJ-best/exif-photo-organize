@@ -2,6 +2,7 @@
 
 pub mod catalog;
 pub mod cull;
+pub mod export;
 pub mod filter;
 pub mod format;
 pub mod import;
@@ -14,6 +15,7 @@ pub mod template;
 pub mod tiff;
 pub mod volumes;
 pub mod xmp;
+pub mod zip;
 
 pub use catalog::{AssetRecord, Catalog, LibraryIndex, ThumbStore};
 pub use filter::{Facets, Filter};

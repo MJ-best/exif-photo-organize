@@ -362,12 +362,13 @@ pub mod tag {
     pub const GPS_ALT: u16 = 6;
 }
 
-#[cfg(test)]
-pub(crate) mod testutil {
-    //! A tiny TIFF writer used to build fixtures in tests.
+pub mod writer {
+    //! A tiny little-endian TIFF writer: EXIF blocks for exported JPEGs, and fixtures in tests.
 
     pub enum Val {
         Ascii(&'static str),
+        /// Owned text (e.g. a camera name read from a photo).
+        Text(String),
         Short(Vec<u16>),
         Long(Vec<u32>),
         Rational(Vec<(u32, u32)>),
@@ -378,8 +379,7 @@ pub(crate) mod testutil {
         Undefined(Vec<u8>),
     }
 
-    /// Build a little-endian TIFF with a single IFD0 (and nested IFDs). `extra` is appended after
-    /// the IFD data and its offset is returned so tests can point tags at it.
+    /// Build a little-endian TIFF with a single IFD0 (and nested IFDs).
     pub fn build_tiff(ifd0: Vec<(u16, Val)>) -> Vec<u8> {
         let mut out = b"II\x2a\x00\x08\x00\x00\x00".to_vec();
         write_ifd(&mut out, ifd0);
@@ -398,6 +398,11 @@ pub(crate) mod testutil {
             let (typ, count, data): (u16, u32, Vec<u8>) = match val {
                 Val::Ascii(s) => {
                     let mut d = s.as_bytes().to_vec();
+                    d.push(0);
+                    (2, d.len() as u32, d)
+                }
+                Val::Text(s) => {
+                    let mut d = s.into_bytes();
                     d.push(0);
                     (2, d.len() as u32, d)
                 }
@@ -445,7 +450,7 @@ pub(crate) mod testutil {
 
 #[cfg(test)]
 mod tests {
-    use super::testutil::*;
+    use super::writer::*;
     use super::*;
     use std::io::Cursor;
 

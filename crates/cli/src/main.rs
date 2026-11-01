@@ -29,6 +29,9 @@ const HELP: &str = "photoorg — EXIF 기반 사진 정리 도구 (CLI)
   photoorg stats <라이브러리>                카메라/렌즈/ISO 통계
   photoorg rate <라이브러리> <별점 0-5> <asset id>...
   photoorg export-csv <라이브러리> <출력.csv>
+  photoorg export <라이브러리> <폴더> [--jpeg | --small <긴 변 px, 0=원래 크기>] [--quality 88]
+        [--zip <이름> [--split <MB>]] [--date-names] [--min-rating <n>] [<asset id>...]
+                                             사진 내보내기 (기본: 원본 전체, 찍은 순서)
   photoorg thumbs <라이브러리> [--all]       누락된(또는 전체) 썸네일 다시 만들기
   photoorg thumb <파일> <출력.jpg>           파일 하나의 썸네일 생성 (디버그)
   photoorg analyze <라이브러리> [--all]      B컷 분석 (초점·흔들림·노출·얼굴/눈·장면·연사) + 학습
@@ -153,6 +156,69 @@ fn run() -> Result<()> {
             );
             for f in &sum.failures {
                 println!("실패: {f}");
+            }
+        }
+        "export" => {
+            let lib = Library::open(&PathBuf::from(rest.first().context("라이브러리 폴더가 필요합니다")?))?;
+            let dest = PathBuf::from(rest.get(1).context("내보낼 폴더가 필요합니다")?);
+            let cat = lib.catalog()?;
+            let kind = if let Some(edge) = arg_value(rest, "--small") {
+                let quality = arg_value(rest, "--quality").map(|q| q.parse()).transpose()?.unwrap_or(88);
+                photoorg_core::export::ExportKind::Resized { long_edge: edge.parse()?, quality }
+            } else if rest.iter().any(|a| a == "--jpeg") {
+                photoorg_core::export::ExportKind::JpegOnly
+            } else {
+                photoorg_core::export::ExportKind::Originals
+            };
+            // Explicit ids (bare numbers after the folder), else everything / by rating.
+            let mut ids: Vec<i64> = Vec::new();
+            let mut skip = false;
+            for a in &rest[2..] {
+                if skip {
+                    skip = false;
+                    continue;
+                }
+                if matches!(a.as_str(), "--small" | "--quality" | "--min-rating" | "--zip" | "--split") {
+                    skip = true;
+                    continue;
+                }
+                if let Ok(id) = a.parse::<i64>() {
+                    ids.push(id);
+                }
+            }
+            if ids.is_empty() {
+                let idx = cat.load_index()?;
+                let min: u8 = arg_value(rest, "--min-rating").map(|v| v.parse()).transpose()?.unwrap_or(0);
+                ids = idx.assets.iter().filter(|a| a.rating >= min).map(|a| a.id).collect();
+            }
+            let t = std::time::Instant::now();
+            let never = std::sync::atomic::AtomicBool::new(false);
+            let zip = arg_value(rest, "--zip").map(|name| -> Result<_> {
+                let mb: u64 = arg_value(rest, "--split").map(|v| v.parse()).transpose()?.unwrap_or(0);
+                Ok(photoorg_core::export::ZipOptions { name, part_bytes: mb * 1_000_000 })
+            });
+            let opts = photoorg_core::export::ExportOptions {
+                kind,
+                date_names: rest.iter().any(|a| a == "--date-names"),
+                zip: zip.transpose()?,
+            };
+            let sum = photoorg_core::export::export(&lib, &cat, &ids, &dest, &opts, &never, &|d, n| {
+                eprint!("\r내보내는 중 {d}/{n}");
+            })?;
+            eprintln!();
+            println!(
+                "{}장 → 파일 {}개, {} ({:.1}초){}",
+                ids.len(),
+                sum.files,
+                fmt::bytes(sum.bytes),
+                t.elapsed().as_secs_f32(),
+                if sum.from_raw > 0 { format!(", RAW에서 만든 JPEG {}개", sum.from_raw) } else { String::new() }
+            );
+            for p in &sum.archives {
+                println!("  {} ({})", p.display(), fmt::bytes(std::fs::metadata(p).map(|m| m.len()).unwrap_or(0)));
+            }
+            for (name, why) in &sum.skipped {
+                println!("  건너뜀 {name}: {why}");
             }
         }
         "list" => {
