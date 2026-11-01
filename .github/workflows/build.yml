@@ -98,7 +98,10 @@ jobs:
           cp target/universal/photoorg dist/
           ditto -c -k --keepParent "dist/Photo Organize.app" photo-organize-macos-universal.zip
           mkdir dmg && cp -R "dist/Photo Organize.app" dmg/ && ln -s /Applications dmg/Applications
-          hdiutil create -volname "Photo Organize" -srcfolder dmg -ov -format UDZO photo-organize-macos-universal.dmg
+          # hdiutil's own size estimate is too tight for the larger binary (embedded models in
+          # both architectures) and fails with "No space left on device": give it headroom.
+          size_mb=$(( $(du -sm dmg | cut -f1) * 12 / 10 + 20 ))
+          hdiutil create -volname "Photo Organize" -srcfolder dmg -size "${size_mb}m" -ov -format UDZO photo-organize-macos-universal.dmg
       - uses: actions/upload-artifact@v4
         with:
           name: photo-organize-macos-universal
