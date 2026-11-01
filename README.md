@@ -87,17 +87,32 @@ Apple Silicon(M1·M2·M3·M4)과 Intel 맥 모두에서 실행되는 **유니버
 1. **[Releases](https://github.com/MJ-best/exif-photo-organize/releases/latest)** 에서 `photo-organize-macos-universal.dmg` 를 내려받습니다.
 2. *(최신 개발 버전을 원하면)* [Actions → build](https://github.com/MJ-best/exif-photo-organize/actions/workflows/build.yml) 에서 가장 최근의 초록색(✓) 실행 → **Artifacts** 의 `photo-organize-macos-universal` 을 받아 압축을 풉니다. *(GitHub 로그인 필요)*
 3. `.dmg` 를 열고 **Photo Organize** 를 **Applications** 폴더로 끌어 놓습니다.
-4. **처음 한 번은 우클릭 → 열기 → 열기** 로 실행합니다.
-   개발자 인증서로 서명된 앱이 아니어서 그냥 더블클릭하면 macOS 가 막습니다.
-   macOS 15(Sequoia) 이상에서는 한 번 실행을 시도한 뒤 **시스템 설정 → 개인정보 보호 및 보안** 맨 아래의 **"그래도 열기"** 를 누르세요.
+4. **처음 한 번은 직접 허용해야 합니다.** 앱을 열면 *"Apple은 'Photo Organize'에 Mac에 손상을 입히거나 개인정보를 침해할 수 있는 **악성 코드가 없음을 확인할 수 없습니다**"* 라는 창이 뜹니다.
+   - **완료**를 누릅니다 (*휴지통으로 이동* 아님).
+   - **시스템 설정 → 개인정보 보호 및 보안** 을 열고 맨 아래 **보안** 항목의 *"'Photo Organize'이(가) Mac을 보호하기 위해 차단되었습니다"* 옆 **그래도 열기** → 암호(또는 Touch ID) → 다시 뜨는 창에서 **그래도 열기**.
+   - 한 번만 하면 다음부터는 그냥 열립니다. (macOS 14 이하는 Finder 에서 **우클릭 → 열기 → 열기** 로도 됩니다. macOS 15 부터는 우클릭으로는 열리지 않습니다.)
 5. SD 카드나 외장 하드에 처음 접근할 때 *"이동식 볼륨의 파일에 접근하려고 합니다"* 창이 뜨면 **허용**을 누릅니다.
+
+> **왜 "악성 코드" 경고가 나오나요?** 실제로 무엇이 발견된 게 아니라, Apple 의 유료 개발자 인증서로 서명하고 Apple 의 **공증(notarization)** 을 받지 않은 앱이면 모두 나오는 문구입니다. 이 앱은 소스가 모두 공개되어 있고, GitHub Actions 에서 이 저장소의 코드로 빌드됩니다. 공증을 켜는 방법은 [macOS 공증](#macos-공증-경고-없이-열리게-하기) 에 있습니다.
+
+**터미널로 설치하기 (경고 없이)** — 브라우저로 받은 파일에만 붙는 "인터넷에서 받음" 표시가 `curl` 로 받으면 붙지 않아, 위의 허용 과정 없이 바로 열립니다. *그래도 열기* 를 누르는 것과 같은 효과입니다.
+
+```bash
+curl -fL https://github.com/MJ-best/exif-photo-organize/releases/latest/download/photo-organize-macos-universal.zip -o /tmp/photo-organize.zip \
+  && rm -rf "/Applications/Photo Organize.app" \
+  && ditto -x -k /tmp/photo-organize.zip /Applications \
+  && open "/Applications/Photo Organize.app"
+```
+
+이미 브라우저로 받아 *Applications* 에 넣었다면 이것만 실행해도 됩니다: `xattr -dr com.apple.quarantine "/Applications/Photo Organize.app"`
 
 > 새 버전 릴리스: `Cargo.toml` 의 `version` 을 올리고 `docs/releases/v<버전>.md` 에 릴리스 노트를 써서 main 에 머지하면, CI 가 빌드한 뒤 태그와 [Releases](https://github.com/MJ-best/exif-photo-organize/releases) 를 자동으로 만듭니다. 태그(`v*`)를 직접 푸시하거나 *Actions → build → Run workflow* 에서 `release_tag` 를 입력해도 됩니다.
 
 ### Windows · Linux
 
 [Releases](https://github.com/MJ-best/exif-photo-organize/releases/latest) 의 `photo-organize-windows-x86_64.zip` / `photo-organize-linux-x86_64.tar.gz` 를 받아 `photo-organize` 를 실행합니다.
-Windows 에서 *"Windows의 PC 보호"* 창이 뜨면 **추가 정보 → 실행** 을 누르세요.
+Windows 에서 *"Windows의 PC 보호"* 창이 뜨면 **추가 정보 → 실행** 을 누르세요. (코드 서명 인증서가 없는 새 프로그램이라 나오는 SmartScreen 경고입니다.)
+Microsoft Defender 가 압축 파일이나 `photo-organize.exe` 를 *위협* 으로 격리했다면 서명 없는 새 실행 파일에 대한 오탐입니다: **Windows 보안 → 바이러스 및 위협 방지 → 보호 기록** 에서 해당 항목을 **허용** 하고 다시 압축을 푸세요.
 Linux 는 X11/Wayland, Vulkan 또는 OpenGL 드라이버(Mesa), `libxkbcommon-x11` 이 필요합니다.
 
 ### 직접 빌드
@@ -420,15 +435,16 @@ cargo build --release -p photoorg-app
 ## 자주 묻는 질문 · 문제 해결
 
 <details>
-<summary><b>"손상되었기 때문에 열 수 없습니다" 또는 "Apple이 확인할 수 없습니다"라고 나와요 (macOS)</b></summary>
+<summary><b>"악성 코드가 없음을 확인할 수 없습니다" · "손상되었기 때문에 열 수 없습니다"라고 나와요 (macOS)</b></summary>
 
-개발자 인증서로 서명되지 않은 앱이라 생기는 메시지입니다.
-1. Finder 에서 앱을 **우클릭 → 열기 → 열기**.
-2. 그래도 안 되면 **시스템 설정 → 개인정보 보호 및 보안** 아래쪽의 **"그래도 열기"**.
-3. 그래도 *손상되었다* 고 나오면 터미널에서 다운로드 표시를 지웁니다:
+Apple 공증을 받지 않은 앱이라 생기는 메시지입니다 (무엇이 발견된 것은 아닙니다).
+1. 창에서 **완료** → **시스템 설정 → 개인정보 보호 및 보안** 맨 아래 **보안** 의 **그래도 열기** → 암호 → **그래도 열기**.
+   (macOS 14 이하는 Finder 에서 **우클릭 → 열기 → 열기**.)
+2. *그래도 열기* 버튼이 안 보이거나 *손상되었다* 고 나오면 터미널에서 "인터넷에서 받음" 표시를 지웁니다:
    ```bash
    xattr -dr com.apple.quarantine "/Applications/Photo Organize.app"
    ```
+3. 처음부터 경고 없이 설치하려면 [터미널로 설치하기](#macos-맥북--권장) 의 명령을 쓰세요.
 </details>
 
 <details>
@@ -586,7 +602,21 @@ PHOTOORG_TEST_IMAGES=<폴더> cargo test -p photoorg-core faces -- --ignored  # 
 ### CI
 
 `.github/workflows/build.yml` 이 PR · `main` 푸시 · `v*` 태그마다 실행됩니다. 첫 `plan` 작업이 릴리스 여부를 정합니다: `v*` 태그 푸시, *Run workflow* 의 `release_tag`, 또는 main 푸시 중 새 버전의 릴리스 노트(`docs/releases/v<버전>.md`)가 있고 그 태그가 아직 없을 때.
-**macOS 를 먼저** 빌드(arm64 + x86_64 → `lipo` 유니버설 → `.app` → ad-hoc 서명 → `.dmg`/`.zip`)하고, 이어서 Windows · Linux 를 빌드합니다. 태그 푸시 시 Releases 에 자동 업로드합니다.
+**macOS 를 먼저** 빌드(arm64 + x86_64 → `lipo` 유니버설 → `.app` → 서명(`scripts/macos-sign.sh`) → `.dmg`/`.zip`)하고, 이어서 Windows · Linux 를 빌드합니다. 태그 푸시 시 Releases 에 자동 업로드합니다.
+
+### macOS 공증: 경고 없이 열리게 하기
+
+지금 배포되는 맥 앱은 *ad-hoc* 서명이라 처음 열 때 사용자가 한 번 허용해야 합니다. Apple 공증을 받으면 이 과정이 없어집니다. 필요한 것은 **Apple Developer Program 가입(연 $99)** 과 GitHub 저장소 *Settings → Secrets and variables → Actions* 에 넣는 비밀값 5개뿐이고, 나머지는 CI 가 합니다.
+
+| Secret | 만드는 법 |
+|---|---|
+| `MACOS_CERTIFICATE_P12` | developer.apple.com → Certificates 에서 **Developer ID Application** 인증서를 만들고, 맥의 키체인 접근에서 인증서+개인 키를 `.p12` 로 내보낸 뒤 `base64 -i cert.p12 \| pbcopy` 로 복사한 값 |
+| `MACOS_CERTIFICATE_PASSWORD` | `.p12` 를 내보낼 때 정한 암호 |
+| `APPLE_ID` | 개발자 계정의 Apple ID (이메일) |
+| `APPLE_TEAM_ID` | developer.apple.com → Membership 의 Team ID (10자리) |
+| `APPLE_APP_PASSWORD` | appleid.apple.com → 로그인 및 보안 → **앱 암호** 에서 만든 앱 전용 암호 |
+
+값이 있으면 `scripts/macos-sign.sh` 가 Developer ID 로 서명(hardened runtime)하고 `notarytool` 로 공증한 뒤 티켓을 붙입니다(staple). 없으면 지금처럼 ad-hoc 서명만 합니다.
 
 ---
 
