@@ -99,7 +99,11 @@ impl PhotoApp {
         let pal = self.pal;
         let ctx = ui.ctx().clone();
         let rect = ui.max_rect();
-        let card = Rect::from_center_size(rect.center(), vec2(460.0_f32.min(rect.width() - 40.0), 400.0));
+        let n_recent = self.cfg.recent_libraries.len().min(6);
+        let h = 330.0
+            + if self.lib_error.is_some() { 48.0 } else { 0.0 }
+            + if n_recent > 0 { 34.0 + 24.0 * n_recent as f32 } else { 0.0 };
+        let card = Rect::from_center_size(rect.center(), vec2(480.0_f32.min(rect.width() - 40.0), h));
         ui.painter().rect_filled(card, 16.0, pal.panel_bg);
         let mut child = ui.new_child(
             egui::UiBuilder::new().max_rect(card.shrink(28.0)).layout(egui::Layout::top_down(egui::Align::Center)),
@@ -136,12 +140,13 @@ impl PhotoApp {
         if !self.cfg.recent_libraries.is_empty() {
             ui.add_space(14.0);
             ui.label(egui::RichText::new("최근 라이브러리").font(bold(12.0)).color(pal.text2));
-            let recent = self.cfg.recent_libraries.clone();
+            let recent: Vec<_> = self.cfg.recent_libraries.iter().take(6).cloned().collect();
             for p in recent {
                 let exists = p.exists();
-                let txt = format!("{}{}", p.display(), if exists { "" } else { "  (연결 안 됨)" });
-                let r =
-                    ui.add_enabled(exists, egui::Button::new(egui::RichText::new(txt).font(font(12.5))).frame(false));
+                let txt = format!("{}{}", short_path(&p), if exists { "" } else { "  (연결 안 됨)" });
+                let r = ui
+                    .add_enabled(exists, egui::Button::new(egui::RichText::new(txt).font(font(12.5))).frame(false))
+                    .on_hover_text(p.display().to_string());
                 if r.clicked() {
                     self.open_library(&ctx, p, false);
                 }
@@ -379,4 +384,13 @@ impl PhotoApp {
             if o.raw_subfolder.trim().is_empty() { String::new() } else { format!("{}/", o.raw_subfolder.trim()) };
         format!("{root}/{dir}/{name}.JPG   ·   {root}/{dir}/{raw}{name}.RAW")
     }
+}
+
+/// "…/외장하드/Photos" style shortening for long paths.
+pub fn short_path(p: &std::path::Path) -> String {
+    let comps: Vec<String> = p.components().map(|c| c.as_os_str().to_string_lossy().into_owned()).collect();
+    if comps.len() <= 4 {
+        return p.display().to_string();
+    }
+    format!("…/{}", comps[comps.len() - 3..].join("/"))
 }

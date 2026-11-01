@@ -118,6 +118,7 @@ impl PhotoApp {
         let mut double: Option<i64> = None;
         let mut context_rate: Option<(Vec<i64>, u8)> = None;
         let mut reveal: Option<i64> = None;
+        let mut export: Option<(Vec<i64>, bool)> = None;
         let mut top_date: Option<chrono::NaiveDate> = None;
         let out = sa.show_viewport(ui, |ui, viewport| {
             ui.set_height(layout.height);
@@ -266,6 +267,14 @@ impl PhotoApp {
                             reveal = Some(id);
                             ui.close();
                         }
+                        if ui.button("내보내기… (원본 전체)").clicked() {
+                            export = Some((sel_ids.clone(), false));
+                            ui.close();
+                        }
+                        if ui.button("내보내기… (JPEG만)").clicked() {
+                            export = Some((sel_ids.clone(), true));
+                            ui.close();
+                        }
                     });
                 }
             }
@@ -339,6 +348,9 @@ impl PhotoApp {
         }
         if let Some(id) = reveal {
             self.reveal_asset(id);
+        }
+        if let Some((ids, jpeg_only)) = export {
+            self.export_assets(ids, jpeg_only);
         }
     }
 

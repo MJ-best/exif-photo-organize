@@ -31,17 +31,19 @@ fn fresh(rating: u8, keywords: &[String]) -> String {
         }
         kw.push_str("    </rdf:Bag>\n   </lr:hierarchicalSubject>\n");
     }
-    format!(
-        "<?xpacket begin=\"\u{feff}\" id=\"W5M0MpCehiHzreSzNTczkc9d\"?>\n\
-<x:xmpmeta xmlns:x=\"adobe:ns:meta/\" x:xmptk=\"Photo Organize\">\n\
- <rdf:RDF xmlns:rdf=\"http://www.w3.org/1999/02/22-rdf-syntax-ns#\">\n\
-  <rdf:Description rdf:about=\"\"\n\
-    xmlns:xmp=\"http://ns.adobe.com/xap/1.0/\"\n\
-    xmlns:dc=\"http://purl.org/dc/elements/1.1/\"\n\
-    xmlns:lr=\"http://ns.adobe.com/lightroom/1.0/\"\n\
-    {MARKER}\n\
-   xmp:Rating=\"{rating}\">\n{kw}  </rdf:Description>\n </rdf:RDF>\n</x:xmpmeta>\n<?xpacket end=\"w\"?>\n"
-    )
+    let mut out = String::new();
+    out.push_str("<?xpacket begin=\"\u{feff}\" id=\"W5M0MpCehiHzreSzNTczkc9d\"?>\n");
+    out.push_str("<x:xmpmeta xmlns:x=\"adobe:ns:meta/\" x:xmptk=\"Photo Organize\">\n");
+    out.push_str(" <rdf:RDF xmlns:rdf=\"http://www.w3.org/1999/02/22-rdf-syntax-ns#\">\n");
+    out.push_str("  <rdf:Description rdf:about=\"\"\n");
+    out.push_str("    xmlns:xmp=\"http://ns.adobe.com/xap/1.0/\"\n");
+    out.push_str("    xmlns:dc=\"http://purl.org/dc/elements/1.1/\"\n");
+    out.push_str("    xmlns:lr=\"http://ns.adobe.com/lightroom/1.0/\"\n");
+    out.push_str(&format!("    {MARKER}\n"));
+    out.push_str(&format!("   xmp:Rating=\"{rating}\">\n"));
+    out.push_str(&kw);
+    out.push_str("  </rdf:Description>\n </rdf:RDF>\n</x:xmpmeta>\n<?xpacket end=\"w\"?>\n");
+    out
 }
 
 /// Replace or insert `xmp:Rating` in a foreign XMP document.

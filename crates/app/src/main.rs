@@ -5,6 +5,7 @@
 mod app;
 mod config;
 mod fonts;
+mod icon;
 mod layout;
 mod theme;
 mod thumbs;
@@ -19,7 +20,8 @@ fn main() -> eframe::Result {
         .with_title("Photo Organize")
         .with_app_id("photo-organize")
         .with_inner_size([1360.0, 860.0])
-        .with_min_inner_size([960.0, 600.0]);
+        .with_min_inner_size([960.0, 600.0])
+        .with_icon(std::sync::Arc::new(icon::icon()));
     if cfg!(target_os = "macos") {
         // Unified title bar like Photos: traffic lights float over the sidebar.
         viewport = viewport.with_fullsize_content_view(true).with_titlebar_shown(false).with_title_shown(false);

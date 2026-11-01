@@ -223,6 +223,7 @@ pub fn scan_source(
     if !source.is_dir() {
         bail!("{}은(는) 폴더가 아닙니다", source.display());
     }
+    let source = &std::path::absolute(source).unwrap_or_else(|_| source.to_path_buf());
     let (files, errors) = walk(source, include_videos, cancel);
     let mut map: HashMap<(PathBuf, String, bool), Vec<SourceFile>> = HashMap::new();
     for f in files {
@@ -627,9 +628,20 @@ pub fn run_import(
     'groups: for pg in &planned {
         let g = &scan.groups[pg.gi];
         let mut new_files: Vec<NewFile> = Vec::new();
+        // Files of a group that is interrupted must not stay on disk without a catalog entry.
+        let discard = |files: &[NewFile], summary: &mut ImportSummary| {
+            if !in_place {
+                for f in files {
+                    let _ = std::fs::remove_file(lib.abs(&f.rel_path));
+                    summary.files_copied = summary.files_copied.saturating_sub(1);
+                    summary.bytes_copied = summary.bytes_copied.saturating_sub(f.size);
+                }
+            }
+        };
         for pf in &pg.files {
             if cancel.load(Ordering::Relaxed) {
                 summary.cancelled = true;
+                discard(&new_files, &mut summary);
                 break 'groups;
             }
             prog.current = pf.src.name.clone();
@@ -640,6 +652,7 @@ pub fn run_import(
                     Err(e) => {
                         if cancel.load(Ordering::Relaxed) {
                             summary.cancelled = true;
+                            discard(&new_files, &mut summary);
                             break 'groups;
                         }
                         let msg = format!("{}: {e:#}", pf.src.name);
@@ -789,10 +802,12 @@ fn copy_one(
         Err(_) => bail!("취소됨"),
     }
     let dir = pf.dest.parent().context("destination has no parent")?;
-    std::fs::create_dir_all(dir).with_context(|| format!("폴더 생성 실패 {}", dir.display()))?;
     let fname = pf.dest.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
     let tmp = dir.join(format!(".{fname}.part"));
+    // Set once the reader has nothing more to send for this file (End, Error or disconnect).
+    let mut ended = false;
     let result = (|| -> Result<String> {
+        std::fs::create_dir_all(dir).with_context(|| format!("폴더 생성 실패 {}", dir.display()))?;
         let mut out = std::io::BufWriter::with_capacity(
             CHUNK,
             File::create(&tmp).with_context(|| format!("쓰기 실패 {}", tmp.display()))?,
@@ -812,10 +827,19 @@ fn copy_one(
                         *last_event = Instant::now();
                     }
                 }
-                Ok(Chunk::End) => break,
-                Ok(Chunk::Error(e)) => bail!("{e}"),
+                Ok(Chunk::End) => {
+                    ended = true;
+                    break;
+                }
+                Ok(Chunk::Error(e)) => {
+                    ended = true;
+                    bail!("{e}")
+                }
                 Ok(Chunk::Begin) => bail!("internal: unexpected begin"),
-                Err(_) => bail!("취소됨"),
+                Err(_) => {
+                    ended = true;
+                    bail!("취소됨")
+                }
             }
         }
         let file = out.into_inner().map_err(|e| e.into_error())?;
@@ -844,7 +868,15 @@ fn copy_one(
     })();
     if result.is_err() {
         let _ = std::fs::remove_file(&tmp);
-        // Drain the rest of this file from the channel.
+        // The write side failed (e.g. disk full): skip the rest of this file so the next file
+        // starts at its own `Begin`.
+        while !ended {
+            match rx.recv() {
+                Ok(Chunk::Data(buf)) => prog.bytes_done += buf.len() as u64,
+                Ok(Chunk::Begin) => {}
+                Ok(Chunk::End) | Ok(Chunk::Error(_)) | Err(_) => ended = true,
+            }
+        }
         prog.files_done += 1;
         return result;
     }
@@ -989,6 +1021,66 @@ mod tests {
         let sum3 = run_import(&lib, &scan3, &opts, &tx, cancel).unwrap();
         assert_eq!(sum3.assets_added, 1);
         assert!(lib.root.join("2026/2026-05-01/IMG_0001_1.JPG").is_file());
+    }
+
+    #[test]
+    fn write_failure_does_not_cascade() {
+        let card = tempfile::tempdir().unwrap();
+        for (i, d) in ["2026:07:01 10:00:00", "2026:07:01 10:00:01", "2026:07:01 10:00:02"].iter().enumerate() {
+            std::fs::write(card.path().join(format!("IMG_000{i}.JPG")), jpeg("Canon EOS R6", d)).unwrap();
+        }
+        let libdir = tempfile::tempdir().unwrap();
+        let lib = Library::open(libdir.path()).unwrap();
+        // Make the temp file of the middle photo impossible to create.
+        let blocker = lib.root.join("2026/2026-07-01/.IMG_0001.JPG.part");
+        std::fs::create_dir_all(&blocker).unwrap();
+        let cancel = Arc::new(AtomicBool::new(false));
+        let mut scan = scan_source(card.path(), true, &cancel, &|_, _| {}).unwrap();
+        mark_existing(&mut scan, &lib.catalog().unwrap()).unwrap();
+        let (tx, _rx) = crossbeam_channel::unbounded();
+        let sum = run_import(&lib, &scan, &ImportOptions::default(), &tx, cancel).unwrap();
+        assert_eq!(sum.failures.len(), 1, "{:?}", sum.failures);
+        assert_eq!(sum.assets_added, 2);
+        assert!(lib.root.join("2026/2026-07-01/IMG_0000.JPG").is_file());
+        assert!(lib.root.join("2026/2026-07-01/IMG_0002.JPG").is_file());
+    }
+
+    #[test]
+    fn cancelled_import_leaves_no_orphans() {
+        let card = tempfile::tempdir().unwrap();
+        std::fs::write(card.path().join("IMG_0001.JPG"), jpeg("Canon EOS R6", "2026:07:02 10:00:00")).unwrap();
+        let libdir = tempfile::tempdir().unwrap();
+        let lib = Library::open(libdir.path()).unwrap();
+        let cancel = Arc::new(AtomicBool::new(false));
+        let scan = scan_source(card.path(), true, &cancel, &|_, _| {}).unwrap();
+        cancel.store(true, Ordering::Relaxed);
+        let (tx, _rx) = crossbeam_channel::unbounded();
+        let sum = run_import(&lib, &scan, &ImportOptions::default(), &tx, cancel).unwrap();
+        assert!(sum.cancelled);
+        assert_eq!(sum.assets_added, 0);
+        assert!(!lib.root.join("2026").exists());
+        assert!(lib.catalog().unwrap().load_index().unwrap().assets.is_empty());
+    }
+
+    #[test]
+    fn export_picks() {
+        let card = tempfile::tempdir().unwrap();
+        std::fs::write(card.path().join("IMG_0001.JPG"), jpeg("Canon EOS R6", "2026:08:01 10:00:00")).unwrap();
+        std::fs::write(card.path().join("IMG_0001.CR2"), raw("Canon EOS R6", "2026:08:01 10:00:00")).unwrap();
+        let libdir = tempfile::tempdir().unwrap();
+        let lib = Library::open(libdir.path()).unwrap();
+        let cancel = Arc::new(AtomicBool::new(false));
+        let scan = scan_source(card.path(), true, &cancel, &|_, _| {}).unwrap();
+        let (tx, _rx) = crossbeam_channel::unbounded();
+        run_import(&lib, &scan, &ImportOptions::default(), &tx, cancel).unwrap();
+        let cat = lib.catalog().unwrap();
+        let ids = cat.all_asset_ids().unwrap();
+        let out = tempfile::tempdir().unwrap();
+        assert_eq!(lib.export(&cat, &ids, out.path(), true).unwrap(), 1);
+        assert!(out.path().join("IMG_0001.JPG").is_file());
+        assert_eq!(lib.export(&cat, &ids, out.path(), false).unwrap(), 2);
+        assert!(out.path().join("IMG_0001_1.JPG").is_file());
+        assert!(out.path().join("IMG_0001.CR2").is_file());
     }
 
     #[test]

@@ -424,3 +424,67 @@ mod tests {
         assert_eq!(fc.ratings[3], 1);
     }
 }
+
+#[cfg(test)]
+mod bench {
+    use super::*;
+    use crate::catalog::{AssetRecord, AssetRow, LibraryIndex};
+
+    /// `cargo test --release -p photoorg-core bench_100k -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn bench_100k() {
+        let cams = ["Canon EOS R5", "Sony ILCE-7M4", "Fujifilm X-T5", "Nikon Z 6_2", "Leica Q3"];
+        let lenses = ["24-70", "70-200", "35mm", "50mm", "85mm", "16-35", "100-400"];
+        let rows: Vec<AssetRow> = (0..100_000i64)
+            .map(|i| AssetRow {
+                rec: AssetRecord {
+                    id: i + 1,
+                    captured_ms: i * 60_000,
+                    camera: 0,
+                    lens: 0,
+                    focal: [24.0, 35.0, 50.0, 85.0, 135.0, 200.0][(i % 6) as usize],
+                    focal35: f32::NAN,
+                    aperture: [1.4, 2.8, 4.0, 5.6, 8.0][(i % 5) as usize],
+                    shutter: [1.0 / 4000.0, 1.0 / 250.0, 1.0 / 60.0, 0.5][(i % 4) as usize],
+                    iso: [100, 200, 400, 800, 1600, 3200, 6400][(i % 7) as usize],
+                    bias: 0.0,
+                    width: 6000,
+                    height: 4000,
+                    orientation: 1,
+                    rating: (i % 6) as u8,
+                    formats: if i % 3 == 0 { 3 } else { 2 },
+                    flash: false,
+                    has_gps: false,
+                    date_from_file: false,
+                    import_id: i / 1000,
+                    tags: vec![(i % 20) as u32, 20 + (i % 7) as u32],
+                    name: format!("IMG_{:05}", i % 10000),
+                },
+                camera: cams[(i % 5) as usize].into(),
+                lens: lenses[(i % 7) as usize].into(),
+                tags: vec![],
+            })
+            .collect();
+        let t = std::time::Instant::now();
+        let mut idx = LibraryIndex::new();
+        idx.upsert(rows);
+        println!("index build: {:?}", t.elapsed());
+        let f = Filter {
+            iso: Some((400, 3200)),
+            rating: RatingFilter::AtLeast(3),
+            focal: Some((35.0, 85.0)),
+            ..Default::default()
+        };
+        let t = std::time::Instant::now();
+        let n = apply(&idx, &f).len();
+        println!("filter 100k -> {n}: {:?}", t.elapsed());
+        let t = std::time::Instant::now();
+        let fc = facets(&idx, &f);
+        println!("facets 100k -> total {}: {:?}", fc.total, t.elapsed());
+        let f = Filter { text: "sony".into(), ..Default::default() };
+        let t = std::time::Instant::now();
+        let n = apply(&idx, &f).len();
+        println!("text search 100k -> {n}: {:?}", t.elapsed());
+    }
+}

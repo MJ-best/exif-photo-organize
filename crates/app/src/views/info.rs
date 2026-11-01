@@ -281,5 +281,15 @@ impl PhotoApp {
             let t = std::mem::take(&mut self.tag_input);
             self.add_tag(ids.to_vec(), &t);
         }
+        ui.add_space(14.0);
+        ui.label(egui::RichText::new("내보내기").font(bold(12.0)).color(pal.text2));
+        ui.horizontal(|ui| {
+            if widgets::secondary_button(ui, "원본 전체…", &pal).clicked() {
+                self.export_assets(ids.to_vec(), false);
+            }
+            if widgets::secondary_button(ui, "JPEG만…", &pal).clicked() {
+                self.export_assets(ids.to_vec(), true);
+            }
+        });
     }
 }

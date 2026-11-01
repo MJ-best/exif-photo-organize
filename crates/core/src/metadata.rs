@@ -251,6 +251,15 @@ fn parse_jpeg<R: Read + Seek>(r: &mut R, base: u64, p: &mut Probe, collect_thumb
                     p.meta.rating = xmp_rating(&payload);
                 }
             }
+            0xE2 if collect_thumb => {
+                // Multi-Picture Format: many cameras store a ~1600px preview after the main image.
+                let mut payload = vec![0u8; payload_len as usize];
+                let n = read_up_to(r, &mut payload)?;
+                payload.truncate(n);
+                if payload.starts_with(b"MPF\0") {
+                    p.previews.extend(mpf_previews(&payload[4..], payload_pos + 4));
+                }
+            }
             0xC0..=0xCF if !matches!(marker, 0xC4 | 0xC8 | 0xCC) => {
                 let mut sof = [0u8; 5];
                 r.read_exact(&mut sof)?;
@@ -267,6 +276,26 @@ fn parse_jpeg<R: Read + Seek>(r: &mut R, base: u64, p: &mut Probe, collect_thumb
         pos = payload_pos + payload_len;
     }
     Ok(())
+}
+
+/// Secondary images listed in an MPF (CIPA DC-007) index. `abs` is the file offset of the MPF
+/// TIFF header, which all MP entry offsets are relative to.
+fn mpf_previews(tiff: &[u8], abs: u64) -> Vec<JpegRef> {
+    let mut out = Vec::new();
+    let Ok((mut t, first)) = TiffReader::new(Cursor::new(tiff.to_vec()), 0) else { return out };
+    let Ok(ifd) = t.read_ifd(first) else { return out };
+    let Some(e) = ifd.get(0xB002).cloned() else { return out };
+    let Ok(entries) = t.bytes(&e) else { return out };
+    let en = t.endian;
+    for (i, ent) in entries.chunks_exact(16).enumerate() {
+        let size = en.u32(&ent[4..8]) as u64;
+        let off = en.u32(&ent[8..12]) as u64;
+        // Entry 0 is the primary image itself (offset 0).
+        if i > 0 && off > 0 && size > 0 {
+            out.push(JpegRef { offset: abs + off, len: size, source: PreviewSource::Embedded });
+        }
+    }
+    out
 }
 
 /// Dimensions and coding of a JPEG stream: `(width, height, is_lossless)`.
@@ -1030,6 +1059,54 @@ mod tests {
         assert_eq!(xmp_rating(b"<x xmp:Rating=\"4\"/>"), Some(4));
         assert_eq!(xmp_rating(b"<xmp:Rating>3</xmp:Rating>"), Some(3));
         assert_eq!(xmp_rating(b"<x xmp:Rating=\"-1\"/>"), Some(0));
+    }
+
+    #[test]
+    fn mpf_preview_is_found() {
+        use crate::preview;
+        // Primary 2400x1600 JPEG followed by a 1200x800 MPF preview.
+        let big = image::RgbImage::from_fn(2400, 1600, |x, _| image::Rgb([(x % 251) as u8, 90, 160]));
+        let small = image::RgbImage::from_fn(1200, 800, |_, y| image::Rgb([30, (y % 251) as u8, 60]));
+        let mut prim = Vec::new();
+        image::codecs::jpeg::JpegEncoder::new_with_quality(&mut prim, 80).encode_image(&big).unwrap();
+        let mut sec = Vec::new();
+        image::codecs::jpeg::JpegEncoder::new_with_quality(&mut sec, 80).encode_image(&small).unwrap();
+        // APP2 MPF segment: "MPF\0" + little-endian TIFF with MP Index IFD (one 0xB002 entry).
+        let build = |prim_len: u32, sec_off: u32| {
+            let mut t = b"II*\0\x08\0\0\0".to_vec();
+            t.extend_from_slice(&1u16.to_le_bytes());
+            t.extend_from_slice(&0xB002u16.to_le_bytes());
+            t.extend_from_slice(&7u16.to_le_bytes());
+            t.extend_from_slice(&32u32.to_le_bytes());
+            t.extend_from_slice(&26u32.to_le_bytes()); // value offset
+            t.extend_from_slice(&0u32.to_le_bytes()); // next IFD
+            for (size, off) in [(prim_len, 0u32), (sec.len() as u32, sec_off)] {
+                t.extend_from_slice(&0u32.to_le_bytes());
+                t.extend_from_slice(&size.to_le_bytes());
+                t.extend_from_slice(&off.to_le_bytes());
+                t.extend_from_slice(&0u32.to_le_bytes());
+            }
+            let mut seg = vec![0xFF, 0xE2];
+            seg.extend_from_slice(&((t.len() + 6) as u16).to_be_bytes());
+            seg.extend_from_slice(b"MPF\0");
+            seg.extend_from_slice(&t);
+            seg
+        };
+        let seg_len = build(0, 0).len();
+        let mpf_tiff_abs = 2 + 4 + 4; // SOI + marker/len + "MPF\0"
+        let total_prim = 2 + seg_len + prim.len() - 2;
+        let seg = build(total_prim as u32, (total_prim - mpf_tiff_abs) as u32);
+        let mut file = vec![0xFF, 0xD8];
+        file.extend_from_slice(&seg);
+        file.extend_from_slice(&prim[2..]);
+        file.extend_from_slice(&sec);
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("MPF.JPG");
+        std::fs::write(&path, &file).unwrap();
+        let p = probe(&path, FileKind::Jpeg).unwrap();
+        let cands = preview::candidates(&path, &p.previews);
+        assert!(cands.iter().any(|c| c.width == 1200 && c.height == 800), "{cands:?}");
+        assert_eq!(preview::choose(&cands, 480).unwrap().width, 1200);
     }
 
     #[test]

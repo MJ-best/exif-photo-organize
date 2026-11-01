@@ -5,6 +5,8 @@
 사진 편집 기능은 없습니다. *가져오기 · 정리 · 셀렉(별점) · 필터* 에만 집중합니다.
 디자인은 macOS 기본 「사진」 앱을 따릅니다 (사이드바 / 연·월·일·모든 사진 / 정보 패널).
 
+![스크린샷: 가져오기 · 라이브러리 · 사진 보기+정보 · 라이트 테마](docs/screenshots.png)
+
 ```
 1. 앱을 연다
 2. SD 카드를 꽂는다            → 카드가 자동 감지되고 가져오기 화면이 열립니다
@@ -46,6 +48,7 @@
   `카메라:` `렌즈:` `화각:초광각/광각/표준/준망원/망원` `감도:저감도…초고감도` `조리개:개방/중간/조임`
   `셔터:고속/일반/저속/장노출` `시간대:새벽/아침/낮/저녁/밤` `계절:` `방향:가로/세로` `형식:RAW+JPEG` `기타:플래시/위치정보`
 - 직접 태그 추가/삭제, 카탈로그 전체를 **CSV 로 내보내기**(Excel 호환).
+- 고른 사진 **내보내기**: 우클릭 또는 여러 장 선택 → 정보 패널에서 원본 전체 / JPEG 만 폴더로 복사.
 
 ### 지원 형식
 | 종류 | 확장자 | 메타데이터 | 썸네일/미리보기 |
@@ -72,6 +75,13 @@ crates/
   cli/    photoorg       — 명령줄 도구 (스크립트·서버·디버그용)
 ```
 
+## 설치
+
+- **빌드된 앱 받기**: GitHub Actions(`.github/workflows/build.yml`)가 macOS(arm64/x86_64) · Windows · Linux 용 실행 파일을 만듭니다.
+  저장소의 *Actions* 탭에서 최신 실행의 아티팩트를 받거나, `v0.1.0` 같은 태그를 푸시하면 *Releases* 에 자동으로 올라갑니다.
+- macOS: 압축을 풀어 `Photo Organize.app` 을 응용 프로그램 폴더로 옮기세요. 서명되지 않은 앱이라 처음 한 번은
+  **우클릭 → 열기** 로 실행해야 합니다. SD 카드를 처음 읽을 때 "이동식 볼륨 접근" 허용 창이 뜨면 허용하세요.
+
 ## 빌드 & 실행
 
 [Rust](https://rustup.rs) 1.85 이상이 필요합니다.
@@ -82,8 +92,9 @@ cargo build --release                      # target/release/photo-organize, targ
 cargo test                                 # 테스트
 ```
 
+- macOS 앱 번들: `cargo build --release -p photoorg-app && scripts/macos-bundle.sh target/release/photo-organize dist`
 - macOS / Windows 는 추가 의존성이 없습니다.
-- Linux 는 X11/Wayland 와 Vulkan 또는 OpenGL 드라이버가 필요합니다. 파일 선택 창은 XDG Desktop Portal 을 사용합니다.
+- Linux 는 X11/Wayland 와 Vulkan 또는 OpenGL 드라이버(`libxkbcommon-x11`, Mesa)가 필요합니다. 파일 선택 창은 XDG Desktop Portal 을 사용합니다.
 
 처음 실행하면 **라이브러리 폴더**(예: `/Volumes/외장하드/Photos`)를 고릅니다. 없으면 새로 만듭니다.
 
@@ -117,6 +128,14 @@ photoorg rate ~/HDD/Photos 5 12 13 14              # asset id 에 별점
 photoorg export-csv ~/HDD/Photos catalog.csv
 photoorg info IMG_0001.CR3                         # EXIF + 내장 미리보기 정보 (디버그)
 ```
+
+## 성능 (참고 수치)
+- 사진 10만 장 라이브러리: 필터 ~2 ms, 패싯(필터별 개수) ~2 ms, 텍스트 검색 ~6 ms (`cargo test --release -p photoorg-core bench_100k -- --ignored --nocapture`)
+- 썸네일: 내장 미리보기(RAW, MPF 가 있는 카메라 JPEG)는 수 ms, MPF 가 없는 24MP JPEG 는 ~45 ms — 여러 코어에서 병렬 생성되어 SD 카드 읽기 속도보다 빠릅니다.
+
+## 알려진 제한
+- HEIF/HEIC 와 동영상은 정리·필터·별점은 되지만 썸네일은 아이콘으로 표시됩니다 (순수 Rust HEVC 디코더 부재).
+- 사진 편집 기능은 의도적으로 없습니다.
 
 ## 라이선스
 MIT
