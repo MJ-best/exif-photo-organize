@@ -87,7 +87,7 @@ Apple Silicon(M1·M2·M3·M4)과 Intel 맥 모두에서 실행되는 **유니버
    macOS 15(Sequoia) 이상에서는 한 번 실행을 시도한 뒤 **시스템 설정 → 개인정보 보호 및 보안** 맨 아래의 **"그래도 열기"** 를 누르세요.
 5. SD 카드나 외장 하드에 처음 접근할 때 *"이동식 볼륨의 파일에 접근하려고 합니다"* 창이 뜨면 **허용**을 누릅니다.
 
-> 새 버전 릴리스: `docs/releases/<태그>.md` 에 릴리스 노트를 쓰고, 태그(`v0.2.0` 등)를 푸시하거나 *Actions → build → Run workflow* 에서 `release_tag` 를 입력하면 CI 가 빌드해서 [Releases](https://github.com/MJ-best/exif-photo-organize/releases) 에 올립니다.
+> 새 버전 릴리스: `Cargo.toml` 의 `version` 을 올리고 `docs/releases/v<버전>.md` 에 릴리스 노트를 써서 main 에 머지하면, CI 가 빌드한 뒤 태그와 [Releases](https://github.com/MJ-best/exif-photo-organize/releases) 를 자동으로 만듭니다. 태그(`v*`)를 직접 푸시하거나 *Actions → build → Run workflow* 에서 `release_tag` 를 입력해도 됩니다.
 
 ### Windows · Linux
 
@@ -486,7 +486,7 @@ cargo test --release -p photoorg-core bench_100k -- --ignored --nocapture   # 10
 
 ### CI
 
-`.github/workflows/build.yml` 이 PR · `main` 푸시 · `v*` 태그마다 실행됩니다. *Run workflow* 로 수동 실행할 때 `release_tag` 를 넣으면 태그와 릴리스를 API 로 만듭니다.
+`.github/workflows/build.yml` 이 PR · `main` 푸시 · `v*` 태그마다 실행됩니다. 첫 `plan` 작업이 릴리스 여부를 정합니다: `v*` 태그 푸시, *Run workflow* 의 `release_tag`, 또는 main 푸시 중 새 버전의 릴리스 노트(`docs/releases/v<버전>.md`)가 있고 그 태그가 아직 없을 때.
 **macOS 를 먼저** 빌드(arm64 + x86_64 → `lipo` 유니버설 → `.app` → ad-hoc 서명 → `.dmg`/`.zip`)하고, 이어서 Windows · Linux 를 빌드합니다. 태그 푸시 시 Releases 에 자동 업로드합니다.
 
 ---

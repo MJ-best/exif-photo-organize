@@ -19,13 +19,51 @@ on:
 env:
   CARGO_TERM_COLOR: always
 
-# Needed to create the GitHub release (tag push, or manual run with a release tag).
+# Needed to create the GitHub release (see the plan job).
 permissions:
   contents: write
 
 jobs:
+  # Decide whether this run publishes a release, and under which tag:
+  #  - pushing a v* tag                      -> that tag
+  #  - manual run with release_tag           -> that tag (created through the API)
+  #  - push to main with a new version whose release notes exist
+  #    (docs/releases/v<Cargo version>.md) -> v<version>, created automatically
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.plan.outputs.tag }}
+      target: ${{ steps.plan.outputs.target }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: plan
+        shell: bash
+        env:
+          INPUT_TAG: ${{ inputs.release_tag }}
+          INPUT_TARGET: ${{ inputs.release_target }}
+        run: |
+          tag=""
+          target="$GITHUB_SHA"
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            tag="$GITHUB_REF_NAME"
+          elif [[ -n "$INPUT_TAG" ]]; then
+            tag="$INPUT_TAG"
+            target="${INPUT_TARGET:-$GITHUB_SHA}"
+          elif [[ "$GITHUB_EVENT_NAME" == "push" && "$GITHUB_REF" == "refs/heads/main" ]]; then
+            version="$(grep -m1 '^version' Cargo.toml | sed -E 's/.*"(.*)".*/\1/')"
+            if [[ -f "docs/releases/v$version.md" ]] && ! git rev-parse -q --verify "refs/tags/v$version" >/dev/null; then
+              tag="v$version"
+            fi
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "target=$target" >> "$GITHUB_OUTPUT"
+          echo "release tag: ${tag:-<none>}  target: $target"
+
   # macOS first: one universal app that runs on Apple Silicon and Intel MacBooks.
   macos:
+    needs: plan
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
@@ -68,13 +106,13 @@ jobs:
             photo-organize-macos-universal.dmg
             photo-organize-macos-universal.zip
       - name: Release
-        if: startsWith(github.ref, 'refs/tags/v') || inputs.release_tag != ''
+        if: needs.plan.outputs.tag != ''
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ inputs.release_tag || github.ref_name }}
-          target_commitish: ${{ inputs.release_target || github.sha }}
-          name: Photo Organize ${{ inputs.release_tag || github.ref_name }}
-          body_path: docs/releases/${{ inputs.release_tag || github.ref_name }}.md
+          tag_name: ${{ needs.plan.outputs.tag }}
+          target_commitish: ${{ needs.plan.outputs.target }}
+          name: Photo Organize ${{ needs.plan.outputs.tag }}
+          body_path: docs/releases/${{ needs.plan.outputs.tag }}.md
           fail_on_unmatched_files: true
           files: |
             photo-organize-macos-universal.dmg
@@ -82,7 +120,7 @@ jobs:
 
   # Windows / Linux run after the macOS build (even if it failed).
   others:
-    needs: macos
+    needs: [plan, macos]
     if: ${{ !cancelled() }}
     strategy:
       fail-fast: false
@@ -118,12 +156,12 @@ jobs:
           name: photo-organize-${{ matrix.name }}
           path: photo-organize-${{ matrix.name }}.*
       - name: Release
-        if: startsWith(github.ref, 'refs/tags/v') || inputs.release_tag != ''
+        if: needs.plan.outputs.tag != ''
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ inputs.release_tag || github.ref_name }}
-          target_commitish: ${{ inputs.release_target || github.sha }}
-          name: Photo Organize ${{ inputs.release_tag || github.ref_name }}
-          body_path: docs/releases/${{ inputs.release_tag || github.ref_name }}.md
+          tag_name: ${{ needs.plan.outputs.tag }}
+          target_commitish: ${{ needs.plan.outputs.target }}
+          name: Photo Organize ${{ needs.plan.outputs.tag }}
+          body_path: docs/releases/${{ needs.plan.outputs.tag }}.md
           fail_on_unmatched_files: true
           files: photo-organize-${{ matrix.name }}.*
