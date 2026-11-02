@@ -128,6 +128,13 @@ impl PhotoApp {
                     }
                 }),
                 ScrollReq::Date(d) => layout.y_of_date(d).map(|y| y.max(0.0)),
+                ScrollReq::Anchor(id, d) => self
+                    .filtered_pos
+                    .get(&id)
+                    .and_then(|&p| layout.y_of_item(p))
+                    .map(|y| (y + d).max(0.0))
+                    .or(Some((layout.height - view_h).max(0.0))),
+                ScrollReq::Offset(o) => Some(o),
             };
             if let Some(o) = off {
                 sa = sa.vertical_scroll_offset(o.min((layout.height - view_h).max(0.0)));
@@ -142,8 +149,14 @@ impl PhotoApp {
         let mut context_flag: Option<(Vec<i64>, i8)> = None;
         let threshold = self.cfg.cull_threshold;
         let cull_badges = self.cfg.cull_badges;
+        // Themes of the project being worked on, in order (their numbers are ⇧1–9).
+        let active_themes: Vec<u32> = match (self.active_project, &self.lib) {
+            (Some(p), Some(st)) => st.index.themes_of(p).iter().map(|t| t.id).collect(),
+            _ => Vec::new(),
+        };
         let mut export: Option<(Vec<i64>, ExportMode)> = None;
         let mut top_date: Option<chrono::NaiveDate> = None;
+        let mut top_anchor: Option<(i64, f32)> = None;
         let out = sa.show_viewport(ui, |ui, viewport| {
             ui.set_height(layout.height);
             ui.set_width(width);
@@ -169,6 +182,7 @@ impl PhotoApp {
             let range = layout.visible_rows(viewport.min.y, viewport.max.y);
             if let Some(r) = layout.rows.get(range.start) {
                 top_date = Some(st.index.assets[self.filtered[r.start]].captured().date());
+                top_anchor = Some((st.index.assets[self.filtered[r.start]].id, viewport.min.y - r.y));
             }
             for ri in range.clone() {
                 let row = &layout.rows[ri];
@@ -281,12 +295,42 @@ impl PhotoApp {
                     } else {
                         resp
                     };
+                    // Themes of the active project: "1·3" (numbers of ⇧1–9).
+                    let nums: Vec<String> = active_themes
+                        .iter()
+                        .enumerate()
+                        .filter(|(_, t)| a.tags.contains(t))
+                        .map(|(i, _)| (i + 1).to_string())
+                        .collect();
+                    let mut corner = rect.right_bottom() + vec2(-5.0, -5.0);
+                    if !nums.is_empty() {
+                        if layout.tile >= 70.0 {
+                            let br = widgets::badge(
+                                &p,
+                                corner,
+                                Align2::RIGHT_BOTTOM,
+                                &nums.join("·"),
+                                9.0,
+                                pal.accent,
+                                pal.accent_text,
+                            );
+                            widgets::paint_icon(
+                                &p,
+                                Rect::from_center_size(pos2(br.left() - 8.0, br.center().y), egui::Vec2::splat(12.0)),
+                                Icon::Tag,
+                                Color32::WHITE,
+                            );
+                            corner.y = br.top() - 3.0;
+                        } else {
+                            p.circle_filled(rect.right_bottom() + vec2(-6.0, -6.0), 3.5, pal.accent);
+                        }
+                    }
                     if a.burst_size >= 2 && cull_badges && layout.tile >= 110.0 && !a.is_video() {
                         let best = a.burst_rank == 0;
                         let label = format!("{}/{}", a.burst_rank + 1, a.burst_size);
                         let br = widgets::badge(
                             &p,
-                            rect.right_bottom() + vec2(-5.0, -5.0),
+                            corner,
                             Align2::RIGHT_BOTTOM,
                             &label,
                             8.5,
@@ -394,6 +438,11 @@ impl PhotoApp {
         });
 
         self.grid_offset = out.state.clamped_offset().y;
+        if self.side == crate::app::SideSel::All {
+            if let Some((id, offset)) = top_anchor {
+                self.library_place = Some(crate::app::LibraryPlace { mode: self.mode, anchor: Some(id), offset });
+            }
+        }
         // Floating date in "All Photos".
         if self.mode == GridMode::All {
             if let Some(d) = top_date {
@@ -487,12 +536,13 @@ impl PhotoApp {
                     let label = format!("{}년", chrono::Datelike::year(&d));
                     layout.headers.iter().find(|h| h.1 == label).map(|h| h.0).unwrap_or(0.0)
                 }
+                ScrollReq::Offset(o) => o,
                 _ => 0.0,
             };
             sa = sa.vertical_scroll_offset(off);
         }
         let mut open: Option<(GridMode, chrono::NaiveDate)> = None;
-        sa.show_viewport(ui, |ui, viewport| {
+        let out = sa.show_viewport(ui, |ui, viewport| {
             ui.set_height(layout.height);
             ui.set_width(width);
             let origin = ui.max_rect().min;
@@ -556,6 +606,10 @@ impl PhotoApp {
             }
         });
         self.card_layout = Some(layout);
+        if self.side == crate::app::SideSel::All {
+            let offset = out.state.clamped_offset().y;
+            self.library_place = Some(crate::app::LibraryPlace { mode: self.mode, anchor: None, offset });
+        }
         if let Some((m, d)) = open {
             self.mode = m;
             self.scroll_req = Some(ScrollReq::Date(d));

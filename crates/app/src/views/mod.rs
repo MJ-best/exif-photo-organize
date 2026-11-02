@@ -84,6 +84,9 @@ impl PhotoApp {
         if self.export_dialog.is_some() {
             self.export_dialog_ui(ui);
         }
+        if self.project_dialog.is_some() {
+            self.project_dialog_ui(ui);
+        }
     }
 
     pub fn filter_active(&self) -> bool {
@@ -99,6 +102,8 @@ impl PhotoApp {
         match self.side {
             Rated | Unrated | Videos | Pairs | Camera(_) | Lens(_) => 1,
             Candidates | Rejected | Picked | BurstBest | Scene(_) => 1,
+            Project(_) | Theme(_) => 1,
+            ProjectTodo(_) => 2,
             _ => 0,
         }
     }
@@ -207,6 +212,24 @@ impl PhotoApp {
                         Rect::from_center_size(pos2(x0 + 13.0, rect.center().y), vec2(26.0, 26.0)),
                         icon,
                         color,
+                    );
+                    painter.galley(pos2(x0 + 36.0, rect.center().y - g.size().y / 2.0), g, Color32::WHITE);
+                }
+                Hud::Theme(tag, on) => {
+                    let name = self
+                        .lib
+                        .as_ref()
+                        .and_then(|st| st.index.tags.get(&tag).map(|t| t.short_name().to_string()))
+                        .unwrap_or_default();
+                    let text = if on { format!("{name}  ✓") } else { format!("{name}  해제") };
+                    let g = painter.layout_no_wrap(text, bold(18.0), Color32::WHITE);
+                    let total = 26.0 + 10.0 + g.size().x;
+                    let x0 = rect.center().x - total / 2.0;
+                    widgets::paint_icon(
+                        &painter,
+                        Rect::from_center_size(pos2(x0 + 13.0, rect.center().y), vec2(24.0, 24.0)),
+                        Icon::Tag,
+                        if on { pal.accent } else { Color32::WHITE },
                     );
                     painter.galley(pos2(x0 + 36.0, rect.center().y - g.size().y / 2.0), g, Color32::WHITE);
                 }
@@ -334,6 +357,7 @@ impl PhotoApp {
                     ("P", "픽 — A컷 (다시 누르면 해제)"),
                     ("X", "거절 — B컷 (다시 누르면 해제)"),
                     ("U", "픽/거절 해제"),
+                    ("⇧1 – ⇧9", "작업 중인 작품의 1–9번째 테마 켜기/끄기"),
                     ("Space / Enter", "사진 크게 보기 / 돌아가기"),
                     ("← → ↑ ↓", "이동 (Shift: 범위 선택)"),
                     ("Z", "100% 확대 (사진 보기)"),

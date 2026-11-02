@@ -40,6 +40,10 @@ pub enum Icon {
     Suspect,
     /// Scene (mountains).
     Scene,
+    /// Project (작품): an open photo book.
+    Album,
+    /// Theme: a tag.
+    Tag,
 }
 
 /// Paint an icon centred in `rect` (designed on a 16×16 grid).
@@ -166,6 +170,16 @@ pub fn paint_icon(p: &egui::Painter, rect: Rect, icon: Icon, color: Color32) {
             line(&[(1.5, 13.5), (6.0, 6.0), (9.0, 10.0), (11.0, 7.5), (14.5, 13.5), (1.5, 13.5)]);
             p.circle_filled(at(11.5, 3.5), 1.5 * s, color);
         }
+        Icon::Album => {
+            // Two pages of an open book.
+            line(&[(8.0, 4.0), (8.0, 14.0)]);
+            line(&[(8.0, 4.0), (5.0, 3.0), (1.5, 3.0), (1.5, 13.0), (5.0, 13.0), (8.0, 14.0)]);
+            line(&[(8.0, 4.0), (11.0, 3.0), (14.5, 3.0), (14.5, 13.0), (11.0, 13.0), (8.0, 14.0)]);
+        }
+        Icon::Tag => {
+            line(&[(2.0, 2.5), (8.5, 2.5), (14.0, 8.0), (8.0, 14.0), (2.0, 8.5), (2.0, 2.5)]);
+            p.circle_filled(at(5.5, 6.0), 1.3 * s, color);
+        }
     }
 }
 
@@ -218,6 +232,19 @@ pub fn sidebar_item(
     selected: bool,
     pal: &Palette,
 ) -> Response {
+    sidebar_item_indented(ui, icon, label, count, selected, pal, 0.0)
+}
+
+/// A sidebar row shifted right by `indent` (nested items such as the themes of a project).
+pub fn sidebar_item_indented(
+    ui: &mut Ui,
+    icon: Icon,
+    label: &str,
+    count: Option<usize>,
+    selected: bool,
+    pal: &Palette,
+    indent: f32,
+) -> Response {
     let w = ui.available_width();
     let (rect, resp) = ui.allocate_exact_size(vec2(w, 28.0), Sense::click());
     let p = ui.painter();
@@ -226,7 +253,7 @@ pub fn sidebar_item(
     } else if resp.hovered() {
         p.rect_filled(rect, 6.0, pal.hover);
     }
-    let icon_rect = Rect::from_center_size(pos2(rect.left() + 18.0, rect.center().y), Vec2::splat(16.0));
+    let icon_rect = Rect::from_center_size(pos2(rect.left() + 18.0 + indent, rect.center().y), Vec2::splat(16.0));
     paint_icon(p, icon_rect, icon, if selected { pal.accent } else { pal.accent.gamma_multiply(0.9) });
     let mut right = rect.right() - 10.0;
     if let Some(n) = count {
@@ -234,11 +261,11 @@ pub fn sidebar_item(
         p.galley(pos2(right - g.size().x, rect.center().y - g.size().y / 2.0), g.clone(), pal.text2);
         right -= g.size().x + 8.0;
     }
-    let max_w = (right - (rect.left() + 34.0)).max(10.0);
+    let left = rect.left() + 34.0 + indent;
+    let max_w = (right - left).max(10.0);
     let g = p.layout_no_wrap(label.to_owned(), font(13.0), pal.text);
-    let clip =
-        Rect::from_min_max(pos2(rect.left() + 34.0, rect.top()), pos2(rect.left() + 34.0 + max_w, rect.bottom()));
-    p.with_clip_rect(clip).galley(pos2(rect.left() + 34.0, rect.center().y - g.size().y / 2.0), g.clone(), pal.text);
+    let clip = Rect::from_min_max(pos2(left, rect.top()), pos2(left + max_w, rect.bottom()));
+    p.with_clip_rect(clip).galley(pos2(left, rect.center().y - g.size().y / 2.0), g.clone(), pal.text);
     if g.size().x > max_w {
         resp.on_hover_text(label)
     } else {

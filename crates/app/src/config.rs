@@ -79,6 +79,8 @@ pub struct Config {
     pub export_zip: bool,
     pub export_split_mb: u32,
     pub export_date_names: bool,
+    /// Projects: "고를 사진" are rated at least this many stars.
+    pub project_min_rating: u8,
 }
 
 impl Default for Config {
@@ -107,6 +109,7 @@ impl Default for Config {
             export_zip: false,
             export_split_mb: 0,
             export_date_names: false,
+            project_min_rating: 1,
         }
     }
 }

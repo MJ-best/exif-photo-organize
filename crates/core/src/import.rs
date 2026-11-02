@@ -1281,6 +1281,7 @@ mod tests {
             kind: ExportKind::JpegOnly,
             date_names: true,
             zip: Some(ZipOptions { name: "여행 사진".into(), part_bytes: 1 }),
+            groups: Vec::new(),
         };
         let seen = std::sync::Mutex::new(Vec::new());
         let sum = crate::export::export(&lib, &cat, &ids, out.path(), &opts, &never, &|d, t| {
@@ -1311,6 +1312,7 @@ mod tests {
             kind: ExportKind::Resized { long_edge: 320, quality: 80 },
             date_names: false,
             zip: Some(ZipOptions { name: "공유".into(), part_bytes: 0 }),
+            groups: Vec::new(),
         };
         let sum = crate::export::export(&lib, &cat, &ids, out.path(), &opts, &never, &|_, _| {}).unwrap();
         assert_eq!(names_in(out.path()), vec!["공유.zip"]);
@@ -1322,6 +1324,99 @@ mod tests {
             assert!(img.width().max(img.height()) <= 320, "{n}");
         }
         assert_eq!(sum.bytes, std::fs::metadata(&sum.archives[0]).unwrap().len());
+    }
+
+    #[test]
+    fn projects_themes_filters_and_export_by_theme() {
+        use crate::export::{ExportKind, ExportOptions};
+        use crate::filter::{self, Filter, ProjectFilter, RatingFilter};
+        let (_d, lib) = import_files(&[
+            ("IMG_0001.JPG", jpeg("Canon EOS R6", "2026:08:01 05:30:00")),
+            ("IMG_0002.JPG", jpeg("Canon EOS R6", "2026:08:01 06:00:00")),
+            ("IMG_0003.JPG", jpeg("Canon EOS R6", "2026:08:01 18:00:00")),
+        ]);
+        let mut cat = lib.catalog().unwrap();
+        let ids = cat.all_asset_ids().unwrap();
+        let (a, b, c) = (ids[0], ids[1], ids[2]);
+        // A user tag that will become a theme of the project.
+        cat.add_tag(&[c], "바다 사진집:빛", crate::catalog::TagKind::User).unwrap();
+
+        let p = cat
+            .create_project("바다 사진집", &["새벽".into(), "파도".into(), "새벽".into(), " ".into(), "빛".into()])
+            .unwrap();
+        assert!(cat.create_project("바다 사진집", &[]).is_err(), "names are unique");
+        assert!(cat.create_project("  ", &[]).is_err());
+        let idx = cat.load_index().unwrap();
+        let themes: Vec<(u32, &str)> = idx.themes_of(p.id).iter().map(|t| (t.id, t.short_name())).collect();
+        assert_eq!(themes.iter().map(|t| t.1).collect::<Vec<_>>(), vec!["새벽", "파도", "빛"]);
+        let (dawn, wave, light) = (themes[0].0, themes[1].0, themes[2].0);
+        assert_eq!(idx.tags[&light].kind, crate::catalog::TagKind::Theme, "existing tag adopted");
+
+        cat.assign_tag(&[a, b], dawn).unwrap();
+        cat.assign_tag(&[b], wave).unwrap();
+        cat.set_rating(&[a, b, c], 4).unwrap();
+        cat.remove_tag(&[c], light).unwrap();
+        let idx = cat.load_index().unwrap();
+        let ids_of =
+            |f: &Filter| -> Vec<i64> { filter::apply(&idx, f).into_iter().map(|i| idx.assets[i].id).collect() };
+        let f = Filter { project: Some(ProjectFilter::In(p.id)), ..Default::default() };
+        assert_eq!(ids_of(&f), vec![a, b]);
+        let todo = Filter {
+            project: Some(ProjectFilter::Missing(p.id)),
+            rating: RatingFilter::AtLeast(1),
+            ..Default::default()
+        };
+        assert_eq!(ids_of(&todo), vec![c], "rated but not sorted into the project yet");
+        let mut by_theme = Filter::default();
+        by_theme.tags.insert(wave);
+        assert_eq!(ids_of(&by_theme), vec![b]);
+
+        // Lightroom sees "바다 사진집 > 새벽" as a hierarchical keyword.
+        lib.write_xmp(&cat, b).unwrap();
+        let jpg = lib.abs(&cat.files_for(b).unwrap()[0].rel_path);
+        let xmp = std::fs::read_to_string(crate::xmp::sidecar_path(&jpg)).unwrap();
+        assert!(
+            xmp.contains("<rdf:li>바다 사진집|새벽</rdf:li>") && xmp.contains("<rdf:li>바다 사진집|파도</rdf:li>"),
+            "{xmp}"
+        );
+
+        // Export one folder per theme (b is in both).
+        let groups: Vec<(String, Vec<i64>)> = idx
+            .themes_of(p.id)
+            .iter()
+            .map(|t| {
+                let members = idx.assets.iter().filter(|x| x.tags.contains(&t.id)).map(|x| x.id).collect();
+                (t.short_name().to_string(), members)
+            })
+            .filter(|g: &(String, Vec<i64>)| !g.1.is_empty())
+            .collect();
+        let out = tempfile::tempdir().unwrap();
+        let opts = ExportOptions { groups, ..ExportOptions::files(ExportKind::JpegOnly) };
+        let sum =
+            crate::export::export(&lib, &cat, &[], out.path(), &opts, &AtomicBool::new(false), &|_, _| {}).unwrap();
+        assert_eq!(sum.files, 3);
+        assert_eq!(names_in(&out.path().join("새벽")), vec!["IMG_0001.JPG", "IMG_0002.JPG"]);
+        assert_eq!(names_in(&out.path().join("파도")), vec!["IMG_0002.JPG"]);
+
+        // Rename (':' is reserved), reorder, delete.
+        let affected = cat.rename_project(p.id, "바다:여름").unwrap();
+        assert_eq!(affected, vec![a, b]);
+        let idx = cat.load_index().unwrap();
+        assert_eq!(idx.project(p.id).unwrap().name, "바다·여름");
+        assert_eq!(idx.tags[&dawn].name, "바다·여름:새벽");
+        assert_eq!(cat.rename_theme(wave, "큰 파도").unwrap(), vec![b]);
+        assert!(cat.rename_theme(wave, "새벽").is_err(), "theme names are unique per project");
+        cat.move_theme(light, -2).unwrap();
+        let idx = cat.load_index().unwrap();
+        let order: Vec<&str> = idx.themes_of(p.id).iter().map(|t| t.short_name()).collect();
+        assert_eq!(order, vec!["빛", "새벽", "큰 파도"]);
+        assert_eq!(cat.delete_theme(wave).unwrap(), vec![b]);
+        assert_eq!(cat.delete_project(p.id).unwrap(), vec![a, b]);
+        let idx = cat.load_index().unwrap();
+        assert!(idx.projects.is_empty());
+        assert!(idx.tags.values().all(|t| t.project.is_none()));
+        assert_eq!(idx.assets.len(), 3, "photos stay");
+        assert!(idx.assets.iter().all(|x| x.rating == 4));
     }
 
     #[test]

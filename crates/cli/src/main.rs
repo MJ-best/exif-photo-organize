@@ -201,6 +201,7 @@ fn run() -> Result<()> {
                 kind,
                 date_names: rest.iter().any(|a| a == "--date-names"),
                 zip: zip.transpose()?,
+                groups: Vec::new(),
             };
             let sum = photoorg_core::export::export(&lib, &cat, &ids, &dest, &opts, &never, &|d, n| {
                 eprint!("\r내보내는 중 {d}/{n}");

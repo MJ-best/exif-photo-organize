@@ -55,11 +55,29 @@ pub struct ExportOptions {
     pub date_names: bool,
     /// Pack into ZIP archive(s) instead of writing loose files.
     pub zip: Option<ZipOptions>,
+    /// Export into one sub folder per group, e.g. one per theme of a project (a photo in two
+    /// themes goes into both). Empty = all `ids` directly into the destination.
+    #[serde(default)]
+    pub groups: Vec<(String, Vec<i64>)>,
 }
 
 impl ExportOptions {
     pub fn files(kind: ExportKind) -> ExportOptions {
-        ExportOptions { kind, date_names: false, zip: None }
+        ExportOptions { kind, date_names: false, zip: None, groups: Vec::new() }
+    }
+}
+
+/// A folder name that is valid on macOS, Windows and Linux.
+fn safe_folder(name: &str) -> String {
+    let n: String = name
+        .chars()
+        .map(|c| if matches!(c, '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|') { '-' } else { c })
+        .collect();
+    let n = n.trim().trim_matches('.').to_string();
+    if n.is_empty() {
+        "사진".to_string()
+    } else {
+        n
     }
 }
 
@@ -144,77 +162,97 @@ pub fn export(
     std::fs::create_dir_all(dest).with_context(|| format!("폴더를 만들 수 없습니다: {}", dest.display()))?;
     let mut sum = ExportSummary::default();
 
-    // Shooting order.
-    let mut photos: Vec<(Option<NaiveDateTime>, i64, Metadata)> = ids
-        .iter()
-        .map(|&id| (catalog.metadata(id).ok(), id))
-        .map(|(m, id)| {
-            let m = m.unwrap_or_default();
-            (m.captured_at, id, m)
-        })
-        .collect();
-    photos.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.cmp(&b.1)));
-
-    let mut names = Names { dest: if opts.zip.is_some() { None } else { Some(dest) }, taken: HashSet::new() };
+    // One folder per group (e.g. per theme of a project), or everything in `dest`.
+    let groups: Vec<(String, Vec<i64>)> = if opts.groups.is_empty() {
+        vec![(String::new(), ids.to_vec())]
+    } else {
+        opts.groups.iter().map(|(f, ids)| (safe_folder(f), ids.clone())).collect()
+    };
     let mut jobs = Vec::new();
-    for (when, id, meta) in photos {
-        let files = catalog.files_for(id)?;
-        let label = files.first().map(|f| file_name(&f.rel_path)).unwrap_or_else(|| format!("#{id}"));
-        let prefix = match (opts.date_names, when) {
-            (true, Some(t)) => t.format("%Y-%m-%d_%H%M%S_").to_string(),
-            _ => String::new(),
-        };
-        let render = |f: &FileRecord, edge: u32, quality: u8, from_raw: bool| Source::Render {
-            src: lib.abs(&f.rel_path),
-            kind: f.kind,
-            meta: Box::new(meta.clone()),
-            edge,
-            quality,
-            from_raw,
-        };
-        match opts.kind {
-            ExportKind::Originals => {
-                let mut items: Vec<(String, PathBuf)> =
-                    files.iter().map(|f| (file_name(&f.rel_path), lib.abs(&f.rel_path))).collect();
-                // Keep ratings / keywords with the RAW.
-                if let Some(raw) = files.iter().find(|f| f.kind == FileKind::Raw) {
-                    let sc = crate::xmp::sidecar_path(&lib.abs(&raw.rel_path));
-                    if sc.exists() {
-                        items.push((sc.file_name().unwrap_or_default().to_string_lossy().into_owned(), sc));
-                    }
-                }
-                let given: Vec<String> = items.iter().map(|(n, _)| format!("{prefix}{n}")).collect();
-                for ((_, src), name) in items.into_iter().zip(names.take_group(&given)) {
-                    jobs.push(Job { name, source: Source::Copy(src), modified: when });
-                }
-            }
-            ExportKind::JpegOnly => {
-                let jpegs: Vec<&FileRecord> = files.iter().filter(|f| f.kind == FileKind::Jpeg).collect();
-                if !jpegs.is_empty() {
-                    let given: Vec<String> =
-                        jpegs.iter().map(|f| format!("{prefix}{}", file_name(&f.rel_path))).collect();
-                    for (f, name) in jpegs.into_iter().zip(names.take_group(&given)) {
-                        jobs.push(Job { name, source: Source::Copy(lib.abs(&f.rel_path)), modified: when });
-                    }
-                } else {
-                    match render_source(&files) {
-                        Ok(f) => {
-                            let name = names.take_group(&[format!("{prefix}{}", jpeg_name(&f.rel_path))]).remove(0);
-                            let source = render(f, u32::MAX, FROM_RAW_QUALITY, f.kind == FileKind::Raw);
-                            jobs.push(Job { name, source, modified: when });
+    for (folder, ids) in &groups {
+        let base = if folder.is_empty() { dest.to_path_buf() } else { dest.join(folder) };
+        if opts.zip.is_none() {
+            std::fs::create_dir_all(&base).with_context(|| format!("폴더를 만들 수 없습니다: {}", base.display()))?;
+        }
+        let sub = if folder.is_empty() { String::new() } else { format!("{folder}/") };
+        // Shooting order.
+        let mut photos: Vec<(Option<NaiveDateTime>, i64, Metadata)> = ids
+            .iter()
+            .map(|&id| (catalog.metadata(id).ok(), id))
+            .map(|(m, id)| {
+                let m = m.unwrap_or_default();
+                (m.captured_at, id, m)
+            })
+            .collect();
+        photos.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.cmp(&b.1)));
+        let mut names = Names { dest: if opts.zip.is_some() { None } else { Some(&base) }, taken: HashSet::new() };
+        for (when, id, meta) in photos {
+            let files = catalog.files_for(id)?;
+            let label = files.first().map(|f| file_name(&f.rel_path)).unwrap_or_else(|| format!("#{id}"));
+            let prefix = match (opts.date_names, when) {
+                (true, Some(t)) => t.format("%Y-%m-%d_%H%M%S_").to_string(),
+                _ => String::new(),
+            };
+            let render = |f: &FileRecord, edge: u32, quality: u8, from_raw: bool| Source::Render {
+                src: lib.abs(&f.rel_path),
+                kind: f.kind,
+                meta: Box::new(meta.clone()),
+                edge,
+                quality,
+                from_raw,
+            };
+            match opts.kind {
+                ExportKind::Originals => {
+                    let mut items: Vec<(String, PathBuf)> =
+                        files.iter().map(|f| (file_name(&f.rel_path), lib.abs(&f.rel_path))).collect();
+                    // Keep ratings / keywords with the RAW.
+                    if let Some(raw) = files.iter().find(|f| f.kind == FileKind::Raw) {
+                        let sc = crate::xmp::sidecar_path(&lib.abs(&raw.rel_path));
+                        if sc.exists() {
+                            items.push((sc.file_name().unwrap_or_default().to_string_lossy().into_owned(), sc));
                         }
-                        Err(why) => sum.skipped.push((label, why)),
+                    }
+                    let given: Vec<String> = items.iter().map(|(n, _)| format!("{prefix}{n}")).collect();
+                    for ((_, src), name) in items.into_iter().zip(names.take_group(&given)) {
+                        jobs.push(Job { name: format!("{sub}{name}"), source: Source::Copy(src), modified: when });
                     }
                 }
-            }
-            ExportKind::Resized { long_edge, quality } => match render_source(&files) {
-                Ok(f) => {
-                    let name = names.take_group(&[format!("{prefix}{}", jpeg_name(&f.rel_path))]).remove(0);
-                    let edge = if long_edge == 0 { u32::MAX } else { long_edge };
-                    jobs.push(Job { name, source: render(f, edge, quality.clamp(30, 100), false), modified: when });
+                ExportKind::JpegOnly => {
+                    let jpegs: Vec<&FileRecord> = files.iter().filter(|f| f.kind == FileKind::Jpeg).collect();
+                    if !jpegs.is_empty() {
+                        let given: Vec<String> =
+                            jpegs.iter().map(|f| format!("{prefix}{}", file_name(&f.rel_path))).collect();
+                        for (f, name) in jpegs.into_iter().zip(names.take_group(&given)) {
+                            jobs.push(Job {
+                                name: format!("{sub}{name}"),
+                                source: Source::Copy(lib.abs(&f.rel_path)),
+                                modified: when,
+                            });
+                        }
+                    } else {
+                        match render_source(&files) {
+                            Ok(f) => {
+                                let name = names.take_group(&[format!("{prefix}{}", jpeg_name(&f.rel_path))]).remove(0);
+                                let source = render(f, u32::MAX, FROM_RAW_QUALITY, f.kind == FileKind::Raw);
+                                jobs.push(Job { name: format!("{sub}{name}"), source, modified: when });
+                            }
+                            Err(why) => sum.skipped.push((label, why)),
+                        }
+                    }
                 }
-                Err(why) => sum.skipped.push((label, why)),
-            },
+                ExportKind::Resized { long_edge, quality } => match render_source(&files) {
+                    Ok(f) => {
+                        let name = names.take_group(&[format!("{prefix}{}", jpeg_name(&f.rel_path))]).remove(0);
+                        let edge = if long_edge == 0 { u32::MAX } else { long_edge };
+                        jobs.push(Job {
+                            name: format!("{sub}{name}"),
+                            source: render(f, edge, quality.clamp(30, 100), false),
+                            modified: when,
+                        });
+                    }
+                    Err(why) => sum.skipped.push((label, why)),
+                },
+            }
         }
     }
 

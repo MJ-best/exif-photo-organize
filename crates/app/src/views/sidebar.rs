@@ -1,5 +1,6 @@
 use super::titlebar_pad;
 use crate::app::{ImportPhase, PhotoApp, SideSel};
+use crate::app_projects::ProjectAction;
 use crate::theme::{bold, font};
 use crate::widgets::{self, Icon};
 use eframe::egui::{self, pos2, vec2, Align2, Rect, Sense, Stroke, Ui, Vec2};
@@ -21,6 +22,7 @@ impl PhotoApp {
             |ui| {
                 ui.spacing_mut().item_spacing.y = 1.0;
                 let mut clicked: Option<SideSel> = None;
+                let mut pact: Option<ProjectAction> = None;
                 if let Some(st) = &self.lib {
                     let t = &st.totals;
                     let rated: usize = t.ratings[1..].iter().sum();
@@ -85,6 +87,120 @@ impl PhotoApp {
                                 clicked = Some(sel);
                             }
                         }
+                    }
+
+                    // Projects (작품) and their themes.
+                    widgets::section_title(ui, "작품", &pal);
+                    let min = self.cfg.project_min_rating.max(1);
+                    for p in &st.index.projects {
+                        let (n, todo) = st.project_counts.get(&p.id).copied().unwrap_or((0, 0));
+                        let active = self.active_project == Some(p.id);
+                        let resp = widgets::sidebar_item(
+                            ui,
+                            Icon::Album,
+                            &p.name,
+                            Some(n),
+                            self.side == SideSel::Project(p.id),
+                            &pal,
+                        );
+                        if active {
+                            ui.painter().circle_filled(
+                                pos2(resp.rect.left() + 5.0, resp.rect.center().y),
+                                2.5,
+                                pal.accent,
+                            );
+                        }
+                        let resp = resp.on_hover_text(if active {
+                            "작업 중인 작품 — 정보 패널의 테마 버튼과 ⇧1–9 가 이 작품의 테마를 지정합니다"
+                        } else {
+                            "누르면 이 작품의 사진을 보고, 작업 중인 작품으로 바꿉니다"
+                        });
+                        if resp.clicked() {
+                            clicked = Some(SideSel::Project(p.id));
+                        }
+                        resp.context_menu(|ui| {
+                            for (label, a) in [
+                                ("테마 추가…", ProjectAction::AddThemes(p.id)),
+                                ("이름 바꾸기…", ProjectAction::Rename(p.id)),
+                                ("테마별 폴더로 내보내기…", ProjectAction::Export(p.id)),
+                                ("작품 삭제…", ProjectAction::Delete(p.id)),
+                            ] {
+                                if ui.button(label).clicked() {
+                                    pact = Some(a);
+                                    ui.close();
+                                }
+                            }
+                        });
+                        if !active {
+                            continue;
+                        }
+                        let themes = st.index.themes_of(p.id);
+                        for (i, t) in themes.iter().enumerate() {
+                            let count = st.totals.tags.iter().find(|x| x.0 == t.id).map(|x| x.1).unwrap_or(0);
+                            let r = widgets::sidebar_item_indented(
+                                ui,
+                                Icon::Tag,
+                                t.short_name(),
+                                Some(count),
+                                self.side == SideSel::Theme(t.id),
+                                &pal,
+                                14.0,
+                            );
+                            let r =
+                                if i < 9 { r.on_hover_text(format!("⇧{} 로 지정 / 해제", i + 1)) } else { r };
+                            if r.clicked() {
+                                clicked = Some(SideSel::Theme(t.id));
+                            }
+                            r.context_menu(|ui| {
+                                for (label, a) in [
+                                    ("이름 바꾸기…", ProjectAction::RenameTheme(t.id)),
+                                    ("위로", ProjectAction::MoveTheme(t.id, -1)),
+                                    ("아래로", ProjectAction::MoveTheme(t.id, 1)),
+                                    ("테마 삭제…", ProjectAction::DeleteTheme(t.id)),
+                                ] {
+                                    if ui.button(label).clicked() {
+                                        pact = Some(a);
+                                        ui.close();
+                                    }
+                                }
+                            });
+                        }
+                        let r = widgets::sidebar_item_indented(
+                            ui,
+                            Icon::Star,
+                            &format!("고를 사진 ★{min}+"),
+                            Some(todo),
+                            self.side == SideSel::ProjectTodo(p.id),
+                            &pal,
+                            14.0,
+                        )
+                        .on_hover_text(format!(
+                            "별점 {min}개 이상인 사진 중 이 작품의 테마가 아직 없는 사진 — 우클릭으로 별점 기준 변경"
+                        ));
+                        if r.clicked() {
+                            clicked = Some(SideSel::ProjectTodo(p.id));
+                        }
+                        r.context_menu(|ui| {
+                            ui.label("별점 기준");
+                            for k in 1..=5u8 {
+                                if ui
+                                    .selectable_label(min == k, format!("{} {k}개 이상", "★".repeat(k as usize)))
+                                    .clicked()
+                                {
+                                    pact = Some(ProjectAction::MinRating(k));
+                                    ui.close();
+                                }
+                            }
+                        });
+                    }
+                    let r = widgets::sidebar_item(ui, Icon::Plus, "새 작품…", None, false, &pal);
+                    let r = if st.index.projects.is_empty() {
+                        r.on_hover_text("사진집 · 전시의 주제와 테마를 만들고, 별점 준 사진을 테마별로 나눕니다")
+                    } else {
+                        r
+                    };
+                    if r.clicked() {
+                        pact = Some(ProjectAction::New);
                     }
                 }
 
@@ -237,6 +353,9 @@ impl PhotoApp {
                 }
                 if let Some(s) = clicked {
                     self.select_side(s);
+                }
+                if let Some(a) = pact {
+                    self.project_action(a);
                 }
             },
         );

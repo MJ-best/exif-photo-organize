@@ -69,6 +69,8 @@ impl PhotoApp {
                 if let Some(f) = flag_buttons(ui, a.flag, &pal) {
                     self.set_flag(&ctx, vec![id], f);
                 }
+                ui.add_space(10.0);
+                self.project_chips(ui, &[id]);
                 ui.add_space(14.0);
 
                 // Camera block (like Photos' info window).
@@ -436,6 +438,8 @@ impl PhotoApp {
         if cands > 0 {
             ui.label(egui::RichText::new(format!("B컷 후보 {cands}개 포함")).font(font(11.5)).color(pal.warning));
         }
+        ui.add_space(10.0);
+        self.project_chips(ui, ids);
         ui.add_space(14.0);
         ui.label(egui::RichText::new("모두에 태그 추가").font(bold(12.0)).color(pal.text2));
         let resp = ui.add(
