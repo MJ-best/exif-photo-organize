@@ -38,6 +38,29 @@ pub fn refresh_totals(st: &mut LibState, threshold: u8) {
     }
     st.cull_counts = c;
     st.analysed = st.index.assets.iter().filter(|a| a.b_prob.is_finite()).count();
+    // Projects: photos in each, and rated photos still to sort.
+    let mut pc: std::collections::HashMap<u32, (usize, usize)> =
+        st.index.projects.iter().map(|p| (p.id, (0, 0))).collect();
+    let min = st.project_min_rating.max(1);
+    let mut in_projects = Vec::new();
+    for a in &st.index.assets {
+        in_projects.clear();
+        for t in &a.tags {
+            if let Some(p) = st.index.tags.get(t).and_then(|t| t.project) {
+                if !in_projects.contains(&p) {
+                    in_projects.push(p);
+                }
+            }
+        }
+        for (p, (n, todo)) in pc.iter_mut() {
+            if in_projects.contains(p) {
+                *n += 1;
+            } else if a.rating >= min {
+                *todo += 1;
+            }
+        }
+    }
+    st.project_counts = pc;
 }
 
 impl PhotoApp {
@@ -79,26 +102,35 @@ impl PhotoApp {
 
     /// Keep the view consistent after a rating / flag change (filters, auto-advance).
     pub fn after_label_change(&mut self, n: usize) {
-        let filtered_by_label = self.filter.cull != CullFilter::Any || self.filter.rating != RatingFilter::Any;
+        let filtered_by_label = self.filter.cull != CullFilter::Any
+            || self.filter.rating != RatingFilter::Any
+            || self.filter.project.is_some()
+            || !self.filter.tags.is_empty();
         if filtered_by_label {
-            if self.viewer.is_some() {
-                self.refilter_needed = true;
-            } else {
-                let focus = self.focus_pos();
-                self.refilter();
-                if let Some(p) = focus {
-                    let p = p.min(self.filtered.len().saturating_sub(1));
-                    if let Some(id) = self.asset_at(p).map(|a| a.id) {
-                        self.sel.focus = Some(id);
-                        if self.sel.ids.is_empty() {
-                            self.sel.ids.insert(id);
-                        }
-                    }
-                }
-            }
+            self.refilter_in_place();
         }
         if self.viewer.is_some() && self.cfg.auto_advance && n == 1 {
             self.viewer_step(1);
+        }
+    }
+
+    /// Refilter after labels changed, keeping the focus at the same place in the list (the next
+    /// photo when the focused one left it). Waits until the viewer closes.
+    pub fn refilter_in_place(&mut self) {
+        if self.viewer.is_some() {
+            self.refilter_needed = true;
+            return;
+        }
+        let focus = self.focus_pos();
+        self.refilter();
+        if let Some(p) = focus {
+            let p = p.min(self.filtered.len().saturating_sub(1));
+            if let Some(id) = self.asset_at(p).map(|a| a.id) {
+                self.sel.focus = Some(id);
+                if self.sel.ids.is_empty() {
+                    self.sel.ids.insert(id);
+                }
+            }
         }
     }
 

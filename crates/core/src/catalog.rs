@@ -9,10 +9,17 @@ use rusqlite::{params, Connection, OptionalExtension};
 use std::collections::{BTreeMap, HashMap};
 use std::path::Path;
 
-const SCHEMA_VERSION: i64 = 2;
+const SCHEMA_VERSION: i64 = 3;
 
 const SCHEMA: &str = r#"
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);
+CREATE TABLE IF NOT EXISTS projects (
+    id INTEGER PRIMARY KEY,
+    name TEXT NOT NULL UNIQUE,
+    note TEXT NOT NULL DEFAULT '',
+    sort INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT ''
+);
 CREATE TABLE IF NOT EXISTS imports (
     id INTEGER PRIMARY KEY,
     started_at TEXT NOT NULL,
@@ -90,6 +97,18 @@ CREATE TABLE IF NOT EXISTS ml_models (
 pub enum TagKind {
     Auto = 0,
     User = 1,
+    /// A theme of a project (작품): name "<project>:<theme>", `TagInfo::project` set.
+    Theme = 2,
+}
+
+impl TagKind {
+    pub fn from_i64(v: i64) -> TagKind {
+        match v {
+            1 => TagKind::User,
+            2 => TagKind::Theme,
+            _ => TagKind::Auto,
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -97,6 +116,30 @@ pub struct TagInfo {
     pub id: u32,
     pub name: String,
     pub kind: TagKind,
+    /// Project of a theme tag.
+    pub project: Option<u32>,
+    /// Order of a theme within its project.
+    pub sort: i64,
+}
+
+impl TagInfo {
+    /// The part after "<project>:" for themes, the whole name otherwise.
+    pub fn short_name(&self) -> &str {
+        if self.kind == TagKind::Theme {
+            self.name.split_once(':').map(|(_, t)| t).unwrap_or(&self.name)
+        } else {
+            &self.name
+        }
+    }
+}
+
+/// A photo book / exhibition (작품) whose themes are tags.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ProjectInfo {
+    pub id: u32,
+    pub name: String,
+    pub note: String,
+    pub sort: i64,
 }
 
 #[derive(Clone, Debug)]
@@ -258,6 +301,8 @@ pub struct LibraryIndex {
     pub cameras: Interner,
     pub lenses: Interner,
     pub tags: BTreeMap<u32, TagInfo>,
+    /// Projects (작품) in display order.
+    pub projects: Vec<ProjectInfo>,
     pub imports: Vec<ImportInfo>,
     pos: HashMap<i64, usize>,
 }
@@ -285,6 +330,22 @@ impl LibraryIndex {
     }
     pub fn tag_name(&self, id: u32) -> &str {
         self.tags.get(&id).map(|t| t.name.as_str()).unwrap_or("")
+    }
+
+    pub fn project(&self, id: u32) -> Option<&ProjectInfo> {
+        self.projects.iter().find(|p| p.id == id)
+    }
+
+    /// Themes of a project in their order.
+    pub fn themes_of(&self, project: u32) -> Vec<&TagInfo> {
+        let mut v: Vec<&TagInfo> = self.tags.values().filter(|t| t.project == Some(project)).collect();
+        v.sort_by_key(|t| (t.sort, t.id));
+        v
+    }
+
+    /// Whether the asset has any theme of `project`.
+    pub fn in_project(&self, a: &AssetRecord, project: u32) -> bool {
+        a.tags.iter().any(|t| self.tags.get(t).is_some_and(|ti| ti.project == Some(project)))
     }
 
     fn reindex(&mut self) {
@@ -349,6 +410,17 @@ impl Catalog {
         }
         if !cols.iter().any(|c| c == "scene_user") {
             conn.execute_batch("ALTER TABLE assets ADD COLUMN scene_user INTEGER;")?;
+        }
+        // v3: projects (작품) whose themes are tags.
+        let tag_cols: Vec<String> = conn
+            .prepare("PRAGMA table_info(tags)")?
+            .query_map([], |r| r.get::<_, String>(1))?
+            .collect::<rusqlite::Result<_>>()?;
+        if !tag_cols.iter().any(|c| c == "project_id") {
+            conn.execute_batch(
+                "ALTER TABLE tags ADD COLUMN project_id INTEGER;
+                 ALTER TABLE tags ADD COLUMN sort INTEGER NOT NULL DEFAULT 0;",
+            )?;
         }
         conn.execute("UPDATE meta SET value=?1 WHERE key='schema_version'", [SCHEMA_VERSION.to_string()])?;
         let version: Option<String> =
@@ -666,7 +738,18 @@ impl Catalog {
             tag_id = ensure_tag(&tx, name, kind)?;
         }
         tx.commit()?;
-        Ok(TagInfo { id: tag_id as u32, name: name.to_string(), kind })
+        let (project, sort) = self
+            .conn
+            .query_row("SELECT project_id, sort FROM tags WHERE id=?1", [tag_id], |r| {
+                Ok((r.get::<_, Option<i64>>(0)?, r.get::<_, i64>(1)?))
+            })
+            .unwrap_or((None, 0));
+        let kind = self
+            .conn
+            .query_row("SELECT kind FROM tags WHERE id=?1", [tag_id], |r| r.get::<_, i64>(0))
+            .map(TagKind::from_i64)
+            .unwrap_or(kind);
+        Ok(TagInfo { id: tag_id as u32, name: name.to_string(), kind, project: project.map(|p| p as u32), sort })
     }
 
     pub fn remove_tag(&mut self, ids: &[i64], tag_id: u32) -> Result<()> {
@@ -844,18 +927,10 @@ impl Catalog {
             }
         }
         {
-            let mut stmt = self.conn.prepare("SELECT id, name, kind FROM tags")?;
-            let rows = stmt.query_map([], |r| {
-                Ok(TagInfo {
-                    id: r.get::<_, i64>(0)? as u32,
-                    name: r.get(1)?,
-                    kind: if r.get::<_, i64>(2)? == 1 { TagKind::User } else { TagKind::Auto },
-                })
-            })?;
-            for t in rows {
-                let t = t?;
+            for t in self.tags()? {
                 idx.tags.insert(t.id, t);
             }
+            idx.projects = self.projects()?;
         }
         {
             let mut stmt = self.conn.prepare("SELECT asset_id, tag_id FROM asset_tags")?;
@@ -879,17 +954,9 @@ impl Catalog {
             return Ok(None);
         };
         let mut stmt = self.conn.prepare_cached(
-            "SELECT t.id, t.name, t.kind FROM asset_tags at JOIN tags t ON t.id=at.tag_id WHERE at.asset_id=?1",
+            "SELECT t.id, t.name, t.kind, t.project_id, t.sort FROM asset_tags at JOIN tags t ON t.id=at.tag_id WHERE at.asset_id=?1",
         )?;
-        let tags: Vec<TagInfo> = stmt
-            .query_map([id], |r| {
-                Ok(TagInfo {
-                    id: r.get::<_, i64>(0)? as u32,
-                    name: r.get(1)?,
-                    kind: if r.get::<_, i64>(2)? == 1 { TagKind::User } else { TagKind::Auto },
-                })
-            })?
-            .collect::<rusqlite::Result<_>>()?;
+        let tags: Vec<TagInfo> = stmt.query_map([id], tag_from_row)?.collect::<rusqlite::Result<_>>()?;
         rec.tags = tags.iter().map(|t| t.id).collect();
         Ok(Some(AssetRow { rec, camera, lens, tags }))
     }
@@ -998,6 +1065,33 @@ fn insert_files(tx: &rusqlite::Transaction, asset_id: i64, files: &[NewFile]) ->
     Ok(())
 }
 
+fn tag_from_row(r: &rusqlite::Row) -> rusqlite::Result<TagInfo> {
+    Ok(TagInfo {
+        id: r.get::<_, i64>(0)? as u32,
+        name: r.get(1)?,
+        kind: TagKind::from_i64(r.get(2)?),
+        project: r.get::<_, Option<i64>>(3)?.map(|p| p as u32),
+        sort: r.get(4)?,
+    })
+}
+
+/// Project names are the first part of their theme tags ("<project>:<theme>").
+fn clean_project_name(name: &str) -> Result<String> {
+    let n = name.trim().replace(':', "·");
+    if n.is_empty() {
+        anyhow::bail!("작품 이름이 비어 있습니다");
+    }
+    Ok(n)
+}
+
+fn clean_theme_name(name: &str) -> Result<String> {
+    let n = name.trim().to_string();
+    if n.is_empty() {
+        anyhow::bail!("테마 이름이 비어 있습니다");
+    }
+    Ok(n)
+}
+
 fn ensure_tag(tx: &rusqlite::Transaction, name: &str, kind: TagKind) -> Result<i64> {
     let mut sel = tx.prepare_cached("SELECT id FROM tags WHERE name=?1")?;
     if let Some(id) = sel.query_row([name], |r| r.get::<_, i64>(0)).optional()? {
@@ -1011,6 +1105,227 @@ fn add_tag_tx(tx: &rusqlite::Transaction, asset_id: i64, name: &str, kind: TagKi
     let id = ensure_tag(tx, name, kind)?;
     tx.execute("INSERT OR IGNORE INTO asset_tags(asset_id, tag_id) VALUES (?1, ?2)", params![asset_id, id])?;
     Ok(id)
+}
+
+impl Catalog {
+    pub fn tags(&self) -> Result<Vec<TagInfo>> {
+        let mut stmt = self.conn.prepare("SELECT id, name, kind, project_id, sort FROM tags")?;
+        let v = stmt.query_map([], tag_from_row)?.collect::<rusqlite::Result<_>>()?;
+        Ok(v)
+    }
+
+    pub fn projects(&self) -> Result<Vec<ProjectInfo>> {
+        let mut stmt = self.conn.prepare("SELECT id, name, note, sort FROM projects ORDER BY sort, id")?;
+        let v = stmt
+            .query_map([], |r| {
+                Ok(ProjectInfo { id: r.get::<_, i64>(0)? as u32, name: r.get(1)?, note: r.get(2)?, sort: r.get(3)? })
+            })?
+            .collect::<rusqlite::Result<_>>()?;
+        Ok(v)
+    }
+
+    pub fn meta_get(&self, key: &str) -> Result<Option<String>> {
+        Ok(self.conn.query_row("SELECT value FROM meta WHERE key=?1", [key], |r| r.get(0)).optional()?)
+    }
+
+    pub fn meta_set(&self, key: &str, value: Option<&str>) -> Result<()> {
+        match value {
+            Some(v) => self.conn.execute(
+                "INSERT INTO meta(key, value) VALUES (?1, ?2) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                params![key, v],
+            )?,
+            None => self.conn.execute("DELETE FROM meta WHERE key=?1", [key])?,
+        };
+        Ok(())
+    }
+
+    /// Create a project (작품) with its themes, in the given order.
+    pub fn create_project(&mut self, name: &str, themes: &[String]) -> Result<ProjectInfo> {
+        let name = clean_project_name(name)?;
+        let tx = self.conn.transaction()?;
+        let exists: bool =
+            tx.query_row("SELECT COUNT(*) FROM projects WHERE name=?1", [&name], |r| r.get::<_, i64>(0))? > 0;
+        if exists {
+            anyhow::bail!("'{name}' 작품이 이미 있습니다");
+        }
+        let sort: i64 = tx.query_row("SELECT COALESCE(MAX(sort), 0) + 1 FROM projects", [], |r| r.get(0))?;
+        let now = chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
+        tx.execute("INSERT INTO projects(name, sort, created_at) VALUES (?1, ?2, ?3)", params![name, sort, now])?;
+        let id = tx.last_insert_rowid() as u32;
+        let mut seen = std::collections::HashSet::new();
+        for t in themes {
+            let Ok(t) = clean_theme_name(t) else { continue };
+            if seen.insert(t.clone()) {
+                add_theme_tx(&tx, id, &name, &t)?;
+            }
+        }
+        tx.commit()?;
+        Ok(ProjectInfo { id, name, note: String::new(), sort })
+    }
+
+    /// Add a theme to a project (an existing tag of the same name becomes the theme).
+    pub fn add_theme(&mut self, project: u32, theme: &str) -> Result<TagInfo> {
+        let theme = clean_theme_name(theme)?;
+        let tx = self.conn.transaction()?;
+        let pname: String =
+            tx.query_row("SELECT name FROM projects WHERE id=?1", [project], |r| r.get(0)).context("작품 없음")?;
+        let id = add_theme_tx(&tx, project, &pname, &theme)?;
+        let t = tx.query_row("SELECT id, name, kind, project_id, sort FROM tags WHERE id=?1", [id], tag_from_row)?;
+        tx.commit()?;
+        Ok(t)
+    }
+
+    /// Asset ids that carry any of the given tags (for refreshing sidecars).
+    fn assets_with_tags(tx: &rusqlite::Transaction, tags: &[i64]) -> Result<Vec<i64>> {
+        let mut out = Vec::new();
+        let mut stmt = tx.prepare_cached("SELECT asset_id FROM asset_tags WHERE tag_id=?1")?;
+        for t in tags {
+            for id in stmt.query_map([t], |r| r.get::<_, i64>(0))? {
+                out.push(id?);
+            }
+        }
+        out.sort_unstable();
+        out.dedup();
+        Ok(out)
+    }
+
+    fn theme_ids(tx: &rusqlite::Transaction, project: u32) -> Result<Vec<i64>> {
+        let mut stmt = tx.prepare_cached("SELECT id FROM tags WHERE project_id=?1")?;
+        let v = stmt.query_map([project], |r| r.get::<_, i64>(0))?.collect::<rusqlite::Result<_>>()?;
+        Ok(v)
+    }
+
+    /// Rename a project; returns the photos whose keywords changed.
+    pub fn rename_project(&mut self, project: u32, name: &str) -> Result<Vec<i64>> {
+        let name = clean_project_name(name)?;
+        let tx = self.conn.transaction()?;
+        let clash: bool =
+            tx.query_row("SELECT COUNT(*) FROM projects WHERE name=?1 AND id<>?2", params![name, project], |r| {
+                r.get::<_, i64>(0)
+            })? > 0;
+        if clash {
+            anyhow::bail!("'{name}' 작품이 이미 있습니다");
+        }
+        tx.execute("UPDATE projects SET name=?2 WHERE id=?1", params![project, name])?;
+        let themes = Self::theme_ids(&tx, project)?;
+        for t in &themes {
+            let old: String = tx.query_row("SELECT name FROM tags WHERE id=?1", [t], |r| r.get(0))?;
+            let theme = old.split_once(':').map(|(_, t)| t.to_string()).unwrap_or(old);
+            let new = format!("{name}:{theme}");
+            let taken: bool =
+                tx.query_row("SELECT COUNT(*) FROM tags WHERE name=?1 AND id<>?2", params![new, t], |r| {
+                    r.get::<_, i64>(0)
+                })? > 0;
+            if taken {
+                anyhow::bail!("'{new}' 태그가 이미 있습니다");
+            }
+            tx.execute("UPDATE tags SET name=?2 WHERE id=?1", params![t, new])?;
+        }
+        let affected = Self::assets_with_tags(&tx, &themes)?;
+        tx.commit()?;
+        Ok(affected)
+    }
+
+    /// Delete a project and its themes (the photos stay); returns the photos that had them.
+    pub fn delete_project(&mut self, project: u32) -> Result<Vec<i64>> {
+        let tx = self.conn.transaction()?;
+        let themes = Self::theme_ids(&tx, project)?;
+        let affected = Self::assets_with_tags(&tx, &themes)?;
+        for t in &themes {
+            tx.execute("DELETE FROM asset_tags WHERE tag_id=?1", [t])?;
+            tx.execute("DELETE FROM tags WHERE id=?1", [t])?;
+        }
+        tx.execute("DELETE FROM projects WHERE id=?1", [project])?;
+        tx.commit()?;
+        Ok(affected)
+    }
+
+    pub fn rename_theme(&mut self, tag: u32, theme: &str) -> Result<Vec<i64>> {
+        let theme = clean_theme_name(theme)?;
+        let tx = self.conn.transaction()?;
+        let project: i64 = tx
+            .query_row("SELECT project_id FROM tags WHERE id=?1 AND kind=2", [tag], |r| r.get(0))
+            .context("테마 없음")?;
+        let pname: String = tx.query_row("SELECT name FROM projects WHERE id=?1", [project], |r| r.get(0))?;
+        let new = format!("{pname}:{theme}");
+        let taken: bool =
+            tx.query_row("SELECT COUNT(*) FROM tags WHERE name=?1 AND id<>?2", params![new, tag], |r| {
+                r.get::<_, i64>(0)
+            })? > 0;
+        if taken {
+            anyhow::bail!("'{theme}' 테마가 이미 있습니다");
+        }
+        tx.execute("UPDATE tags SET name=?2 WHERE id=?1", params![tag, new])?;
+        let affected = Self::assets_with_tags(&tx, &[tag as i64])?;
+        tx.commit()?;
+        Ok(affected)
+    }
+
+    pub fn delete_theme(&mut self, tag: u32) -> Result<Vec<i64>> {
+        let tx = self.conn.transaction()?;
+        let affected = Self::assets_with_tags(&tx, &[tag as i64])?;
+        tx.execute("DELETE FROM asset_tags WHERE tag_id=?1", [tag])?;
+        tx.execute("DELETE FROM tags WHERE id=?1 AND kind=2", [tag])?;
+        tx.commit()?;
+        Ok(affected)
+    }
+
+    /// Move a theme up (-1) or down (+1) within its project.
+    pub fn move_theme(&mut self, tag: u32, delta: i32) -> Result<()> {
+        let tx = self.conn.transaction()?;
+        let project: i64 = tx.query_row("SELECT project_id FROM tags WHERE id=?1", [tag], |r| r.get(0))?;
+        let mut ids: Vec<i64> = {
+            let mut stmt = tx.prepare("SELECT id FROM tags WHERE project_id=?1 ORDER BY sort, id")?;
+            let v = stmt.query_map([project], |r| r.get(0))?.collect::<rusqlite::Result<_>>()?;
+            v
+        };
+        if let Some(i) = ids.iter().position(|&t| t == tag as i64) {
+            let j = (i as i64 + delta as i64).clamp(0, ids.len() as i64 - 1) as usize;
+            let t = ids.remove(i);
+            ids.insert(j, t);
+        }
+        for (k, t) in ids.iter().enumerate() {
+            tx.execute("UPDATE tags SET sort=?2 WHERE id=?1", params![t, k as i64 + 1])?;
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// Give the photos a tag by id.
+    pub fn assign_tag(&mut self, ids: &[i64], tag: u32) -> Result<()> {
+        let tx = self.conn.transaction()?;
+        {
+            let mut stmt = tx.prepare_cached("INSERT OR IGNORE INTO asset_tags(asset_id, tag_id) VALUES (?1, ?2)")?;
+            for id in ids {
+                stmt.execute(params![id, tag])?;
+            }
+        }
+        tx.commit()?;
+        Ok(())
+    }
+}
+
+fn add_theme_tx(tx: &rusqlite::Transaction, project: u32, pname: &str, theme: &str) -> Result<i64> {
+    let name = format!("{pname}:{theme}");
+    let sort: i64 =
+        tx.query_row("SELECT COALESCE(MAX(sort), 0) + 1 FROM tags WHERE project_id=?1", [project], |r| r.get(0))?;
+    let existing: Option<(i64, Option<i64>)> = tx
+        .query_row("SELECT id, project_id FROM tags WHERE name=?1", [&name], |r| Ok((r.get(0)?, r.get(1)?)))
+        .optional()?;
+    match existing {
+        Some((id, Some(p))) if p == project as i64 => Ok(id),
+        Some((id, _)) => {
+            tx.execute("UPDATE tags SET kind=2, project_id=?2, sort=?3 WHERE id=?1", params![id, project, sort])?;
+            Ok(id)
+        }
+        None => {
+            tx.execute(
+                "INSERT INTO tags(name, kind, project_id, sort) VALUES (?1, 2, ?2, ?3)",
+                params![name, project, sort],
+            )?;
+            Ok(tx.last_insert_rowid())
+        }
+    }
 }
 
 /// Thumbnail store: a second SQLite file holding small JPEGs keyed by asset id.

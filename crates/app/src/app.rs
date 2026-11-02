@@ -7,7 +7,7 @@ use crate::thumbs::{color_image, ImageCache, Loaded, LoaderFactory};
 use crossbeam_channel::{unbounded, Receiver, Sender};
 use eframe::egui::{self, Key};
 use photoorg_core::catalog::{FileRecord, TagKind};
-use photoorg_core::filter::{self, Facets, Filter, FormatFilter, RatingFilter};
+use photoorg_core::filter::{self, Facets, Filter, FormatFilter, ProjectFilter, RatingFilter};
 use photoorg_core::import::{self, ImportEvent, ImportProgress, ImportSummary, ScanResult, ScanSummary};
 use photoorg_core::metadata::JpegRef;
 use photoorg_core::volumes::{self, Volume};
@@ -28,6 +28,10 @@ pub struct LibState {
     pub cull_counts: [usize; 5],
     /// Photos with a B-cut score.
     pub analysed: usize,
+    /// Per project: (photos in it, rated photos not yet in it).
+    pub project_counts: std::collections::HashMap<u32, (usize, usize)>,
+    /// "고를 사진" of a project: rated at least this many stars.
+    pub project_min_rating: u8,
 }
 
 /// Short confirmation shown in the middle of the screen.
@@ -35,6 +39,8 @@ pub struct LibState {
 pub enum Hud {
     Rating(u8),
     Flag(i8),
+    /// A theme was switched on / off.
+    Theme(u32, bool),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -61,6 +67,12 @@ pub enum SideSel {
     Picked,
     BurstBest,
     Scene(u8),
+    /// Photos of a project (작품).
+    Project(u32),
+    /// Photos of one theme.
+    Theme(u32),
+    /// Rated photos not yet in any theme of the project.
+    ProjectTodo(u32),
     None,
 }
 
@@ -76,6 +88,20 @@ pub enum ScrollReq {
     Bottom,
     Item(usize),
     Date(chrono::NaiveDate),
+    /// Put this asset's row at the top, `f32` points further down (returning to the library).
+    Anchor(i64, f32),
+    /// A plain offset (year / month cards).
+    Offset(f32),
+}
+
+/// Where the library ("라이브러리") was last scrolled to, so returning to it shows the same place.
+#[derive(Clone, Copy, Debug)]
+pub struct LibraryPlace {
+    pub mode: GridMode,
+    /// Asset at the top of the grid (None for year / month cards).
+    pub anchor: Option<i64>,
+    /// Offset below that asset's row (or the plain offset for cards).
+    pub offset: f32,
 }
 
 #[derive(Default)]
@@ -196,14 +222,22 @@ pub struct PhotoApp {
     pub analysis_pending: bool,
     pub export_job: Option<crate::app_export::ExportJob>,
     pub export_dialog: Option<crate::app_export::ExportDialog>,
+    /// The project (작품) whose themes the chips and ⇧1–9 assign.
+    pub active_project: Option<u32>,
+    pub project_dialog: Option<crate::app_projects::ProjectDialog>,
     pub rescore_rx: Option<Receiver<crate::app_cull::RescoreResult>>,
     pub labels_dirty_at: Option<f64>,
     pub cull_report: Option<photoorg_core::cull::Report>,
     pub xmp_enabled: Arc<AtomicBool>,
     pub refilter_needed: bool,
+    /// Refilter once the focus leaves this photo (themes in "고를 사진": the photo stays until the
+    /// user moves on, so several themes can go on it).
+    pub refilter_on_move: Option<i64>,
     pub maintenance: Option<Maintenance>,
     pub last_grid_cols: usize,
     pub grid_offset: f32,
+    /// Last scroll position of the library view (see [`LibraryPlace`]).
+    pub library_place: Option<LibraryPlace>,
     /// Area of the central panel (for centring overlays).
     pub central_rect: egui::Rect,
     pub focus_search: bool,
@@ -258,14 +292,18 @@ impl PhotoApp {
             analysis_pending: false,
             export_job: None,
             export_dialog: None,
+            active_project: None,
+            project_dialog: None,
             rescore_rx: None,
             labels_dirty_at: None,
             cull_report: None,
             xmp_enabled: Arc::new(AtomicBool::new(true)),
             refilter_needed: false,
+            refilter_on_move: None,
             maintenance: None,
             last_grid_cols: 1,
             grid_offset: 0.0,
+            library_place: None,
             central_rect: egui::Rect::NOTHING,
             focus_search: false,
             library_missing_since: None,
@@ -309,9 +347,12 @@ impl PhotoApp {
                 self.sel = Selection::default();
                 self.viewer = None;
                 if let Some(st) = &mut self.lib {
+                    st.project_min_rating = self.cfg.project_min_rating;
                     crate::app_cull::refresh_totals(st, self.cfg.cull_threshold);
                 }
                 self.cull_report = None;
+                self.load_active_project();
+                self.library_place = None;
                 self.select_side(SideSel::All);
                 self.ensure_missing_thumbnails(ctx);
                 self.ensure_analysis(ctx);
@@ -328,7 +369,16 @@ impl PhotoApp {
         let catalog = lib.catalog()?;
         let index = catalog.load_index()?;
         let totals = filter::facets(&index, &Filter::default());
-        Ok(LibState { lib, catalog, index, totals, cull_counts: [0; 5], analysed: 0 })
+        Ok(LibState {
+            lib,
+            catalog,
+            index,
+            totals,
+            cull_counts: [0; 5],
+            analysed: 0,
+            project_counts: Default::default(),
+            project_min_rating: 1,
+        })
     }
 
     pub fn choose_library(&mut self, ctx: &egui::Context) {
@@ -395,6 +445,7 @@ impl PhotoApp {
         self.filter_gen += 1;
         self.facets = None;
         self.refilter_needed = false;
+        self.refilter_on_move = None;
         let pos = &self.filtered_pos;
         self.sel.ids.retain(|id| pos.contains_key(id));
         if self.sel.focus.is_some_and(|f| !pos.contains_key(&f)) {
@@ -422,7 +473,20 @@ impl PhotoApp {
         self.search.clear();
         let mut scroll = ScrollReq::Top;
         match &s {
-            SideSel::All => scroll = ScrollReq::Bottom,
+            // Back to where the library was left (the newest photos the first time).
+            SideSel::All => {
+                scroll = match self.library_place {
+                    Some(LibraryPlace { mode, anchor: Some(id), offset }) => {
+                        self.mode = mode;
+                        ScrollReq::Anchor(id, offset)
+                    }
+                    Some(LibraryPlace { mode, anchor: None, offset }) => {
+                        self.mode = mode;
+                        ScrollReq::Offset(offset)
+                    }
+                    None => ScrollReq::Bottom,
+                }
+            }
             SideSel::Rated => self.filter.rating = RatingFilter::AtLeast(1),
             SideSel::Unrated => self.filter.rating = RatingFilter::Unrated,
             SideSel::Recent => {
@@ -447,6 +511,22 @@ impl PhotoApp {
             SideSel::BurstBest => self.filter.cull = photoorg_core::filter::CullFilter::BurstBest,
             SideSel::Scene(s) => {
                 self.filter.scenes.insert(*s);
+            }
+            SideSel::Project(p) => {
+                self.filter.project = Some(ProjectFilter::In(*p));
+                self.set_active_project(Some(*p));
+            }
+            SideSel::Theme(t) => {
+                self.filter.tags.insert(*t);
+                let p = self.lib.as_ref().and_then(|st| st.index.tags.get(t).and_then(|t| t.project));
+                if p.is_some() {
+                    self.set_active_project(p);
+                }
+            }
+            SideSel::ProjectTodo(p) => {
+                self.filter.project = Some(ProjectFilter::Missing(*p));
+                self.filter.rating = RatingFilter::AtLeast(self.cfg.project_min_rating.max(1));
+                self.set_active_project(Some(*p));
             }
             SideSel::Device(_) | SideSel::None => {}
         }
@@ -955,23 +1035,47 @@ impl PhotoApp {
         if self.view != MainView::Library || self.lib.is_none() {
             return;
         }
-        let keys: Vec<(Key, egui::Modifiers)> = ctx.input(|i| {
+        let keys: Vec<(Key, Option<Key>, egui::Modifiers)> = ctx.input(|i| {
             i.events
                 .iter()
                 .filter_map(|e| match e {
-                    egui::Event::Key { key, pressed: true, modifiers, .. } => Some((*key, *modifiers)),
+                    egui::Event::Key { key, physical_key, pressed: true, modifiers, .. } => {
+                        Some((*key, *physical_key, *modifiers))
+                    }
                     _ => None,
                 })
                 .collect()
         });
-        for (key, mods) in keys {
+        for (key, physical, mods) in keys {
             let (cmd, shift) = (mods.command, mods.shift);
+            // ⇧1–9: themes of the active project (the logical key is "!", "@", … with Shift).
+            let digit = match physical.unwrap_or(key) {
+                Key::Num1 => Some(1),
+                Key::Num2 => Some(2),
+                Key::Num3 => Some(3),
+                Key::Num4 => Some(4),
+                Key::Num5 => Some(5),
+                Key::Num6 => Some(6),
+                Key::Num7 => Some(7),
+                Key::Num8 => Some(8),
+                Key::Num9 => Some(9),
+                _ => None,
+            };
+            if let (Some(n), true, false) = (digit, shift, cmd) {
+                self.theme_key(ctx, n);
+                continue;
+            }
             let rating = match key {
-                Key::F1 | Key::Num1 if !cmd => Some(1),
-                Key::F2 | Key::Num2 if !cmd => Some(2),
-                Key::F3 | Key::Num3 if !cmd => Some(3),
-                Key::F4 | Key::Num4 if !cmd => Some(4),
-                Key::F5 | Key::Num5 if !cmd => Some(5),
+                Key::F1 => Some(1),
+                Key::F2 => Some(2),
+                Key::F3 => Some(3),
+                Key::F4 => Some(4),
+                Key::F5 => Some(5),
+                Key::Num1 if !cmd && !shift => Some(1),
+                Key::Num2 if !cmd && !shift => Some(2),
+                Key::Num3 if !cmd && !shift => Some(3),
+                Key::Num4 if !cmd && !shift => Some(4),
+                Key::Num5 if !cmd && !shift => Some(5),
                 Key::Num0 | Key::Backtick | Key::F6 if !cmd => Some(0),
                 _ => None,
             };
@@ -1082,7 +1186,9 @@ impl eframe::App for PhotoApp {
                 t.begin_frame(&ctx);
             }
         }
-        if self.refilter_needed && self.viewer.is_none() {
+        if self.viewer.is_none()
+            && (self.refilter_needed || self.refilter_on_move.is_some_and(|id| self.sel.focus != Some(id)))
+        {
             self.refilter();
         }
         self.handle_keys(&ctx);

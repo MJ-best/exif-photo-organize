@@ -118,6 +118,16 @@ pub enum Facet {
     Text,
     Cull,
     Scene,
+    Project,
+}
+
+/// Photos of a project (작품), or those not yet in it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ProjectFilter {
+    /// In any theme of the project.
+    In(u32),
+    /// In no theme of the project (still to be sorted).
+    Missing(u32),
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -140,6 +150,7 @@ pub struct Filter {
     pub cull: CullFilter,
     /// Any of these scenes (see `cull::Scene`).
     pub scenes: BTreeSet<u8>,
+    pub project: Option<ProjectFilter>,
 }
 
 fn in_range_f(v: f32, r: (f32, f32)) -> bool {
@@ -167,6 +178,7 @@ impl Filter {
             !self.text.trim().is_empty(),
             self.cull != CullFilter::Any,
             !self.scenes.is_empty(),
+            self.project.is_some(),
         ]
         .iter()
         .filter(|b| **b)
@@ -237,6 +249,11 @@ impl Filter {
         }
         if !self.scenes.is_empty() && !self.scenes.contains(&a.scene) {
             fail(Facet::Scene);
+        }
+        match self.project {
+            Some(ProjectFilter::In(p)) if !idx.in_project(a, p) => fail(Facet::Project),
+            Some(ProjectFilter::Missing(p)) if idx.in_project(a, p) => fail(Facet::Project),
+            _ => {}
         }
         m
     }

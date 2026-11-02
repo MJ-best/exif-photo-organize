@@ -36,6 +36,11 @@ pub struct ExportDialog {
     pub info: ExportPlanInfo,
     pub mode: ExportMode,
     pub zip_name: String,
+    /// Exporting a project: one folder per theme (when `by_theme`).
+    pub groups: Option<Vec<(String, Vec<i64>)>>,
+    pub by_theme: bool,
+    /// Like `info`, counting a photo once per theme folder.
+    pub group_info: Option<ExportPlanInfo>,
 }
 
 /// Long-edge choices (0 = keep the size).
@@ -60,10 +65,11 @@ impl PhotoApp {
             (Some(a), _) => format!("사진 {} ({}장)", a.format("%Y-%m-%d"), ids.len()),
             _ => format!("사진 {}장", ids.len()),
         };
-        self.export_dialog = Some(ExportDialog { ids, info, mode, zip_name });
+        self.export_dialog =
+            Some(ExportDialog { ids, info, mode, zip_name, groups: None, by_theme: false, group_info: None });
     }
 
-    fn export_options(&self, mode: ExportMode, zip_name: &str) -> ExportOptions {
+    fn export_options(&self, mode: ExportMode, zip_name: &str, groups: Vec<(String, Vec<i64>)>) -> ExportOptions {
         let kind = match mode {
             ExportMode::Originals => ExportKind::Originals,
             ExportMode::JpegOnly => ExportKind::JpegOnly,
@@ -75,7 +81,7 @@ impl PhotoApp {
             name: zip_name.trim().to_string(),
             part_bytes: self.cfg.export_split_mb as u64 * 1_000_000,
         });
-        ExportOptions { kind, date_names: self.cfg.export_date_names, zip }
+        ExportOptions { kind, date_names: self.cfg.export_date_names, zip, groups }
     }
 
     /// Ask for a folder and export `ids` there in the background.
@@ -188,7 +194,10 @@ impl PhotoApp {
     /// The export dialog.
     pub fn export_dialog_ui(&mut self, ui: &mut egui::Ui) {
         let Some(d) = &self.export_dialog else { return };
-        let (n, info, mut mode, mut zip_name) = (d.ids.len(), d.info.clone(), d.mode, d.zip_name.clone());
+        let has_groups = d.groups.as_ref().map(|g| g.len());
+        let mut by_theme = d.by_theme;
+        let info = if by_theme { d.group_info.clone().unwrap_or_else(|| d.info.clone()) } else { d.info.clone() };
+        let (n, mut mode, mut zip_name) = (info.photos, d.mode, d.zip_name.clone());
         let pal = self.pal;
         let ctx = ui.ctx().clone();
         let mut close = false;
@@ -310,6 +319,18 @@ impl PhotoApp {
                 );
             }
 
+            if let Some(k) = has_groups {
+                ui.add_space(6.0);
+                widgets::switch(ui, &mut by_theme, &format!("테마별 폴더로 나누기 (테마 {k}개)"), &pal);
+                ui.label(
+                    egui::RichText::new(
+                        "사진집 · 전시 준비용: 테마 이름의 폴더에 나눠 담습니다. 여러 테마에 든 사진은 각 폴더에 들어갑니다.",
+                    )
+                    .font(font(11.0))
+                    .color(pal.text3),
+                );
+            }
+
             // Packaging.
             ui.add_space(8.0);
             ui.label(egui::RichText::new("보내기 좋게").font(bold(12.5)));
@@ -384,15 +405,18 @@ impl PhotoApp {
         if let Some(d) = &mut self.export_dialog {
             d.mode = mode;
             d.zip_name = zip_name.clone();
+            d.by_theme = by_theme;
         }
         self.cfg.export_mode = mode;
         if resp.should_close() {
             close = true;
         }
         if go {
-            let ids = self.export_dialog.take().map(|d| d.ids).unwrap_or_default();
+            let d = self.export_dialog.take();
+            let groups = d.as_ref().filter(|d| d.by_theme).and_then(|d| d.groups.clone()).unwrap_or_default();
+            let ids = d.map(|d| d.ids).unwrap_or_default();
             self.cfg.save();
-            let opts = self.export_options(mode, &zip_name);
+            let opts = self.export_options(mode, &zip_name, groups);
             self.export_assets(ids, opts);
         } else if close {
             self.export_dialog = None;

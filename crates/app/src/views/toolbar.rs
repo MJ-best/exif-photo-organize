@@ -3,6 +3,7 @@ use crate::app::{PhotoApp, SideSel};
 use crate::layout::GridMode;
 use crate::theme::{bold, font};
 use crate::widgets::{self, Icon};
+use chrono::Datelike;
 use eframe::egui::{self, pos2, vec2, Align2, Rect, Sense, Ui, UiBuilder};
 use photoorg_core::format;
 
@@ -25,6 +26,19 @@ impl PhotoApp {
             SideSel::Picked => "픽 (A컷)".into(),
             SideSel::BurstBest => "연사 베스트".into(),
             SideSel::Scene(s) => photoorg_core::cull::Scene::from_u8(*s).label().into(),
+            SideSel::Project(p) => st.index.project(*p).map(|p| p.name.clone()).unwrap_or_else(|| "작품".into()),
+            SideSel::Theme(t) => match st.index.tags.get(t) {
+                Some(ti) => {
+                    let p = ti.project.and_then(|p| st.index.project(p)).map(|p| p.name.as_str()).unwrap_or("");
+                    format!("{p} · {}", ti.short_name())
+                }
+                None => "테마".into(),
+            },
+            SideSel::ProjectTodo(p) => format!(
+                "{} · 고를 사진 ★{}+",
+                st.index.project(*p).map(|p| p.name.as_str()).unwrap_or("작품"),
+                self.cfg.project_min_rating.max(1)
+            ),
             SideSel::Import(id) => st
                 .index
                 .imports
@@ -44,6 +58,9 @@ impl PhotoApp {
         let last = st.index.assets[*self.filtered.last().unwrap()].captured().date();
         let range = if first == last {
             format::date_medium(first)
+        } else if first.year() == last.year() {
+            // Same year: "2026년 10월 3일 – 11월 1일" (keeps the photo count in view).
+            format!("{} – {}월 {}일", format::date_medium(first), last.month(), last.day())
         } else {
             format!("{} – {}", format::date_medium(first), format::date_medium(last))
         };
@@ -68,14 +85,23 @@ impl PhotoApp {
         widgets::separator_h(ui, rect, &pal);
         let bar = Rect::from_min_max(pos2(rect.left(), rect.top() + titlebar_pad()), rect.max);
 
-        // Title.
-        let title = self.title();
-        let subtitle = self.subtitle();
-        p.text(pos2(bar.left() + 18.0, bar.center().y - 8.0), Align2::LEFT_CENTER, &title, bold(15.0), pal.text);
-        p.text(pos2(bar.left() + 18.0, bar.center().y + 10.0), Align2::LEFT_CENTER, &subtitle, font(11.5), pal.text2);
+        // Title (cut with "…" before the segmented control in the centre).
+        let wide = bar.width() > 1040.0;
+        let seg_w = 250.0;
+        let cx = if wide { bar.center().x } else { bar.center().x - 40.0 };
+        let seg_rect = Rect::from_center_size(pos2(cx, bar.center().y), vec2(seg_w, 26.0));
+        let left = bar.left() + 18.0;
+        let max_w = (seg_rect.left() - 10.0 - left).max(60.0);
+        for (text, f, color, dy) in
+            [(self.title(), bold(15.0), pal.text, -8.0), (self.subtitle(), font(11.5), pal.text2, 10.0)]
+        {
+            let mut job = egui::text::LayoutJob::simple_singleline(text, f, color);
+            job.wrap = egui::text::TextWrapping::truncate_at_width(max_w);
+            let g = p.layout_job(job);
+            p.galley(pos2(left, bar.center().y + dy - g.size().y / 2.0), g, color);
+        }
 
         // Right controls (fewer when the window is narrow).
-        let wide = bar.width() > 1040.0;
         let search_w = if bar.width() > 860.0 { 180.0 } else { 120.0 };
         let right = Rect::from_min_max(pos2(bar.center().x + 130.0, bar.top()), pos2(bar.right() - 12.0, bar.bottom()));
         let mut rui =
@@ -125,9 +151,6 @@ impl PhotoApp {
         }
 
         // Centre: segmented control.
-        let seg_w = 250.0;
-        let cx = if wide { bar.center().x } else { bar.center().x - 40.0 };
-        let seg_rect = Rect::from_center_size(pos2(cx, bar.center().y), vec2(seg_w, 26.0));
         let mut cui =
             ui.new_child(UiBuilder::new().max_rect(seg_rect).layout(egui::Layout::left_to_right(egui::Align::Center)));
         let mut mode = self.mode;

@@ -213,6 +213,7 @@ impl PhotoApp {
         } else {
             None
         };
+        let has_status = status.is_some();
         if let Some((icon, text, color)) = status {
             let y = if zoom.is_some() { 40.0 } else { 12.0 };
             let g = ui.painter().layout_no_wrap(text, bold(11.5), Color32::WHITE);
@@ -226,6 +227,33 @@ impl PhotoApp {
                 color,
             );
             p.galley(pos2(r.left() + 30.0, r.center().y - g.size().y / 2.0), g, Color32::WHITE);
+        }
+        // Themes of the active project on this photo.
+        if let (Some(pid), Some(st)) = (self.active_project, &self.lib) {
+            let names: Vec<String> = st
+                .index
+                .themes_of(pid)
+                .iter()
+                .enumerate()
+                .filter(|(_, t)| a.tags.contains(&t.id))
+                .map(|(i, t)| format!("{} {}", i + 1, t.short_name()))
+                .collect();
+            if !names.is_empty() {
+                let pname = st.index.project(pid).map(|p| p.name.as_str()).unwrap_or("");
+                let text = format!("{pname}: {}", names.join(" · "));
+                let y = if zoom.is_some() { 40.0 } else { 12.0 } + if has_status { 32.0 } else { 0.0 };
+                let g = ui.painter().layout_no_wrap(text, bold(11.5), Color32::WHITE);
+                let r = Rect::from_min_size(area.left_top() + vec2(14.0, y), vec2(g.size().x + 38.0, 26.0));
+                let p = ui.painter_at(area);
+                p.rect_filled(r, 13.0, Color32::from_black_alpha(160));
+                widgets::paint_icon(
+                    &p,
+                    Rect::from_center_size(pos2(r.left() + 16.0, r.center().y), vec2(14.0, 14.0)),
+                    Icon::Tag,
+                    pal.accent,
+                );
+                p.galley(pos2(r.left() + 30.0, r.center().y - g.size().y / 2.0), g, Color32::WHITE);
+            }
         }
         if let Some(r) = rate_to {
             self.rate(&ctx, vec![id], r);
