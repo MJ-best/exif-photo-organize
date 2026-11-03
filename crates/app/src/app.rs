@@ -28,10 +28,8 @@ pub struct LibState {
     pub cull_counts: [usize; 5],
     /// Photos with a B-cut score.
     pub analysed: usize,
-    /// Per project: (photos in it, rated photos not yet in it).
-    pub project_counts: std::collections::HashMap<u32, (usize, usize)>,
-    /// "고를 사진" of a project: rated at least this many stars.
-    pub project_min_rating: u8,
+    /// Photos in each project.
+    pub project_counts: std::collections::HashMap<u32, usize>,
 }
 
 /// Short confirmation shown in the middle of the screen.
@@ -40,7 +38,8 @@ pub enum Hud {
     Rating(u8),
     Flag(i8),
     /// A theme was switched on / off.
-    Theme(u32, bool),
+    /// Theme `tag` put on (true) or taken off `n` photos.
+    Theme(u32, bool, usize),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -71,9 +70,14 @@ pub enum SideSel {
     Project(u32),
     /// Photos of one theme.
     Theme(u32),
-    /// Rated photos not yet in any theme of the project.
-    ProjectTodo(u32),
     None,
+}
+
+impl SideSel {
+    /// Views of chosen photos (rated, picked) from which photos are sent to a project's themes.
+    pub fn sends_to_project(&self) -> bool {
+        matches!(self, SideSel::Rated | SideSel::Picked)
+    }
 }
 
 #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
@@ -360,7 +364,6 @@ impl PhotoApp {
                 self.sel = Selection::default();
                 self.viewer = None;
                 if let Some(st) = &mut self.lib {
-                    st.project_min_rating = self.cfg.project_min_rating;
                     crate::app_cull::refresh_totals(st, self.cfg.cull_threshold);
                 }
                 self.cull_report = None;
@@ -390,7 +393,6 @@ impl PhotoApp {
             cull_counts: [0; 5],
             analysed: 0,
             project_counts: Default::default(),
-            project_min_rating: 1,
         })
     }
 
@@ -482,6 +484,8 @@ impl PhotoApp {
             self.side = s;
             return;
         }
+        // The new view is current while its filter is set up (set_active_project looks at it).
+        self.side = s.clone();
         self.filter = Filter::default();
         self.search.clear();
         let mut scroll = ScrollReq::Top;
@@ -536,12 +540,13 @@ impl PhotoApp {
                     self.set_active_project(p);
                 }
             }
-            SideSel::ProjectTodo(p) => {
-                self.filter.project = Some(ProjectFilter::Missing(*p));
-                self.filter.rating = RatingFilter::AtLeast(self.cfg.project_min_rating.max(1));
-                self.set_active_project(Some(*p));
-            }
             SideSel::Device(_) | SideSel::None => {}
+        }
+        // Rated / picked photos: optionally without those already sent to the project.
+        if s.sends_to_project() && self.cfg.hide_sent {
+            if let Some(p) = self.active_project {
+                self.filter.project = Some(ProjectFilter::Missing(p));
+            }
         }
         if !matches!(s, SideSel::All) && matches!(self.mode, GridMode::Years | GridMode::Months) {
             self.mode = GridMode::Days;

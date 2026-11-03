@@ -92,9 +92,8 @@ impl PhotoApp {
 
                     // Projects (작품) and their themes.
                     widgets::section_title(ui, "작품", &pal);
-                    let min = self.cfg.project_min_rating.max(1);
                     for p in &st.index.projects {
-                        let (n, todo) = st.project_counts.get(&p.id).copied().unwrap_or((0, 0));
+                        let n = st.project_counts.get(&p.id).copied().unwrap_or(0);
                         let active = self.active_project == Some(p.id);
                         let resp = widgets::sidebar_item(
                             ui,
@@ -173,37 +172,10 @@ impl PhotoApp {
                                 }
                             });
                         }
-                        let r = widgets::sidebar_item_indented(
-                            ui,
-                            Icon::Star,
-                            &format!("고를 사진 ★{min}+"),
-                            Some(todo),
-                            self.side == SideSel::ProjectTodo(p.id),
-                            &pal,
-                            14.0,
-                        )
-                        .on_hover_text(format!(
-                            "별점 {min}개 이상인 사진 중 이 작품의 테마가 아직 없는 사진 — 우클릭으로 별점 기준 변경"
-                        ));
-                        if r.clicked() {
-                            clicked = Some(SideSel::ProjectTodo(p.id));
-                        }
-                        r.context_menu(|ui| {
-                            ui.label("별점 기준");
-                            for k in 1..=5u8 {
-                                if ui
-                                    .selectable_label(min == k, format!("{} {k}개 이상", "★".repeat(k as usize)))
-                                    .clicked()
-                                {
-                                    pact = Some(ProjectAction::MinRating(k));
-                                    ui.close();
-                                }
-                            }
-                        });
                     }
                     let r = widgets::sidebar_item(ui, Icon::Plus, "새 작품…", None, false, &pal);
                     let r = if st.index.projects.is_empty() {
-                        r.on_hover_text("사진집 · 전시의 주제와 테마를 만들고, 별점 준 사진을 테마별로 나눕니다")
+                        r.on_hover_text("사진집 · 전시의 주제와 테마를 만들고, 별점 있는 사진에서 테마별로 보냅니다")
                     } else {
                         r
                     };
