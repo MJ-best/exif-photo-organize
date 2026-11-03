@@ -74,6 +74,11 @@ impl PhotoApp {
                         if let Some(p) = self.works_bar_project() {
                             self.works_bar(ui, p);
                         }
+                        if self.side.sends_to_project()
+                            && self.lib.as_ref().is_some_and(|st| !st.index.projects.is_empty())
+                        {
+                            self.project_send_bar(ui);
+                        }
                         self.browse(ui);
                     }
                 }
@@ -106,10 +111,11 @@ impl PhotoApp {
     fn preset_filter_count(&self) -> usize {
         use crate::app::SideSel::*;
         match self.side {
-            Rated | Unrated | Videos | Pairs | Camera(_) | Lens(_) => 1,
-            Candidates | Rejected | Picked | BurstBest | Scene(_) => 1,
+            // "보낸 사진 숨기기" of the send bar is not a filter token either.
+            Rated | Picked => 1 + self.filter.project.is_some() as usize,
+            Unrated | Videos | Pairs | Camera(_) | Lens(_) => 1,
+            Candidates | Rejected | BurstBest | Scene(_) => 1,
             Project(_) | Theme(_) => 1,
-            ProjectTodo(_) => 2,
             _ => 0,
         }
     }
@@ -172,6 +178,25 @@ impl PhotoApp {
         }
     }
 
+    /// "바다 사진집 › 새벽에 보냄 (3장)": where the photos went.
+    fn theme_hud_text(&self, tag: u32, on: bool, n: usize) -> String {
+        let (project, name) = self
+            .lib
+            .as_ref()
+            .and_then(|st| {
+                let t = st.index.tags.get(&tag)?;
+                let p = t.project.and_then(|p| st.index.project(p)).map(|p| p.name.clone());
+                Some((p.unwrap_or_default(), t.short_name().to_string()))
+            })
+            .unwrap_or_default();
+        let count = if n > 1 { format!(" ({n}장)") } else { String::new() };
+        if on {
+            format!("{project} › {name}에 보냄{count}")
+        } else {
+            format!("{project} › {name}에서 뺌{count}")
+        }
+    }
+
     fn overlays(&mut self, ui: &mut Ui) {
         let pal = self.pal;
         let ctx = ui.ctx().clone();
@@ -179,9 +204,19 @@ impl PhotoApp {
         let painter = ctx.layer_painter(egui::LayerId::new(egui::Order::Foreground, egui::Id::unique("overlays")));
         // Rating / flag HUD.
         if let Some((hud, _)) = self.hud {
+            let theme_text = match hud {
+                Hud::Theme(tag, on, n) => Some(self.theme_hud_text(tag, on, n)),
+                _ => None,
+            };
+            // Wide enough for "바다 사진집 › 새벽에 보냄 (3장)".
+            let w = theme_text
+                .as_ref()
+                .map(|t| painter.layout_no_wrap(t.clone(), bold(18.0), Color32::WHITE).size().x + 26.0 + 10.0 + 48.0)
+                .unwrap_or(0.0)
+                .max(230.0);
             let rect = Rect::from_center_size(
                 if self.central_rect.is_positive() { self.central_rect.center() } else { screen.center() },
-                vec2(230.0, 70.0),
+                vec2(w, 70.0),
             );
             painter.rect_filled(rect, 14.0, pal.hud_bg);
             match hud {
@@ -221,13 +256,8 @@ impl PhotoApp {
                     );
                     painter.galley(pos2(x0 + 36.0, rect.center().y - g.size().y / 2.0), g, Color32::WHITE);
                 }
-                Hud::Theme(tag, on) => {
-                    let name = self
-                        .lib
-                        .as_ref()
-                        .and_then(|st| st.index.tags.get(&tag).map(|t| t.short_name().to_string()))
-                        .unwrap_or_default();
-                    let text = if on { format!("{name}  ✓") } else { format!("{name}  해제") };
+                Hud::Theme(_, on, _) => {
+                    let text = theme_text.clone().unwrap_or_default();
                     let g = painter.layout_no_wrap(text, bold(18.0), Color32::WHITE);
                     let total = 26.0 + 10.0 + g.size().x;
                     let x0 = rect.center().x - total / 2.0;
@@ -363,7 +393,7 @@ impl PhotoApp {
                     ("P", "픽 — A컷 (다시 누르면 해제)"),
                     ("X", "거절 — B컷 (다시 누르면 해제)"),
                     ("U", "픽/거절 해제"),
-                    ("⇧1 – ⇧9", "작업 중인 작품의 1–9번째 테마 켜기/끄기"),
+                    ("⇧1 – ⇧9", "고른 사진을 작업 중인 작품의 1–9번째 테마로 보내기 / 빼기"),
                     ("Space / Enter", "사진 크게 보기 / 돌아가기"),
                     ("← → ↑ ↓", "이동 (Shift: 범위 선택)"),
                     ("Z", "100% 확대 (사진 보기)"),

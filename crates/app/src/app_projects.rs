@@ -4,7 +4,7 @@
 use crate::app::{Hud, PhotoApp, SideSel, WriteJob};
 use crate::app_export::ExportMode;
 use crate::theme::{bold, font};
-use crate::widgets;
+use crate::widgets::{self, Icon};
 use eframe::egui::{self, Frame, Margin};
 use photoorg_core::filter::ProjectFilter;
 use photoorg_core::format;
@@ -42,7 +42,6 @@ pub enum ProjectAction {
     RenameTheme(u32),
     MoveTheme(u32, i32),
     DeleteTheme(u32),
-    MinRating(u8),
 }
 
 pub enum ProjectDialog {
@@ -73,6 +72,22 @@ impl PhotoApp {
         if let Some(st) = &self.lib {
             let _ = st.catalog.meta_set(ACTIVE_KEY, project.map(|p| p.to_string()).as_deref());
         }
+        self.update_hide_sent();
+    }
+
+    /// Rated / picked view: hide the photos already sent to the active project, or not.
+    pub fn update_hide_sent(&mut self) {
+        if !self.side.sends_to_project() {
+            return;
+        }
+        let want = match (self.cfg.hide_sent, self.active_project) {
+            (true, Some(p)) => Some(ProjectFilter::Missing(p)),
+            _ => None,
+        };
+        if self.filter.project != want {
+            self.filter.project = want;
+            self.refilter();
+        }
     }
 
     /// Re-read projects and tags after a structural change; `affected` photos get new sidecars.
@@ -102,9 +117,7 @@ impl PhotoApp {
         }
         // The current view may show a deleted project / theme.
         let gone = match &self.side {
-            SideSel::Project(p) | SideSel::ProjectTodo(p) => {
-                self.lib.as_ref().is_some_and(|st| st.index.project(*p).is_none())
-            }
+            SideSel::Project(p) => self.lib.as_ref().is_some_and(|st| st.index.project(*p).is_none()),
             SideSel::Theme(t) => self.lib.as_ref().is_some_and(|st| !st.index.tags.contains_key(t)),
             _ => false,
         };
@@ -123,10 +136,13 @@ impl PhotoApp {
             Ok(p) => {
                 self.reload_projects(Vec::new());
                 self.set_active_project(Some(p.id));
-                self.select_side(SideSel::ProjectTodo(p.id));
+                // Photos are sent from the rated ones (or the picks, when looking at those).
+                if !self.side.sends_to_project() {
+                    self.select_side(SideSel::Rated);
+                }
                 self.toast(
                     format!(
-                        "'{}' 작품을 만들었습니다. 별점 준 사진을 고르고 테마를 누르거나 ⇧1–9 로 지정하세요",
+                        "'{}' 작품을 만들었습니다. 사진을 고른 뒤 위쪽의 테마 버튼(또는 ⇧1–9)을 누르면 그 테마로 보내집니다",
                         p.name
                     ),
                     false,
@@ -165,7 +181,7 @@ impl PhotoApp {
         if let Some(w) = &self.writer {
             let _ = w.send(WriteJob::Xmp(ids.clone()));
         }
-        self.hud = Some((Hud::Theme(tag, !all), ctx.input(|i| i.time) + 0.9));
+        self.hud = Some((Hud::Theme(tag, !all, ids.len()), ctx.input(|i| i.time) + 1.2));
         self.works_status = None;
         self.facets = None;
         self.info = None;
@@ -465,17 +481,6 @@ impl PhotoApp {
                 }
                 self.reload_projects(Vec::new());
             }
-            ProjectAction::MinRating(k) => {
-                self.cfg.project_min_rating = k;
-                self.cfg.save();
-                if let Some(st) = &mut self.lib {
-                    st.project_min_rating = k;
-                    crate::app_cull::refresh_totals(st, self.cfg.cull_threshold);
-                }
-                if let SideSel::ProjectTodo(p) = self.side {
-                    self.select_side(SideSel::ProjectTodo(p));
-                }
-            }
         }
     }
 
@@ -556,6 +561,153 @@ impl PhotoApp {
         }
         if add {
             self.project_dialog = Some(ProjectDialog::AddThemes { project: active, text: String::new() });
+        }
+    }
+}
+
+impl PhotoApp {
+    /// Bar above the rated (or picked) photos: send the selected photos to a theme of the project
+    /// being worked on — `[작품 ▾] 테마로 보내기 [1 추억] [2 삶] [+ 테마] … 보낸 사진 숨기기 · 보낸 사진 n장`.
+    pub fn project_send_bar(&mut self, ui: &mut egui::Ui) {
+        let pal = self.pal;
+        let ctx = ui.ctx().clone();
+        let Some(st) = &self.lib else { return };
+        let projects: Vec<(u32, String)> = st.index.projects.iter().map(|p| (p.id, p.name.clone())).collect();
+        let Some(active) =
+            self.active_project.filter(|p| projects.iter().any(|x| x.0 == *p)).or(projects.first().map(|p| p.0))
+        else {
+            return;
+        };
+        let ids = self.target_ids();
+        let themes: Vec<(u32, String, u8)> = st
+            .index
+            .themes_of(active)
+            .iter()
+            .map(|t| {
+                let n = ids.iter().filter(|id| st.index.get(**id).is_some_and(|a| a.tags.contains(&t.id))).count();
+                let state = match n {
+                    0 => 0,
+                    n if n == ids.len() => 2,
+                    _ => 1,
+                };
+                (t.id, t.short_name().to_string(), state)
+            })
+            .collect();
+        let sent = st.project_counts.get(&active).copied().unwrap_or(0);
+        let current = projects.iter().find(|p| p.0 == active).map(|p| p.1.clone()).unwrap_or_default();
+
+        let (rect, _) = ui.allocate_exact_size(egui::vec2(ui.available_width(), 44.0), egui::Sense::hover());
+        ui.painter().rect_filled(rect, 0.0, pal.accent.gamma_multiply(0.08));
+        widgets::separator_h(ui, rect, &pal);
+        let (mut switch_to, mut toggle, mut add, mut new_project, mut open) = (None, None, false, false, false);
+        let mut hide = self.cfg.hide_sent;
+
+        // Right: how many are in the project, and whether to hide them; the rest on the left.
+        let right_w = 250.0;
+        let right = egui::Rect::from_min_max(
+            egui::pos2(rect.right() - 16.0 - right_w, rect.top()),
+            egui::pos2(rect.right() - 16.0, rect.bottom()),
+        );
+        let left = egui::Rect::from_min_max(
+            egui::pos2(rect.left() + 16.0, rect.top() + 6.0),
+            egui::pos2(right.left() - 12.0, rect.bottom() - 6.0),
+        );
+        let mut rui = ui
+            .new_child(egui::UiBuilder::new().max_rect(right).layout(egui::Layout::right_to_left(egui::Align::Center)));
+        let mut child = ui
+            .new_child(egui::UiBuilder::new().max_rect(left).layout(egui::Layout::left_to_right(egui::Align::Center)));
+        child.set_clip_rect(left.expand2(egui::vec2(0.0, 6.0)));
+        let ui = &mut child;
+        ui.spacing_mut().item_spacing.x = 6.0;
+        rui.spacing_mut().item_spacing.x = 10.0;
+        let link = rui
+            .add(
+                egui::Label::new(
+                    egui::RichText::new(format!("보낸 사진 {}장 ›", format::count(sent)))
+                        .font(font(12.0))
+                        .color(pal.accent),
+                )
+                .sense(egui::Sense::click()),
+            )
+            .on_hover_text("이 작품에 보낸 사진을 모아 봅니다 (사이드바의 작품과 같음)");
+        if link.clicked() {
+            open = true;
+        }
+        widgets::switch(&mut rui, &mut hide, "보낸 사진 숨기기", &pal)
+            .on_hover_text("켜면 이 작품에 아직 보내지 않은 사진만 보입니다");
+
+        // Left: project, themes.
+        widgets::paint_icon(
+            ui.painter(),
+            egui::Rect::from_center_size(
+                ui.cursor().min + egui::vec2(8.0, rect.height() / 2.0 - 6.0),
+                egui::vec2(16.0, 16.0),
+            ),
+            Icon::Album,
+            pal.accent,
+        );
+        ui.add_space(22.0);
+        egui::ComboBox::from_id_salt("send-project").selected_text(&current).width(150.0).show_ui(ui, |ui| {
+            for (id, name) in &projects {
+                if ui.selectable_label(*id == active, name).clicked() {
+                    switch_to = Some(*id);
+                }
+            }
+            ui.separator();
+            if ui.button("새 작품…").clicked() {
+                new_project = true;
+            }
+        });
+        ui.label(egui::RichText::new("테마로 보내기").font(font(12.0)).color(pal.text2));
+        ui.spacing_mut().item_spacing.x = 4.0;
+        for (i, (tag, name, state)) in themes.iter().enumerate() {
+            let label = if i < 9 { format!("{} {name}", i + 1) } else { name.clone() };
+            let tip = match (ids.is_empty(), i < 9) {
+                (true, _) => "먼저 보낼 사진을 고르세요".to_string(),
+                (false, true) => format!("고른 사진을 '{name}' 테마로 보내기 / 다시 누르면 빼기 (⇧{})", i + 1),
+                (false, false) => format!("고른 사진을 '{name}' 테마로 보내기 / 다시 누르면 빼기"),
+            };
+            if theme_chip(ui, &label, *state, &pal).on_hover_text(tip).clicked() {
+                toggle = Some(*tag);
+            }
+        }
+        if ui.add(egui::Button::new(egui::RichText::new("+ 테마").color(pal.accent)).frame(false)).clicked() {
+            add = true;
+        }
+        let hint = if ids.is_empty() {
+            "← 사진을 고른 뒤 누르세요".to_string()
+        } else {
+            format!("고른 사진 {}장", format::count(ids.len()))
+        };
+        let g = ui.painter().layout_no_wrap(hint.clone(), font(11.5), pal.text3);
+        if ui.available_width() > g.size().x + 8.0 {
+            ui.add_space(4.0);
+            ui.label(egui::RichText::new(hint).font(font(11.5)).color(pal.text3));
+        }
+
+        if let Some(p) = switch_to {
+            self.set_active_project(Some(p));
+        }
+        if hide != self.cfg.hide_sent {
+            self.cfg.hide_sent = hide;
+            self.cfg.save();
+            self.update_hide_sent();
+        }
+        if let Some(t) = toggle {
+            if ids.is_empty() {
+                self.toast("먼저 보낼 사진을 고르세요 (클릭, 여러 장은 ⌘/Ctrl · Shift + 클릭)", true);
+            } else {
+                self.toggle_theme(&ctx, ids, t);
+            }
+        }
+        if add {
+            self.project_dialog = Some(ProjectDialog::AddThemes { project: active, text: String::new() });
+        }
+        if new_project {
+            self.project_dialog = Some(ProjectDialog::New { name: String::new(), themes: String::new() });
+        }
+        if open {
+            self.select_side(SideSel::Project(active));
         }
     }
 }

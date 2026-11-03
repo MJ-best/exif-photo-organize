@@ -34,11 +34,6 @@ impl PhotoApp {
                 }
                 None => "테마".into(),
             },
-            SideSel::ProjectTodo(p) => format!(
-                "{} · 고를 사진 ★{}+",
-                st.index.project(*p).map(|p| p.name.as_str()).unwrap_or("작품"),
-                self.cfg.project_min_rating.max(1)
-            ),
             SideSel::Import(id) => st
                 .index
                 .imports

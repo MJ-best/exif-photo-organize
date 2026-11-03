@@ -150,8 +150,8 @@ impl PhotoApp {
         let threshold = self.cfg.cull_threshold;
         let cull_badges = self.cfg.cull_badges;
         // Themes of the project being worked on, in order (their numbers are ⇧1–9).
-        let active_themes: Vec<u32> = match (self.active_project, &self.lib) {
-            (Some(p), Some(st)) => st.index.themes_of(p).iter().map(|t| t.id).collect(),
+        let active_themes: Vec<(u32, String)> = match (self.active_project, &self.lib) {
+            (Some(p), Some(st)) => st.index.themes_of(p).iter().map(|t| (t.id, t.short_name().to_string())).collect(),
             _ => Vec::new(),
         };
         let mut export: Option<(Vec<i64>, ExportMode)> = None;
@@ -295,22 +295,32 @@ impl PhotoApp {
                     } else {
                         resp
                     };
-                    // Themes of the active project: "1·3" (numbers of ⇧1–9).
-                    let nums: Vec<String> = active_themes
+                    // Sent to the active project: its theme names ("추억 · 삶"), or their numbers
+                    // (⇧1–9) when the names do not fit.
+                    let mine: Vec<(usize, &str)> = active_themes
                         .iter()
                         .enumerate()
-                        .filter(|(_, t)| a.tags.contains(t))
-                        .map(|(i, _)| (i + 1).to_string())
+                        .filter(|(_, (t, _))| a.tags.contains(t))
+                        .map(|(i, (_, name))| (i, name.as_str()))
                         .collect();
                     let mut corner = rect.right_bottom() + vec2(-5.0, -5.0);
-                    if !nums.is_empty() {
+                    if !mine.is_empty() {
                         if layout.tile >= 70.0 {
+                            let names = mine.iter().map(|(_, n)| *n).collect::<Vec<_>>().join(" · ");
+                            let fits = layout.tile >= 110.0
+                                && p.layout_no_wrap(names.clone(), bold(9.5), Color32::WHITE).size().x
+                                    < layout.tile * 0.62;
+                            let text = if fits {
+                                names
+                            } else {
+                                mine.iter().map(|(i, _)| (i + 1).to_string()).collect::<Vec<_>>().join("·")
+                            };
                             let br = widgets::badge(
                                 &p,
                                 corner,
                                 Align2::RIGHT_BOTTOM,
-                                &nums.join("·"),
-                                9.0,
+                                &text,
+                                if fits { 9.5 } else { 9.0 },
                                 pal.accent,
                                 pal.accent_text,
                             );

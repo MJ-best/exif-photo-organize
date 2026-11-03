@@ -38,10 +38,8 @@ pub fn refresh_totals(st: &mut LibState, threshold: u8) {
     }
     st.cull_counts = c;
     st.analysed = st.index.assets.iter().filter(|a| a.b_prob.is_finite()).count();
-    // Projects: photos in each, and rated photos still to sort.
-    let mut pc: std::collections::HashMap<u32, (usize, usize)> =
-        st.index.projects.iter().map(|p| (p.id, (0, 0))).collect();
-    let min = st.project_min_rating.max(1);
+    // Projects: photos in each.
+    let mut pc: std::collections::HashMap<u32, usize> = st.index.projects.iter().map(|p| (p.id, 0)).collect();
     let mut in_projects = Vec::new();
     for a in &st.index.assets {
         in_projects.clear();
@@ -52,11 +50,9 @@ pub fn refresh_totals(st: &mut LibState, threshold: u8) {
                 }
             }
         }
-        for (p, (n, todo)) in pc.iter_mut() {
+        for (p, n) in pc.iter_mut() {
             if in_projects.contains(p) {
                 *n += 1;
-            } else if a.rating >= min {
-                *todo += 1;
             }
         }
     }
