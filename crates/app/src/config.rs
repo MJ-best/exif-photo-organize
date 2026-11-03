@@ -81,6 +81,10 @@ pub struct Config {
     pub export_date_names: bool,
     /// Projects: "고를 사진" are rated at least this many stars.
     pub project_min_rating: u8,
+    /// 작품 폴더: move (default) or copy the photos into it.
+    pub works_mode: photoorg_core::works::GatherMode,
+    /// 작품 폴더: one subfolder per theme.
+    pub works_by_theme: bool,
 }
 
 impl Default for Config {
@@ -110,6 +114,8 @@ impl Default for Config {
             export_split_mb: 0,
             export_date_names: false,
             project_min_rating: 1,
+            works_mode: Default::default(),
+            works_by_theme: true,
         }
     }
 }

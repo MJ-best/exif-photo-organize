@@ -9,7 +9,7 @@ use rusqlite::{params, Connection, OptionalExtension};
 use std::collections::{BTreeMap, HashMap};
 use std::path::Path;
 
-const SCHEMA_VERSION: i64 = 3;
+const SCHEMA_VERSION: i64 = 4;
 
 const SCHEMA: &str = r#"
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);
@@ -91,6 +91,13 @@ CREATE TABLE IF NOT EXISTS ml_models (
     data TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS work_copies (
+    project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    asset_id INTEGER NOT NULL REFERENCES assets(id) ON DELETE CASCADE,
+    rel_path TEXT NOT NULL,
+    PRIMARY KEY (project_id, rel_path)
+);
+CREATE INDEX IF NOT EXISTS work_copies_asset ON work_copies(asset_id);
 "#;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -163,6 +170,8 @@ pub struct FileRecord {
     pub orig_path: Option<String>,
     pub size: u64,
     pub hash: String,
+    /// Where the file was before it was moved into a 작품 folder (see [`crate::works`]).
+    pub home_rel: Option<String>,
 }
 
 /// New file to be recorded.
@@ -421,6 +430,14 @@ impl Catalog {
                 "ALTER TABLE tags ADD COLUMN project_id INTEGER;
                  ALTER TABLE tags ADD COLUMN sort INTEGER NOT NULL DEFAULT 0;",
             )?;
+        }
+        // v4: files moved into a 작품 folder remember their place in the dated folders.
+        let file_cols: Vec<String> = conn
+            .prepare("PRAGMA table_info(files)")?
+            .query_map([], |r| r.get::<_, String>(1))?
+            .collect::<rusqlite::Result<_>>()?;
+        if !file_cols.iter().any(|c| c == "home_rel") {
+            conn.execute_batch("ALTER TABLE files ADD COLUMN home_rel TEXT;")?;
         }
         conn.execute("UPDATE meta SET value=?1 WHERE key='schema_version'", [SCHEMA_VERSION.to_string()])?;
         let version: Option<String> =
@@ -766,22 +783,99 @@ impl Catalog {
 
     pub fn files_for(&self, asset_id: i64) -> Result<Vec<FileRecord>> {
         let mut stmt = self.conn.prepare_cached(
-            "SELECT id, asset_id, role, rel_path, orig_name, orig_path, size, hash FROM files WHERE asset_id=?1 ORDER BY role",
+            "SELECT id, asset_id, role, rel_path, orig_name, orig_path, size, hash, home_rel FROM files
+             WHERE asset_id=?1 ORDER BY role",
         )?;
-        let rows = stmt.query_map([asset_id], |r| {
-            Ok(FileRecord {
-                id: r.get(0)?,
-                asset_id: r.get(1)?,
-                kind: FileKind::from_role(&r.get::<_, String>(2)?).unwrap_or(FileKind::Jpeg),
-                rel_path: r.get(3)?,
-                orig_name: r.get(4)?,
-                orig_path: r.get(5)?,
-                size: r.get::<_, i64>(6)? as u64,
-                hash: r.get(7)?,
-            })
-        })?;
+        let rows = stmt.query_map([asset_id], file_from_row)?;
         let mut v: Vec<FileRecord> = rows.collect::<rusqlite::Result<_>>()?;
         v.sort_by_key(|f| f.kind.preview_priority());
+        Ok(v)
+    }
+
+    /// Files inside the library folder `dir` (library-relative, '/' separated), at any depth.
+    pub fn files_under(&self, dir: &str) -> Result<Vec<FileRecord>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, asset_id, role, rel_path, orig_name, orig_path, size, hash, home_rel FROM files
+             WHERE substr(rel_path, 1, length(?1) + 1) = ?1 || '/' ORDER BY asset_id, role",
+        )?;
+        let v = stmt.query_map([dir], file_from_row)?.collect::<rusqlite::Result<_>>()?;
+        Ok(v)
+    }
+
+    /// Record files moved into a 작품 folder: `(file id, new path)`. The first place a file is
+    /// moved from is kept as its home.
+    pub fn move_files(&mut self, moves: &[(i64, String)]) -> Result<()> {
+        let tx = self.conn.transaction()?;
+        {
+            let mut stmt =
+                tx.prepare_cached("UPDATE files SET home_rel=COALESCE(home_rel, rel_path), rel_path=?2 WHERE id=?1")?;
+            for (id, rel) in moves {
+                stmt.execute(params![id, rel])?;
+            }
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// Record files moved back to their dated folders: `(file id, new path)`.
+    pub fn return_files(&mut self, moves: &[(i64, String)]) -> Result<()> {
+        let tx = self.conn.transaction()?;
+        {
+            let mut stmt = tx.prepare_cached("UPDATE files SET rel_path=?2, home_rel=NULL WHERE id=?1")?;
+            for (id, rel) in moves {
+                stmt.execute(params![id, rel])?;
+            }
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// A folder was renamed from `old` to `new` (library-relative): update the paths inside it.
+    pub fn rename_dir(&mut self, old: &str, new: &str) -> Result<usize> {
+        let tx = self.conn.transaction()?;
+        let n = tx.execute(
+            "UPDATE files SET rel_path = ?2 || substr(rel_path, length(?1) + 1)
+             WHERE substr(rel_path, 1, length(?1) + 1) = ?1 || '/'",
+            params![old, new],
+        )?;
+        tx.execute(
+            "UPDATE work_copies SET rel_path = ?2 || substr(rel_path, length(?1) + 1)
+             WHERE substr(rel_path, 1, length(?1) + 1) = ?1 || '/'",
+            params![old, new],
+        )?;
+        tx.commit()?;
+        Ok(n)
+    }
+
+    /// Copies made in a project's 작품 folder, per photo (library-relative paths).
+    pub fn work_copies(&self, project: u32) -> Result<HashMap<i64, Vec<String>>> {
+        let mut stmt = self.conn.prepare("SELECT asset_id, rel_path FROM work_copies WHERE project_id=?1")?;
+        let mut out: HashMap<i64, Vec<String>> = HashMap::new();
+        for row in stmt.query_map([project], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?)))? {
+            let (id, rel) = row?;
+            out.entry(id).or_default().push(rel);
+        }
+        Ok(out)
+    }
+
+    /// Record the copies of one photo in a project's 작품 folder (replacing earlier ones).
+    pub fn set_work_copies(&mut self, project: u32, asset_id: i64, rels: &[String]) -> Result<()> {
+        let tx = self.conn.transaction()?;
+        tx.execute("DELETE FROM work_copies WHERE project_id=?1 AND asset_id=?2", params![project, asset_id])?;
+        for rel in rels {
+            tx.execute(
+                "INSERT OR REPLACE INTO work_copies(project_id, asset_id, rel_path) VALUES (?1, ?2, ?3)",
+                params![project, asset_id, rel],
+            )?;
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// Photos with tag `tag`.
+    pub fn tag_members(&self, tag: u32) -> Result<Vec<i64>> {
+        let mut stmt = self.conn.prepare_cached("SELECT asset_id FROM asset_tags WHERE tag_id=?1 ORDER BY asset_id")?;
+        let v = stmt.query_map([tag], |r| r.get::<_, i64>(0))?.collect::<rusqlite::Result<_>>()?;
         Ok(v)
     }
 
@@ -1099,6 +1193,20 @@ fn ensure_tag(tx: &rusqlite::Transaction, name: &str, kind: TagKind) -> Result<i
     }
     tx.execute("INSERT INTO tags(name, kind) VALUES (?1, ?2)", params![name, kind as i64])?;
     Ok(tx.last_insert_rowid())
+}
+
+fn file_from_row(r: &rusqlite::Row) -> rusqlite::Result<FileRecord> {
+    Ok(FileRecord {
+        id: r.get(0)?,
+        asset_id: r.get(1)?,
+        kind: FileKind::from_role(&r.get::<_, String>(2)?).unwrap_or(FileKind::Jpeg),
+        rel_path: r.get(3)?,
+        orig_name: r.get(4)?,
+        orig_path: r.get(5)?,
+        size: r.get::<_, i64>(6)? as u64,
+        hash: r.get(7)?,
+        home_rel: r.get(8)?,
+    })
 }
 
 fn add_tag_tx(tx: &rusqlite::Transaction, asset_id: i64, name: &str, kind: TagKind) -> Result<i64> {

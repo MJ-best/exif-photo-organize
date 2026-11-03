@@ -184,8 +184,13 @@ impl PhotoApp {
                             .wrap()
                             .sense(Sense::click()),
                     );
+                    let moved = f
+                        .home_rel
+                        .as_ref()
+                        .map(|h| format!("작품 폴더로 옮김 — 날짜 폴더 자리: {h}\n"))
+                        .unwrap_or_default();
                     let r = r.on_hover_text(format!(
-                        "{}\n원래 위치: {}\n원래 이름: {}\nBLAKE3: {}…\n클릭하면 파일 위치를 엽니다",
+                        "{}\n{moved}원래 위치: {}\n원래 이름: {}\nBLAKE3: {}…\n클릭하면 파일 위치를 엽니다",
                         path.display(),
                         f.orig_path.clone().unwrap_or_default(),
                         f.orig_name,

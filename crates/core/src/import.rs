@@ -1420,6 +1420,145 @@ mod tests {
     }
 
     #[test]
+    fn works_folder_move_copy_rename_restore() {
+        use crate::works::{self, GatherMode, GatherOptions};
+        // Two folders on the card with an IMG_0001 each; RAW files go into RAW/ sub folders.
+        let card = tempfile::tempdir().unwrap();
+        let (d100, d101) = (card.path().join("DCIM/100CANON"), card.path().join("DCIM/101CANON"));
+        std::fs::create_dir_all(&d100).unwrap();
+        std::fs::create_dir_all(&d101).unwrap();
+        std::fs::write(d100.join("IMG_0001.JPG"), jpeg("Canon EOS R6", "2026:09:01 10:00:00")).unwrap();
+        std::fs::write(d100.join("IMG_0001.CR2"), raw("Canon EOS R6", "2026:09:01 10:00:00")).unwrap();
+        std::fs::write(d100.join("IMG_0002.JPG"), jpeg("Canon EOS R6", "2026:09:01 11:00:00")).unwrap();
+        std::fs::write(d101.join("IMG_0001.JPG"), jpeg("Canon EOS R6", "2026:09:02 09:00:00")).unwrap();
+        std::fs::write(d101.join("IMG_0003.CR2"), raw("Canon EOS R6", "2026:09:02 10:00:00")).unwrap();
+        let libdir = tempfile::tempdir().unwrap();
+        let lib = Library::open(libdir.path()).unwrap();
+        let cancel = Arc::new(AtomicBool::new(false));
+        let scan = scan_source(card.path(), true, &cancel, &|_, _| {}).unwrap();
+        let (tx, _rx) = crossbeam_channel::unbounded();
+        let iopts = ImportOptions { raw_subfolder: "RAW".into(), ..Default::default() };
+        run_import(&lib, &scan, &iopts, &tx, cancel.clone()).unwrap();
+        let mut cat = lib.catalog().unwrap();
+        let ids = cat.all_asset_ids().unwrap();
+        assert_eq!(ids.len(), 4);
+        let by_name = |cat: &Catalog, date: &str, name: &str| -> i64 {
+            *ids.iter()
+                .find(|&&id| {
+                    cat.files_for(id).unwrap().iter().any(|f| f.rel_path.contains(date) && f.rel_path.contains(name))
+                })
+                .unwrap()
+        };
+        let (a, b, c, d) = (
+            by_name(&cat, "09-01", "IMG_0001"),
+            by_name(&cat, "09-01", "IMG_0002"),
+            by_name(&cat, "09-02", "IMG_0001"),
+            by_name(&cat, "09-02", "IMG_0003"),
+        );
+        cat.set_rating(&ids, 4).unwrap();
+        let p = cat.create_project("바다 사진집", &["새벽".into(), "파도".into()]).unwrap();
+        let idx = cat.load_index().unwrap();
+        let themes: Vec<u32> = idx.themes_of(p.id).iter().map(|t| t.id).collect();
+        let (dawn, wave) = (themes[0], themes[1]);
+        cat.assign_tag(&[a, c], dawn).unwrap();
+        cat.assign_tag(&[a, b], wave).unwrap();
+        for id in &ids {
+            lib.write_xmp(&cat, *id).unwrap();
+        }
+        // a's JPEG has a sidecar of its own too (same name as the RAW's, one folder up).
+        std::fs::write(lib.root.join("2026/2026-09-01/IMG_0001.xmp"), b"<x:xmpmeta/>").unwrap();
+        let never = AtomicBool::new(false);
+        let moving = GatherOptions { mode: GatherMode::Move, by_theme: true, write_xmp: true };
+        let rels = |cat: &Catalog, id: i64| -> Vec<String> {
+            let mut v: Vec<String> = cat.files_for(id).unwrap().into_iter().map(|f| f.rel_path).collect();
+            v.sort();
+            v
+        };
+
+        // Move: a (both themes) goes into its first theme only; c clashes with a's name.
+        let plan = works::plan(&lib, &cat, p.id, &moving).unwrap();
+        assert_eq!(plan.folder, "작품/바다 사진집");
+        assert_eq!((plan.members, plan.items.len(), plan.moved, plan.copies()), (3, 3, 0, 0));
+        let sum = works::gather(&lib, &mut cat, &plan, &moving, &never, &|_, _| {}).unwrap();
+        assert_eq!((sum.moved, sum.copied, sum.failed.len()), (3, 0, 0), "{:?}", sum.failed);
+        let folder = lib.abs("작품/바다 사진집");
+        assert_eq!(
+            names_in(&folder.join("새벽")),
+            vec!["IMG_0001.CR2", "IMG_0001.JPG", "IMG_0001.xmp", "IMG_0001_1.JPG", "IMG_0001_1.xmp"]
+        );
+        assert_eq!(names_in(&folder.join("파도")), vec!["IMG_0002.JPG", "IMG_0002.xmp"]);
+        assert_eq!(rels(&cat, a), vec!["작품/바다 사진집/새벽/IMG_0001.CR2", "작품/바다 사진집/새벽/IMG_0001.JPG"]);
+        let homes: Vec<Option<String>> = cat.files_for(a).unwrap().into_iter().map(|f| f.home_rel).collect();
+        assert!(homes.contains(&Some("2026/2026-09-01/RAW/IMG_0001.CR2".into())), "{homes:?}");
+        let xmp = std::fs::read_to_string(folder.join("새벽/IMG_0001.xmp")).unwrap();
+        assert!(xmp.contains("바다 사진집|새벽") && xmp.contains("바다 사진집|파도"), "all themes stay as keywords");
+        assert_eq!(
+            names_in(&lib.root.join("2026/2026-09-01")),
+            vec!["IMG_0001.xmp"],
+            "emptied RAW/ folder removed; the JPEG's own sidecar stays (the RAW's went along)"
+        );
+        assert!(lib.root.join("2026/2026-09-02/RAW/IMG_0003.CR2").is_file(), "d is not in the project");
+        let plan = works::plan(&lib, &cat, p.id, &moving).unwrap();
+        assert_eq!((plan.items.len(), plan.moved), (0, 3), "gathering again changes nothing");
+
+        // Copy: d joins later; the dated folder keeps it.
+        cat.assign_tag(&[d], wave).unwrap();
+        let copying = GatherOptions { mode: GatherMode::Copy, ..moving };
+        let plan = works::plan(&lib, &cat, p.id, &copying).unwrap();
+        assert_eq!(plan.items.iter().map(|i| (i.asset_id, i.copy)).collect::<Vec<_>>(), vec![(d, true)]);
+        let sum = works::gather(&lib, &mut cat, &plan, &copying, &never, &|_, _| {}).unwrap();
+        assert_eq!((sum.copied, sum.files), (1, 2));
+        assert!(folder.join("파도/IMG_0003.CR2").is_file() && folder.join("파도/IMG_0003.xmp").is_file());
+        assert_eq!(rels(&cat, d), vec!["2026/2026-09-02/RAW/IMG_0003.CR2"]);
+        let plan = works::plan(&lib, &cat, p.id, &copying).unwrap();
+        assert_eq!((plan.items.len(), plan.moved, plan.copied), (0, 3, 1));
+
+        // A photo already moved into another project's folder is copied there, never moved again.
+        let p2 = cat.create_project("가을 전시", &["빛".into()]).unwrap();
+        let light = cat.load_index().unwrap().themes_of(p2.id)[0].id;
+        cat.assign_tag(&[a], light).unwrap();
+        let plan = works::plan(&lib, &cat, p2.id, &moving).unwrap();
+        assert_eq!((plan.items.len(), plan.elsewhere, plan.copies()), (1, 1, 1));
+        works::gather(&lib, &mut cat, &plan, &moving, &never, &|_, _| {}).unwrap();
+        assert_eq!(names_in(&lib.abs("작품/가을 전시/빛")), vec!["IMG_0001.CR2", "IMG_0001.JPG", "IMG_0001.xmp"]);
+        assert!(rels(&cat, a)[0].starts_with("작품/바다 사진집/"));
+
+        // Leaving the project: b stays in the folder until it is sent back.
+        cat.remove_tag(&[b], wave).unwrap();
+        assert_eq!(works::plan(&lib, &cat, p.id, &moving).unwrap().strays, vec![b]);
+
+        // Renaming the project folder carries the catalog (moved files and recorded copies).
+        cat.rename_project(p.id, "바다·여름").unwrap();
+        assert!(works::rename_folder(&lib, &mut cat, "작품/바다 사진집", &works::project_folder("바다·여름")).unwrap());
+        assert_eq!(rels(&cat, a)[0], "작품/바다·여름/새벽/IMG_0001.CR2");
+        let plan = works::plan(&lib, &cat, p.id, &moving).unwrap();
+        assert_eq!((plan.folder.as_str(), plan.moved, plan.copied, plan.items.len()), ("작품/바다·여름", 2, 1, 0));
+
+        // Back to the dated folders (a name taken in the meantime gets a suffix, sidecar included).
+        std::fs::write(lib.root.join("2026/2026-09-02/IMG_0001.JPG"), b"other").unwrap();
+        let sum = works::restore(&lib, &mut cat, "작품/바다·여름", None, &never, &|_, _| {}).unwrap();
+        assert_eq!((sum.moved, sum.failed.len()), (3, 0), "{:?}", sum.failed);
+        assert_eq!(rels(&cat, a), vec!["2026/2026-09-01/IMG_0001.JPG", "2026/2026-09-01/RAW/IMG_0001.CR2"]);
+        assert!(lib.root.join("2026/2026-09-01/RAW/IMG_0001.xmp").is_file(), "sidecar back next to the RAW");
+        assert_eq!(rels(&cat, c), vec!["2026/2026-09-02/IMG_0001_1.JPG"]);
+        assert!(lib.root.join("2026/2026-09-02/IMG_0001_1.xmp").is_file());
+        assert_eq!(rels(&cat, b), vec!["2026/2026-09-01/IMG_0002.JPG"]);
+        assert!(cat.files_for(a).unwrap().iter().all(|f| f.home_rel.is_none()));
+        let folder = lib.abs("작품/바다·여름");
+        assert!(!folder.join("새벽").exists(), "emptied theme folder removed");
+        assert_eq!(names_in(&folder.join("파도")), vec!["IMG_0003.CR2", "IMG_0003.xmp"], "copies stay");
+        for id in [a, b, c] {
+            for f in cat.files_for(id).unwrap() {
+                assert!(lib.abs(&f.rel_path).is_file(), "{}", f.rel_path);
+            }
+        }
+        // Deleting a project forgets its copies (the files stay).
+        cat.delete_project(p.id).unwrap();
+        assert!(cat.work_copies(p.id).unwrap().is_empty());
+        assert!(folder.join("파도/IMG_0003.CR2").is_file());
+    }
+
+    #[test]
     fn export_keep_size_never_grows() {
         use crate::export::ExportKind;
         // A strongly compressed (q50) photo with GPS and orientation 6: re-encoding it at full
