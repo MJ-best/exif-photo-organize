@@ -68,7 +68,7 @@ impl ExportOptions {
 }
 
 /// A folder name that is valid on macOS, Windows and Linux.
-fn safe_folder(name: &str) -> String {
+pub(crate) fn safe_folder(name: &str) -> String {
     let n: String = name
         .chars()
         .map(|c| if matches!(c, '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|') { '-' } else { c })
@@ -185,7 +185,7 @@ pub fn export(
             })
             .collect();
         photos.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.cmp(&b.1)));
-        let mut names = Names { dest: if opts.zip.is_some() { None } else { Some(&base) }, taken: HashSet::new() };
+        let mut names = Names::new(if opts.zip.is_some() { None } else { Some(base.clone()) });
         for (when, id, meta) in photos {
             let files = catalog.files_for(id)?;
             let label = files.first().map(|f| file_name(&f.rel_path)).unwrap_or_else(|| format!("#{id}"));
@@ -454,19 +454,23 @@ fn split_name(name: &str) -> (String, String) {
 
 /// Unique destination names: not taken earlier in this export and (for loose files) not present
 /// in the folder.
-struct Names<'a> {
-    dest: Option<&'a Path>,
+pub(crate) struct Names {
+    dest: Option<PathBuf>,
     taken: HashSet<String>,
 }
 
-impl Names<'_> {
+impl Names {
+    pub(crate) fn new(dest: Option<PathBuf>) -> Names {
+        Names { dest, taken: HashSet::new() }
+    }
+
     fn free(&self, name: &str) -> bool {
-        !self.taken.contains(&name.to_lowercase()) && self.dest.is_none_or(|d| !d.join(name).exists())
+        !self.taken.contains(&name.to_lowercase()) && self.dest.as_ref().is_none_or(|d| !d.join(name).exists())
     }
 
     /// Names for the files of one photo. Files sharing a stem (IMG_0001.CR3 / .JPG / .xmp) get
     /// the same suffix so they stay together.
-    fn take_group(&mut self, given: &[String]) -> Vec<String> {
+    pub(crate) fn take_group(&mut self, given: &[String]) -> Vec<String> {
         let parts: Vec<(String, String)> = given.iter().map(|n| split_name(n)).collect();
         let mut out = Vec::with_capacity(given.len());
         let mut by_stem: Vec<(String, String)> = Vec::new(); // original stem -> chosen stem
@@ -503,7 +507,7 @@ fn write_atomic(dst: &Path, write: impl FnOnce(&Path) -> Result<()>) -> Result<u
     Ok(std::fs::metadata(dst).map(|m| m.len()).unwrap_or(0))
 }
 
-fn copy_file(src: &Path, dst: &Path) -> Result<u64> {
+pub(crate) fn copy_file(src: &Path, dst: &Path) -> Result<u64> {
     write_atomic(dst, |tmp| {
         std::fs::copy(src, tmp).with_context(|| format!("복사 실패 {}", src.display()))?;
         Ok(())

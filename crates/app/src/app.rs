@@ -175,9 +175,15 @@ pub struct Toast {
     pub error: bool,
 }
 
+/// Work run on the catalog writer thread with its connection.
+pub type WriterTask = Box<dyn FnOnce(&Library, &mut Catalog) + Send>;
+
 pub enum WriteJob {
     Rating(Vec<i64>, u8),
     Xmp(Vec<i64>),
+    /// Work that changes files and the catalog together (moving photos into a 작품 folder), run
+    /// in order with the sidecar writes so a sidecar is never written to a file's old place.
+    Run(WriterTask),
 }
 
 pub enum Maintenance {
@@ -222,6 +228,10 @@ pub struct PhotoApp {
     pub analysis_pending: bool,
     pub export_job: Option<crate::app_export::ExportJob>,
     pub export_dialog: Option<crate::app_export::ExportDialog>,
+    /// 작품 폴더: running gather / restore, the dialog, and the status of the shown project.
+    pub works_job: Option<crate::app_works::WorksJob>,
+    pub works_dialog: Option<crate::app_works::WorksDialog>,
+    pub works_status: Option<(u32, photoorg_core::works::GatherPlan)>,
     /// The project (작품) whose themes the chips and ⇧1–9 assign.
     pub active_project: Option<u32>,
     pub project_dialog: Option<crate::app_projects::ProjectDialog>,
@@ -292,6 +302,9 @@ impl PhotoApp {
             analysis_pending: false,
             export_job: None,
             export_dialog: None,
+            works_job: None,
+            works_dialog: None,
+            works_status: None,
             active_project: None,
             project_dialog: None,
             rescore_rx: None,
@@ -962,6 +975,7 @@ impl PhotoApp {
         }
         self.poll_cull(ctx);
         self.poll_export(ctx);
+        self.poll_works(ctx);
     }
 
     fn finish_import(&mut self, ctx: &egui::Context, r: Result<ImportSummary, String>) {
@@ -1307,6 +1321,7 @@ fn spawn_writer(lib: Library, rx: Receiver<WriteJob>, write_xmp: Arc<AtomicBool>
                             }
                         }
                     }
+                    WriteJob::Run(f) => f(&lib, &mut cat),
                 }
             }
         })

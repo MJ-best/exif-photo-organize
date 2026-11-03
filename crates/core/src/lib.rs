@@ -14,6 +14,7 @@ pub mod tags;
 pub mod template;
 pub mod tiff;
 pub mod volumes;
+pub mod works;
 pub mod xmp;
 pub mod zip;
 

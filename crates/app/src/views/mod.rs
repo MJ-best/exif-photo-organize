@@ -71,6 +71,9 @@ impl PhotoApp {
                         if matches!(self.filter.cull, photoorg_core::filter::CullFilter::Candidates(_)) {
                             self.cull_bar(ui);
                         }
+                        if let Some(p) = self.works_bar_project() {
+                            self.works_bar(ui, p);
+                        }
                         self.browse(ui);
                     }
                 }
@@ -86,6 +89,9 @@ impl PhotoApp {
         }
         if self.project_dialog.is_some() {
             self.project_dialog_ui(ui);
+        }
+        if self.works_dialog.is_some() {
+            self.works_dialog_ui(ui);
         }
     }
 

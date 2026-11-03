@@ -9,6 +9,21 @@ use eframe::egui::{self, Frame, Margin};
 use photoorg_core::filter::ProjectFilter;
 use photoorg_core::format;
 
+/// Folder of a project (or theme) just renamed by `dlg`, from the catalog's new names.
+fn renamed_folder(catalog: &photoorg_core::Catalog, dlg: &ProjectDialog) -> Option<String> {
+    use photoorg_core::works;
+    let projects = catalog.projects().ok()?;
+    let project_folder = |id: u32| projects.iter().find(|p| p.id == id).map(|p| works::project_folder(&p.name));
+    match dlg {
+        ProjectDialog::Rename { project, .. } => project_folder(*project),
+        ProjectDialog::RenameTheme { tag, .. } => {
+            let t = catalog.tags().ok()?.into_iter().find(|t| t.id == *tag)?;
+            Some(format!("{}/{}", project_folder(t.project?)?, works::theme_folder(t.short_name())))
+        }
+        _ => None,
+    }
+}
+
 /// Meta key (in the library's catalog) of the project being worked on.
 const ACTIVE_KEY: &str = "active_project";
 
@@ -19,6 +34,10 @@ pub enum ProjectAction {
     AddThemes(u32),
     Rename(u32),
     Export(u32),
+    /// 작품 폴더: gather, open, move back to the dated folders.
+    Gather(u32),
+    OpenFolder(u32),
+    Restore(u32),
     Delete(u32),
     RenameTheme(u32),
     MoveTheme(u32, i32),
@@ -58,6 +77,7 @@ impl PhotoApp {
 
     /// Re-read projects and tags after a structural change; `affected` photos get new sidecars.
     pub fn reload_projects(&mut self, affected: Vec<i64>) {
+        self.works_status = None;
         let Some(st) = &mut self.lib else { return };
         if let (Ok(tags), Ok(projects)) = (st.catalog.tags(), st.catalog.projects()) {
             let known: std::collections::HashSet<u32> = tags.iter().map(|t| t.id).collect();
@@ -146,6 +166,7 @@ impl PhotoApp {
             let _ = w.send(WriteJob::Xmp(ids.clone()));
         }
         self.hud = Some((Hud::Theme(tag, !all), ctx.input(|i| i.time) + 0.9));
+        self.works_status = None;
         self.facets = None;
         self.info = None;
         // Unlike ratings, themes never move on to the next photo: one photo can take several.
@@ -238,7 +259,8 @@ impl PhotoApp {
                 .map(|st| st.index.assets.iter().filter(|a| a.tags.iter().any(|t| tags.contains(t))).count())
                 .unwrap_or(0)
         };
-        let modal = egui::Modal::new(egui::Id::unique("project-dialog")).frame(
+        // One id per kind of dialog: a modal keeps the size it had last time.
+        let modal = egui::Modal::new(egui::Id::unique(("project-dialog", std::mem::discriminant(&dlg)))).frame(
             Frame::new()
                 .fill(pal.panel_bg)
                 .corner_radius(14.0)
@@ -306,6 +328,16 @@ impl PhotoApp {
                         ))
                         .font(font(12.5)),
                     );
+                    if self.works_folder_exists(*project) {
+                        ui.label(
+                            egui::RichText::new(
+                                "작품 폴더의 파일은 그대로 남습니다. 옮긴 사진을 날짜 폴더로 되돌리려면 지우기 전에 \
+                                 작품을 우클릭 → '날짜 폴더로 되돌리기'를 하세요.",
+                            )
+                            .font(font(11.5))
+                            .color(pal.warning),
+                        );
+                    }
                 }
                 ProjectDialog::DeleteTheme { tag } => {
                     let n = counts(self, vec![*tag]);
@@ -350,6 +382,14 @@ impl PhotoApp {
 
     /// Returns true when the dialog can close.
     fn apply_project_dialog(&mut self, dlg: &ProjectDialog) -> bool {
+        // The 작품 folder (or theme subfolder) is renamed along with the project (theme).
+        let folder_before = match dlg {
+            ProjectDialog::Rename { project, .. } => self.works_folder(*project).map(|f| (*project, f)),
+            ProjectDialog::RenameTheme { tag, .. } => {
+                self.works_theme_folder(*tag).and_then(|f| Some((self.lib.as_ref()?.index.tags.get(tag)?.project?, f)))
+            }
+            _ => None,
+        };
         let Some(st) = &mut self.lib else { return true };
         let r: anyhow::Result<Vec<i64>> = match dlg {
             ProjectDialog::New { name, themes } => return self.create_project(name, themes),
@@ -370,6 +410,13 @@ impl PhotoApp {
         };
         match r {
             Ok(affected) => {
+                // Rename the folder first: the sidecar rewrites queued by reload_projects then
+                // find the files at their new place.
+                if let Some((project, old)) = folder_before {
+                    if let Some(new) = renamed_folder(&st.catalog, dlg) {
+                        self.rename_works_folder(project, &old, &new);
+                    }
+                }
                 self.reload_projects(affected);
                 true
             }
@@ -401,6 +448,9 @@ impl PhotoApp {
                 self.project_dialog = Some(ProjectDialog::Rename { project: p, text: name(self, p) })
             }
             ProjectAction::Export(p) => self.export_project(p),
+            ProjectAction::Gather(p) => self.open_works_gather(p),
+            ProjectAction::OpenFolder(p) => self.open_works_folder(p),
+            ProjectAction::Restore(p) => self.open_works_restore(p, None),
             ProjectAction::Delete(p) => self.project_dialog = Some(ProjectDialog::DeleteProject { project: p }),
             ProjectAction::RenameTheme(t) => {
                 self.project_dialog = Some(ProjectDialog::RenameTheme { tag: t, text: theme(self, t) })
