@@ -65,7 +65,14 @@ impl PhotoApp {
         }
         match self.mode {
             GridMode::Years | GridMode::Months => self.cards(ui),
-            GridMode::Days | GridMode::All => self.grid(ui),
+            GridMode::Days | GridMode::All => {
+                // Photos above, the feedback strip below (see `overlays`).
+                let full = ui.available_rect_before_wrap();
+                let split = full.bottom() - super::STATUS_H;
+                let photos = Rect::from_min_max(full.min, pos2(full.right(), split));
+                self.status_band = Some(Rect::from_min_max(pos2(full.left(), split), full.max));
+                ui.scope_builder(egui::UiBuilder::new().max_rect(photos), |ui| self.grid(ui));
+            }
         }
     }
 

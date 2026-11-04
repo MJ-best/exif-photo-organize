@@ -12,11 +12,14 @@ use crate::app::{Hud, MainView, PhotoApp};
 use crate::config::ThemePref;
 use crate::theme::{bold, font};
 use crate::widgets::{self, Icon};
-use eframe::egui::{self, pos2, vec2, Align2, Color32, Frame, Margin, Rect, Sense, Ui};
+use eframe::egui::{self, pos2, vec2, Color32, Frame, Margin, Rect, Sense, Ui};
 use photoorg_core::format;
 use photoorg_core::template;
 
 pub const SIDEBAR_W: f32 = 232.0;
+/// Height of the strip under the photos where action feedback (별점, 픽, 테마) appears, so it
+/// never covers a photo.
+pub const STATUS_H: f32 = 34.0;
 pub const INFO_W: f32 = 300.0;
 
 /// Extra top padding on macOS where the title bar is merged into the window content.
@@ -51,6 +54,7 @@ impl PhotoApp {
         egui::CentralPanel::no_frame().show(ui, |ui| {
             let r = ui.max_rect();
             self.central_rect = r;
+            self.status_band = None;
             ui.painter().rect_filled(r, 0.0, pal.content_bg);
             // Hairline between sidebar and content.
             ui.painter().line_segment([r.left_top(), r.left_bottom()], egui::Stroke::new(1.0, pal.separator));
@@ -202,77 +206,68 @@ impl PhotoApp {
         let ctx = ui.ctx().clone();
         let screen = ctx.content_rect();
         let painter = ctx.layer_painter(egui::LayerId::new(egui::Order::Foreground, egui::Id::unique("overlays")));
-        // Rating / flag HUD.
+        // Rating / flag / theme feedback: a small pill in the strip under the photos (never over
+        // a photo), or at the bottom of the content when there is no strip.
         if let Some((hud, _)) = self.hud {
-            let theme_text = match hud {
-                Hud::Theme(tag, on, n) => Some(self.theme_hud_text(tag, on, n)),
-                _ => None,
-            };
-            // Wide enough for "바다 사진집 › 새벽에 보냄 (3장)".
-            let w = theme_text
-                .as_ref()
-                .map(|t| painter.layout_no_wrap(t.clone(), bold(18.0), Color32::WHITE).size().x + 26.0 + 10.0 + 48.0)
-                .unwrap_or(0.0)
-                .max(230.0);
-            let rect = Rect::from_center_size(
-                if self.central_rect.is_positive() { self.central_rect.center() } else { screen.center() },
-                vec2(w, 70.0),
-            );
-            painter.rect_filled(rect, 14.0, pal.hud_bg);
-            match hud {
-                Hud::Rating(0) => {
-                    painter.text(rect.center(), Align2::CENTER_CENTER, "별점 지움", bold(18.0), Color32::WHITE);
+            let size = 13.5;
+            // (icon and its colour, text): stars are drawn instead of text for ratings.
+            let (icon, text) = match hud {
+                Hud::Rating(0) => (None, "별점 지움".to_string()),
+                Hud::Rating(_) => (None, String::new()),
+                Hud::Flag(-1) => (Some((Icon::Reject, pal.danger)), "B컷 (거절)".to_string()),
+                Hud::Flag(1) => (Some((Icon::Flag, pal.success)), "A컷 (픽)".to_string()),
+                Hud::Flag(_) => (Some((Icon::Close, Color32::WHITE)), "표시 해제".to_string()),
+                Hud::Theme(tag, on, n) => {
+                    (Some((Icon::Tag, if on { pal.accent } else { Color32::WHITE })), self.theme_hud_text(tag, on, n))
                 }
-                Hud::Rating(r) => {
+            };
+            let g = painter.layout_no_wrap(text, bold(size), Color32::WHITE);
+            let stars = matches!(hud, Hud::Rating(r) if r > 0);
+            let content_w = if stars { 5.0 * 18.0 - 4.0 } else { g.size().x + if icon.is_some() { 22.0 } else { 0.0 } };
+            let h = 26.0;
+            let center = match self.status_band {
+                Some(b) => b.center(),
+                None if self.central_rect.is_positive() => {
+                    pos2(self.central_rect.center().x, self.central_rect.bottom() - 12.0 - h / 2.0)
+                }
+                None => pos2(screen.center().x, screen.bottom() - 12.0 - h / 2.0),
+            };
+            let rect = Rect::from_center_size(center, vec2(content_w + 28.0, h));
+            painter.rect_filled(rect, h / 2.0, pal.hud_bg);
+            let mut x = rect.left() + 14.0;
+            if let Hud::Rating(r) = hud {
+                if r > 0 {
                     for i in 0..5u8 {
-                        let c = pos2(rect.center().x + (i as f32 - 2.0) * 38.0, rect.center().y);
+                        let c = pos2(x + 7.0 + i as f32 * 18.0, rect.center().y);
                         if i < r {
-                            widgets::star_shape(&painter, c, 15.0, Some(pal.star), None);
+                            widgets::star_shape(&painter, c, 7.5, Some(pal.star), None);
                         } else {
                             widgets::star_shape(
                                 &painter,
                                 c,
-                                15.0,
+                                7.5,
                                 None,
-                                Some(egui::Stroke::new(1.2, Color32::from_white_alpha(120))),
+                                Some(egui::Stroke::new(1.0, Color32::from_white_alpha(120))),
                             );
                         }
                     }
                 }
-                Hud::Flag(f) => {
-                    let (icon, text, color) = match f {
-                        -1 => (Icon::Reject, "B컷 (거절)", pal.danger),
-                        1 => (Icon::Flag, "A컷 (픽)", pal.success),
-                        _ => (Icon::Close, "표시 해제", Color32::WHITE),
-                    };
-                    let g = painter.layout_no_wrap(text.into(), bold(18.0), Color32::WHITE);
-                    let total = 26.0 + 10.0 + g.size().x;
-                    let x0 = rect.center().x - total / 2.0;
-                    widgets::paint_icon(
-                        &painter,
-                        Rect::from_center_size(pos2(x0 + 13.0, rect.center().y), vec2(26.0, 26.0)),
-                        icon,
-                        color,
-                    );
-                    painter.galley(pos2(x0 + 36.0, rect.center().y - g.size().y / 2.0), g, Color32::WHITE);
-                }
-                Hud::Theme(_, on, _) => {
-                    let text = theme_text.clone().unwrap_or_default();
-                    let g = painter.layout_no_wrap(text, bold(18.0), Color32::WHITE);
-                    let total = 26.0 + 10.0 + g.size().x;
-                    let x0 = rect.center().x - total / 2.0;
-                    widgets::paint_icon(
-                        &painter,
-                        Rect::from_center_size(pos2(x0 + 13.0, rect.center().y), vec2(24.0, 24.0)),
-                        Icon::Tag,
-                        if on { pal.accent } else { Color32::WHITE },
-                    );
-                    painter.galley(pos2(x0 + 36.0, rect.center().y - g.size().y / 2.0), g, Color32::WHITE);
-                }
+            }
+            if let Some((icon, color)) = icon {
+                widgets::paint_icon(
+                    &painter,
+                    Rect::from_center_size(pos2(x + 8.0, rect.center().y), vec2(16.0, 16.0)),
+                    icon,
+                    color,
+                );
+                x += 22.0;
+            }
+            if !stars {
+                painter.galley(pos2(x, rect.center().y - g.size().y / 2.0), g, Color32::WHITE);
             }
         }
-        // Toasts.
-        let mut y = screen.bottom() - 24.0;
+        // Toasts (above the feedback strip).
+        let mut y = self.status_band.map(|b| b.top() - 6.0).unwrap_or(screen.bottom() - 24.0);
         for t in self.toasts.iter().rev() {
             let g = painter.layout(t.text.clone(), font(13.0), Color32::WHITE, 520.0);
             let rect = Rect::from_center_size(
