@@ -200,6 +200,10 @@ impl PhotoApp {
             let opts = [
                 (CullFilter::Any, "전체".to_string()),
                 (CullFilter::Candidates(threshold), format!("B컷 후보 ≥{threshold}%  ({})", format::count(c[0]))),
+                (
+                    CullFilter::Keepers(self.cfg.keep_pct),
+                    format!("A컷 후보 상위 {}%  ({})", self.cfg.keep_pct, format::count(c[5])),
+                ),
                 (CullFilter::Rejected, format!("거절 (B컷)  ({})", format::count(c[1]))),
                 (CullFilter::Picked, format!("픽 (A컷)  ({})", format::count(c[2]))),
                 (CullFilter::Undecided, format!("아직 안 고름  ({})", format::count(c[3]))),
@@ -318,8 +322,13 @@ impl PhotoApp {
         let n = self.filtered.len();
         ui.label(egui::RichText::new(format!("B컷 후보 {}장", format::count(n))).font(bold(12.5)))
             .on_hover_text("X로 거절, 잘못 걸러진 사진은 P(픽)로 표시하세요. 고를 때마다 내 기준을 다시 학습합니다.");
-        if rect.width() > 820.0 {
-            ui.label(egui::RichText::new("X 거절 · P 잘못 걸러짐").font(font(11.5)).color(pal.text2));
+        // What was learned first (is the suggestion mine or the default?), then the keys.
+        let (learned, tip) = self.learning_status();
+        if rect.width() > 760.0 {
+            ui.label(egui::RichText::new(learned).font(font(11.5)).color(pal.text2)).on_hover_text(tip);
+        }
+        if rect.width() > 1040.0 {
+            ui.label(egui::RichText::new("· X 거절 · P 잘못 걸러짐").font(font(11.5)).color(pal.text3));
         }
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             if n > 0 && widgets::secondary_button(ui, &format!("{}장 모두 거절", format::count(n)), &pal).clicked()
@@ -336,6 +345,58 @@ impl PhotoApp {
                 .changed()
             {
                 self.set_cull_threshold(t as u8);
+            }
+            ui.label(egui::RichText::new("기준").font(font(11.5)).color(pal.text2));
+        });
+    }
+
+    /// Bar above the A-cut candidates: how many, how strict, what was learned.
+    pub fn keeper_bar(&mut self, ui: &mut Ui) {
+        let pal = self.pal;
+        let ctx = ui.ctx().clone();
+        let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), 40.0), Sense::hover());
+        ui.painter().rect_filled(rect, 0.0, pal.success.gamma_multiply(0.12));
+        widgets::separator_h(ui, rect, &pal);
+        let mut child = ui.new_child(
+            egui::UiBuilder::new()
+                .max_rect(rect.shrink2(vec2(16.0, 6.0)))
+                .layout(egui::Layout::left_to_right(egui::Align::Center)),
+        );
+        let ui = &mut child;
+        ui.spacing_mut().item_spacing.x = 8.0;
+        widgets::paint_icon(
+            ui.painter(),
+            Rect::from_center_size(ui.cursor().min + vec2(8.0, rect.height() / 2.0 - 6.0), vec2(16.0, 16.0)),
+            widgets::Icon::Keeper,
+            pal.success,
+        );
+        ui.add_space(22.0);
+        let n = self.filtered.len();
+        let (learned, tip) = self.learning_status();
+        ui.label(egui::RichText::new(format!("A컷 후보 {}장", format::count(n))).font(bold(12.5))).on_hover_text(
+            "아직 고르지 않은 사진 중 가장 잘 나온 사진입니다 — 초점 · 흔들림 · 노출 · 눈 · 연사 비교와 \
+             내가 고른 A컷을 바탕으로, 연사는 베스트 한 장만. P 로 픽, 별점으로 셀렉하세요.",
+        );
+        if rect.width() > 760.0 {
+            ui.label(egui::RichText::new(learned).font(font(11.5)).color(pal.text2)).on_hover_text(tip);
+        }
+        if rect.width() > 1040.0 {
+            ui.label(egui::RichText::new("· P 픽 · X 아님").font(font(11.5)).color(pal.text3));
+        }
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            if n > 0 && widgets::secondary_button(ui, &format!("{}장 모두 픽", format::count(n)), &pal).clicked() {
+                self.pick_all_keepers(&ctx);
+            }
+            ui.add_space(6.0);
+            let mut t = self.cfg.keep_pct as f32;
+            ui.label(egui::RichText::new(format!("상위 {t:.0}%")).font(bold(12.0)));
+            ui.spacing_mut().slider_width = 110.0;
+            if ui
+                .add(egui::Slider::new(&mut t, 5.0..=50.0).step_by(5.0).show_value(false))
+                .on_hover_text("라이브러리에서 가장 잘 나온 사진 몇 % 를 후보로 볼지 (낮출수록 확실한 것만)")
+                .changed()
+            {
+                self.set_keep_pct(t as u8);
             }
             ui.label(egui::RichText::new("기준").font(font(11.5)).color(pal.text2));
         });

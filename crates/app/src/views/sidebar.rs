@@ -45,7 +45,7 @@ impl PhotoApp {
                         (SideSel::All, Icon::Photos, "라이브러리", Some(t.total)),
                         (SideSel::Recent, Icon::Clock, "최근 가져온 항목", recent),
                         (SideSel::Rated, Icon::Star, "별점 있는 사진", Some(rated)),
-                        (SideSel::Unrated, Icon::Check, "아직 고르지 않은 사진", Some(t.ratings[0])),
+                        (SideSel::Unrated, Icon::Check, "아직 고르지 않은 사진", Some(st.open_count)),
                         (SideSel::Pairs, Icon::Raw, "RAW+JPEG", Some(pairs)),
                         (SideSel::Videos, Icon::Video, "동영상", Some(videos)),
                     ];
@@ -69,6 +69,13 @@ impl PhotoApp {
                                 "B컷 후보",
                                 c[0],
                                 "초점·흔들림·눈 감음·노출·연사 비교로 골라낸, 아직 고르지 않은 사진",
+                            ),
+                            (
+                                SideSel::Keepers,
+                                Icon::Keeper,
+                                "A컷 후보",
+                                c[5],
+                                "아직 고르지 않은 사진 중 가장 잘 나온 사진 (내가 고른 A컷으로 학습, 연사는 베스트 한 장)",
                             ),
                             (SideSel::Rejected, Icon::Reject, "거절 (B컷)", c[1], "X 키로 거절한 사진"),
                             (SideSel::Picked, Icon::Flag, "픽 (A컷)", c[2], "P 키로 고른 사진"),

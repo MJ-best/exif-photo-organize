@@ -303,6 +303,17 @@ impl PhotoApp {
             ui.painter().rect_filled(Rect::from_min_size(r.min, vec2(r.width() * p, r.height())), 3.0, color);
             let t = r.left() + r.width() * self.cfg.cull_threshold as f32 / 100.0;
             ui.painter().line_segment([pos2(t, r.top() - 2.0), pos2(t, r.bottom() + 2.0)], Stroke::new(1.0, pal.text3));
+            if a.keep_rank.is_finite() && a.keep_rank * 100.0 < 50.0 {
+                ui.label(
+                    egui::RichText::new(format!(
+                        "가장 잘 나온 사진 상위 {:.0}%{}",
+                        (a.keep_rank * 100.0).ceil().max(1.0),
+                        if a.keep_rank * 100.0 < self.cfg.keep_pct as f32 { " · A컷 후보" } else { "" }
+                    ))
+                    .font(font(11.5))
+                    .color(pal.success),
+                );
+            }
             let why = reason::labels(a.reasons);
             if !why.is_empty() {
                 ui.add_space(4.0);

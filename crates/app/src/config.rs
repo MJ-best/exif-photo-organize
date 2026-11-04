@@ -67,6 +67,8 @@ pub struct Config {
     pub cull_auto: bool,
     /// B-cut probability (%) from which an undecided photo is a candidate.
     pub cull_threshold: u8,
+    /// A-cut candidates: the best this many percent of the library.
+    pub keep_pct: u8,
     /// Show B-cut badges on thumbnails.
     pub cull_badges: bool,
     /// Which ratings count as A / B labels for learning.
@@ -105,6 +107,7 @@ impl Default for Config {
             show_filmstrip: true,
             cull_auto: true,
             cull_threshold: 60,
+            keep_pct: 15,
             cull_badges: true,
             learn: Default::default(),
             export_mode: Default::default(),
