@@ -254,6 +254,8 @@ pub struct PhotoApp {
     pub library_place: Option<LibraryPlace>,
     /// Area of the central panel (for centring overlays).
     pub central_rect: egui::Rect,
+    /// Strip under the photos (grid, viewer) where action feedback appears, this frame.
+    pub status_band: Option<egui::Rect>,
     pub focus_search: bool,
     pub library_missing_since: Option<f64>,
 }
@@ -322,6 +324,7 @@ impl PhotoApp {
             grid_offset: 0.0,
             library_place: None,
             central_rect: egui::Rect::NOTHING,
+            status_band: None,
             focus_search: false,
             library_missing_since: None,
         };

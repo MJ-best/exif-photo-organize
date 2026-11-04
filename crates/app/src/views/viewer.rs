@@ -82,7 +82,11 @@ impl PhotoApp {
 
         // Image area.
         let strip_h = if self.cfg.show_filmstrip { FILMSTRIP_H } else { 0.0 };
-        let area = Rect::from_min_max(pos2(full.left(), bar.bottom()), pos2(full.right(), full.bottom() - strip_h));
+        // Under the photo, above the filmstrip: the feedback strip (see `overlays`).
+        let band_bottom = full.bottom() - strip_h;
+        let band_top = band_bottom - super::STATUS_H;
+        self.status_band = Some(Rect::from_min_max(pos2(full.left(), band_top), pos2(full.right(), band_bottom)));
+        let area = Rect::from_min_max(pos2(full.left(), bar.bottom()), pos2(full.right(), band_top));
         let img_area = area.shrink(16.0);
         let ppp = ctx.pixels_per_point();
         let max_side = ctx.input(|i| i.max_texture_side) as u32;
