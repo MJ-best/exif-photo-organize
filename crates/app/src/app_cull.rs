@@ -27,16 +27,22 @@ pub fn refresh_totals(st: &mut LibState, threshold: u8) {
         CullFilter::Picked,
         CullFilter::Undecided,
         CullFilter::BurstBest,
+        CullFilter::Keepers(st.keep_pct),
     ];
-    let mut c = [0usize; 5];
+    let mut c = [0usize; 6];
+    let mut open = 0;
     for a in &st.index.assets {
         for (k, f) in kinds.iter().enumerate() {
             if f.matches(a) {
                 c[k] += 1;
             }
         }
+        if a.rating == 0 && a.flag == 0 {
+            open += 1;
+        }
     }
     st.cull_counts = c;
+    st.open_count = open;
     st.analysed = st.index.assets.iter().filter(|a| a.b_prob.is_finite()).count();
     // Projects: photos in each.
     let mut pc: std::collections::HashMap<u32, usize> = st.index.projects.iter().map(|p| (p.id, 0)).collect();
@@ -288,6 +294,7 @@ impl PhotoApp {
                 a.scene = s.scene;
             }
         }
+        st.index.rank_keepers();
         refresh_totals(st, threshold);
         self.cull_report = Some(report);
         self.facets = None;
@@ -315,6 +322,62 @@ impl PhotoApp {
             self.filter.cull = CullFilter::Candidates(t);
             self.refilter();
         }
+    }
+
+    /// A-cut candidates: the best `pct` percent of the library.
+    pub fn set_keep_pct(&mut self, pct: u8) {
+        self.cfg.keep_pct = pct.clamp(1, 60);
+        let t = self.cfg.cull_threshold;
+        if let Some(st) = &mut self.lib {
+            st.keep_pct = self.cfg.keep_pct;
+            refresh_totals(st, t);
+        }
+        self.facets = None;
+        if matches!(self.filter.cull, CullFilter::Keepers(_)) {
+            self.filter.cull = CullFilter::Keepers(self.cfg.keep_pct);
+            self.refilter();
+        }
+    }
+
+    /// Mark every current A-cut candidate (in the filtered view) as picked.
+    pub fn pick_all_keepers(&mut self, ctx: &egui::Context) {
+        let pct = self.cfg.keep_pct;
+        let Some(st) = &self.lib else { return };
+        let ids: Vec<i64> = self
+            .filtered
+            .iter()
+            .map(|&i| &st.index.assets[i])
+            .filter(|a| CullFilter::Keepers(pct).matches(a))
+            .map(|a| a.id)
+            .collect();
+        let n = ids.len();
+        self.set_flag(ctx, ids, 1);
+        self.toast(
+            format!("{n}장을 A컷(픽)으로 표시했습니다. 아닌 사진은 U 로 풀거나 X 로 거절하면 학습에 반영됩니다."),
+            false,
+        );
+    }
+
+    /// One line on what the culling assistant learned so far (for the candidate bars).
+    pub fn learning_status(&self) -> (String, String) {
+        let tip = "거절(X) · ★1 은 B컷, 픽(P) · ★3 이상은 A컷으로 학습합니다 (설정 → 셀렉 도우미에서 바꿀 수 있음). \
+                   A · B 가 각각 6장 이상이면 내 기준을 학습하고, 장면마다 10장 이상이면 그 장면만의 기준도 만듭니다. \
+                   학습해도 B컷 비율은 기본 기준(내 판정으로 보정)을 따르고, 어떤 사진이 B컷인지만 내 기준으로 바뀝니다."
+            .to_string();
+        let Some(r) = self.cull_report.as_ref().and_then(|r| r.scenes.first()) else {
+            return ("기본 기준".into(), tip);
+        };
+        let scenes = self
+            .cull_report
+            .as_ref()
+            .map(|r| r.scenes.iter().filter(|s| s.model == "장면별 학습").count())
+            .unwrap_or(0);
+        let text = match r.model {
+            "기본값" => format!("기본 기준 · 학습까지 A {} / B {} (각 6장)", r.a.min(6), r.b.min(6)),
+            _ if scenes > 0 => format!("내 기준으로 학습됨 · A {} · B {} · 장면별 {scenes}개", r.a, r.b),
+            _ => format!("내 기준으로 학습됨 · A {} · B {}", r.a, r.b),
+        };
+        (text, tip)
     }
 
     /// Analyse every photo again (e.g. after an update of the analysis).

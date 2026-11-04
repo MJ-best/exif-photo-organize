@@ -94,6 +94,12 @@ impl PhotoApp {
                 CullFilter::Candidates(_) => {
                     ("B컷 후보가 없습니다", "기준을 넘는 사진이 없어요. 기준을 낮추면 더 찾아봅니다.")
                 }
+                CullFilter::Keepers(_) if self.analysis_job.is_some() => {
+                    ("사진을 살펴보는 중이에요", "분석이 끝나는 대로 A컷 후보가 여기에 모입니다.")
+                }
+                CullFilter::Keepers(_) => {
+                    ("A컷 후보가 없습니다", "잘 나온 사진은 모두 골랐어요. 기준을 넓히면 더 찾아봅니다.")
+                }
                 CullFilter::Rejected => ("거절한 사진이 없습니다", "X 키로 B컷을 거절하면 여기에 모입니다."),
                 CullFilter::Picked => ("고른 사진이 없습니다", "P 키로 A컷을 고르면 여기에 모입니다."),
                 _ => ("일치하는 사진이 없습니다", "필터를 바꾸거나 지워 보세요."),

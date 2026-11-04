@@ -25,7 +25,12 @@ pub struct LibState {
     /// Facet counts over the whole library (sidebar).
     pub totals: Facets,
     /// [B-cut candidates, rejected, picked, undecided, burst best] over the whole library.
-    pub cull_counts: [usize; 5],
+    /// B-cut candidates, rejected, picked, undecided, burst best, A-cut candidates.
+    pub cull_counts: [usize; 6],
+    /// Photos not judged yet: no stars, not picked or rejected.
+    pub open_count: usize,
+    /// A-cut candidates: the best this many percent (from the settings).
+    pub keep_pct: u8,
     /// Photos with a B-cut score.
     pub analysed: usize,
     /// Photos in each project.
@@ -64,6 +69,8 @@ pub enum SideSel {
     Candidates,
     Rejected,
     Picked,
+    /// A-cut candidates.
+    Keepers,
     BurstBest,
     Scene(u8),
     /// Photos of a project (작품).
@@ -367,6 +374,7 @@ impl PhotoApp {
                 self.sel = Selection::default();
                 self.viewer = None;
                 if let Some(st) = &mut self.lib {
+                    st.keep_pct = self.cfg.keep_pct;
                     crate::app_cull::refresh_totals(st, self.cfg.cull_threshold);
                 }
                 self.cull_report = None;
@@ -393,7 +401,9 @@ impl PhotoApp {
             catalog,
             index,
             totals,
-            cull_counts: [0; 5],
+            cull_counts: [0; 6],
+            open_count: 0,
+            keep_pct: 15,
             analysed: 0,
             project_counts: Default::default(),
         })
@@ -476,7 +486,7 @@ impl PhotoApp {
             let st = self.lib.as_ref()?;
             let mut f = self.filter.clone();
             f.text = self.search.clone();
-            self.facets = Some(filter::facets_with(&st.index, &f, self.cfg.cull_threshold));
+            self.facets = Some(filter::facets_with(&st.index, &f, self.cfg.cull_threshold, self.cfg.keep_pct));
         }
         self.facets.as_ref()
     }
@@ -508,7 +518,11 @@ impl PhotoApp {
                 }
             }
             SideSel::Rated => self.filter.rating = RatingFilter::AtLeast(1),
-            SideSel::Unrated => self.filter.rating = RatingFilter::Unrated,
+            // Not judged yet: no stars and not picked or rejected (X takes a photo out of here).
+            SideSel::Unrated => {
+                self.filter.rating = RatingFilter::Unrated;
+                self.filter.cull = photoorg_core::filter::CullFilter::Undecided;
+            }
             SideSel::Recent => {
                 if let Some(imp) = self.lib.as_ref().and_then(|s| s.index.imports.first()) {
                     self.filter.import_id = Some(imp.id);
@@ -528,6 +542,7 @@ impl PhotoApp {
             }
             SideSel::Rejected => self.filter.cull = photoorg_core::filter::CullFilter::Rejected,
             SideSel::Picked => self.filter.cull = photoorg_core::filter::CullFilter::Picked,
+            SideSel::Keepers => self.filter.cull = photoorg_core::filter::CullFilter::Keepers(self.cfg.keep_pct),
             SideSel::BurstBest => self.filter.cull = photoorg_core::filter::CullFilter::BurstBest,
             SideSel::Scene(s) => {
                 self.filter.scenes.insert(*s);

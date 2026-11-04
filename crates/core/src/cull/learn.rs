@@ -160,7 +160,7 @@ pub fn fit(xs: &[Features], ys: &[bool], prior: &Model, lambda: f64) -> Model {
     let mut theta = theta0.clone();
     // The intercept is only weakly tied to the prior.
     let reg = |j: usize| if j == N { lambda * 0.05 } else { lambda };
-    for _ in 0..25 {
+    for _ in 0..60 {
         let mut grad = vec![0.0; d];
         let mut hess = vec![0.0; d * d];
         for (x, &y) in xs.iter().zip(ys) {
@@ -182,11 +182,14 @@ pub fn fit(xs: &[Features], ys: &[bool], prior: &Model, lambda: f64) -> Model {
             grad[j] += reg(j) * (theta[j] - theta0[j]);
             hess[j * d + j] += reg(j);
         }
-        let Some(step) = solve(hess, grad.clone(), d) else { break };
-        let mut max_step = 0f64;
+        let Some(mut step) = solve(hess, grad.clone(), d) else { break };
+        // Damped Newton: a full step from far away can overshoot and diverge.
+        let max_step = step.iter().fold(0f64, |m, s| m.max(s.abs()));
+        if max_step > 2.0 {
+            step.iter_mut().for_each(|s| *s *= 2.0 / max_step);
+        }
         for j in 0..d {
             theta[j] -= step[j];
-            max_step = max_step.max(step[j].abs());
         }
         if max_step < 1e-6 {
             break;
@@ -448,6 +451,36 @@ pub fn features(items: &[Item]) -> (Vec<Features>, Vec<Score>) {
     (feats, scores)
 }
 
+/// Shift a trained model's intercept so that, over the photos not judged yet (`open`), it expects
+/// as many B-cuts as the prior does — scaled by how the prior fared on the judged photos
+/// (`judged`: features and whether the user called it a B-cut).
+///
+/// Labels are not a fair sample of the library (B-cuts are mostly rejected from the candidate
+/// list, starting with the worst), so a trained model knows *which* photos look like B-cuts to
+/// this user but not *how many* there are: left alone it learns that only the most extreme frames
+/// are B-cuts, and the candidate list collapses. A user who keeps photos the prior flagged gets
+/// fewer candidates; one who rejects photos it thought fine gets more.
+pub fn anchor(model: &Model, prior: &Model, open: &[&Features], judged: &[(&Features, bool)]) -> Model {
+    if open.is_empty() || model == prior {
+        return model.clone();
+    }
+    let expected: f64 = judged.iter().map(|(x, _)| prior.prob(x)).sum();
+    let actual = judged.iter().filter(|(_, b)| *b).count() as f64;
+    let strictness = ((actual + 3.0) / (expected + 3.0)).clamp(0.2, 5.0);
+    let target = (open.iter().map(|x| prior.prob(x)).sum::<f64>() / open.len() as f64 * strictness).clamp(0.001, 0.95);
+    let mean = |shift: f64| open.iter().map(|x| sigmoid(model.logit(x) + shift)).sum::<f64>() / open.len() as f64;
+    let (mut lo, mut hi) = (-30.0, 30.0);
+    for _ in 0..60 {
+        let mid = (lo + hi) / 2.0;
+        if mean(mid) < target {
+            lo = mid;
+        } else {
+            hi = mid;
+        }
+    }
+    Model { w: model.w.clone(), b: model.b + (lo + hi) / 2.0 }
+}
+
 /// Trained models: `None` = the library-wide model, `Some(scene)` = a per-scene model.
 pub type Models = Vec<(Option<Scene>, Model)>;
 
@@ -461,12 +494,17 @@ pub fn score(items: &[Item], settings: &LearnSettings) -> (Vec<Score>, Report, M
     let g_b = gy.iter().filter(|y| **y).count();
     let g_a = gy.len() - g_b;
     let mut report = Report { analysed: items.len(), ..Default::default() };
-    let global = if g_a >= MIN_GLOBAL && g_b >= MIN_GLOBAL { fit(&gx, &gy, &prior, LAMBDA) } else { prior.clone() };
+    // Scene models learn on top of the trained global model; both are anchored to the
+    // library's base rate only for scoring (see `anchor`).
+    let open: Vec<&Features> = feats.iter().zip(&labels).filter(|(_, y)| y.is_none()).map(|(x, _)| x).collect();
+    let judged: Vec<(&Features, bool)> = feats.iter().zip(&labels).filter_map(|(x, y)| y.map(|y| (x, y))).collect();
+    let global_fit = if g_a >= MIN_GLOBAL && g_b >= MIN_GLOBAL { fit(&gx, &gy, &prior, LAMBDA) } else { prior.clone() };
+    let global = anchor(&global_fit, &prior, &open, &judged);
     report.scenes.push(SceneReport {
         scene: None,
         a: g_a,
         b: g_b,
-        model: if global == prior { "기본값" } else { "전체 학습" },
+        model: if global_fit == prior { "기본값" } else { "전체 학습" },
         accuracy: cross_validate(&gx, &gy, &prior, LAMBDA, 5),
     });
     let mut models: Models = vec![(None, global.clone())];
@@ -486,16 +524,30 @@ pub fn score(items: &[Item], settings: &LearnSettings) -> (Vec<Score>, Report, M
             continue;
         }
         let (model, name) = if a >= MIN_SCENE && b >= MIN_SCENE {
-            (fit(&sx, &sy, &global, LAMBDA), "장면별 학습")
+            let open: Vec<&Features> = feats
+                .iter()
+                .zip(&labels)
+                .zip(items)
+                .filter(|((_, y), it)| it.scene == s && y.is_none())
+                .map(|((x, _), _)| x)
+                .collect();
+            let judged: Vec<(&Features, bool)> = feats
+                .iter()
+                .zip(&labels)
+                .zip(items)
+                .filter(|(_, it)| it.scene == s)
+                .filter_map(|((x, y), _)| y.map(|y| (x, y)))
+                .collect();
+            (anchor(&fit(&sx, &sy, &global_fit, LAMBDA), &prior, &open, &judged), "장면별 학습")
         } else {
-            (global.clone(), if global == prior { "기본값" } else { "전체 학습" })
+            (global.clone(), if global_fit == prior { "기본값" } else { "전체 학습" })
         };
         report.scenes.push(SceneReport {
             scene: Some(s),
             a,
             b,
             model: name,
-            accuracy: cross_validate(&sx, &sy, &global, LAMBDA, 5),
+            accuracy: cross_validate(&sx, &sy, &global_fit, LAMBDA, 5),
         });
         if name == "장면별 학습" {
             models.push((Some(s), model.clone()));
@@ -507,7 +559,8 @@ pub fn score(items: &[Item], settings: &LearnSettings) -> (Vec<Score>, Report, M
         scores[i].b_prob = m.prob(&feats[i]) as f32;
         scores[i].reasons = m.reasons(&feats[i]);
     }
-    report.candidates_at_60 = scores.iter().zip(items).filter(|(s, it)| s.b_prob >= 0.6 && it.flag == 0).count();
+    report.candidates_at_60 =
+        scores.iter().zip(items).filter(|(s, it)| s.b_prob >= 0.6 && it.flag == 0 && it.rating == 0).count();
     (scores, report, models)
 }
 
@@ -586,7 +639,8 @@ mod tests {
         items.push(test_lo);
         let (scores, report, _) = score(&items, &LearnSettings::default());
         let p = |id: i64| scores.iter().find(|s| s.id == id).unwrap().b_prob;
-        assert!(p(500) > 0.7 && p(501) < 0.3, "hi {} lo {}", p(500), p(501));
+        // Learned which photos are B-cuts (the share of B-cuts among new photos stays anchored).
+        assert!(p(500) > 0.45 && p(501) < 0.05, "hi {} lo {}", p(500), p(501));
         assert_eq!(report.scenes[0].model, "전체 학습");
         assert!(report.scenes[0].accuracy.unwrap() > 0.9);
         let land = report.scenes.iter().find(|r| r.scene == Some(Scene::Landscape)).unwrap();
@@ -601,6 +655,56 @@ mod tests {
         assert_eq!(s.label(2, 0), None);
         assert_eq!(s.label(5, -1), Some(true));
         assert_eq!(s.label(0, 1), Some(false));
+    }
+
+    #[test]
+    fn candidates_survive_rejecting_the_worst() {
+        // Portraits shot wide open, sharpness all over the place. The user rejects the 150
+        // worst candidates and keeps 60 photos, some of which the prior thought soft. The
+        // trained model used to learn "only the blurriest frames are B-cuts" and the candidate
+        // list collapsed (1202 → 41 in a 4000-photo run); anchored, the rest stay candidates.
+        let mut seed = 12345u64;
+        let mut rnd = || {
+            seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            ((seed >> 33) as f64) / (1u64 << 31) as f64
+        };
+        let mut items: Vec<Item> = (0..1500i64)
+            .map(|i| {
+                let mut it = item(i + 1, i * 5000, (2.0 + rnd() * 5.0) as f32);
+                it.scene = Scene::Portrait;
+                it.face_area = 0.02;
+                it.face_sharp = Some(it.sharp_peak - (rnd() * 1.5) as f32);
+                it.eyes = Some((0.5 + rnd() * 0.5) as f32);
+                it.iso = 3200;
+                it.motion = (0.2 + rnd() * 0.5) as f32;
+                it.dhash = rnd().to_bits();
+                it
+            })
+            .collect();
+        let settings = LearnSettings::default();
+        let candidates = |sc: &[Score], items: &[Item]| {
+            sc.iter().zip(items).filter(|(s, it)| s.b_prob >= 0.6 && it.flag == 0 && it.rating == 0).count()
+        };
+        let (before, _, _) = score(&items, &settings);
+        let n_before = candidates(&before, &items);
+        let mut order: Vec<usize> = (0..items.len()).collect();
+        order.sort_by(|&a, &b| before[b].b_prob.partial_cmp(&before[a].b_prob).unwrap());
+        for &i in &order[..150] {
+            items[i].flag = -1;
+        }
+        for &i in order[150..].iter().step_by(15).take(30) {
+            items[i].flag = 1;
+        }
+        for &i in order.iter().rev().step_by(11).take(30) {
+            items[i].rating = 4;
+        }
+        let (after, report, _) = score(&items, &settings);
+        assert_eq!(report.scenes[0].model, "전체 학습");
+        let n_after = candidates(&after, &items);
+        let left = n_before - 150;
+        assert!(n_after * 10 >= left * 6 && n_after <= left * 3 / 2, "before {n_before}, left {left}, after {n_after}");
+        // Every probability is finite (the scene model used to diverge).
+        assert!(after.iter().all(|s| s.b_prob.is_finite()));
     }
 
     /// `cargo test --release -p photoorg-core bench_score -- --ignored --nocapture`

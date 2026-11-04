@@ -24,6 +24,7 @@ impl PhotoApp {
             SideSel::Candidates => "B컷 후보".into(),
             SideSel::Rejected => "거절 (B컷)".into(),
             SideSel::Picked => "픽 (A컷)".into(),
+            SideSel::Keepers => "A컷 후보".into(),
             SideSel::BurstBest => "연사 베스트".into(),
             SideSel::Scene(s) => photoorg_core::cull::Scene::from_u8(*s).label().into(),
             SideSel::Project(p) => st.index.project(*p).map(|p| p.name.clone()).unwrap_or_else(|| "작품".into()),

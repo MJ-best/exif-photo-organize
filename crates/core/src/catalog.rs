@@ -224,6 +224,10 @@ pub struct AssetRecord {
     pub burst: i64,
     pub burst_rank: u16,
     pub burst_size: u16,
+    /// A-cut candidate rank: share of the analysed photos (best frame of each burst) that look
+    /// better, 0 = the best one (NaN = not analysed, or a weaker frame of a burst). See
+    /// [`LibraryIndex::rank_keepers`].
+    pub keep_rank: f32,
 }
 
 impl AssetRecord {
@@ -360,6 +364,28 @@ impl LibraryIndex {
     fn reindex(&mut self) {
         self.assets.sort_by_key(|a| (a.captured_ms, a.id));
         self.pos = self.assets.iter().enumerate().map(|(i, a)| (a.id, i)).collect();
+        self.rank_keepers();
+    }
+
+    /// Rank the analysed photos by how unlikely they are to be B-cuts (the learned model, so
+    /// "like the ones I keep"), counting only the best frame of each burst: `keep_rank` 0 is the
+    /// best photo, 0.1 means 10 % look better. Call after the scores change.
+    pub fn rank_keepers(&mut self) {
+        let mut order: Vec<(f32, usize)> = self
+            .assets
+            .iter()
+            .enumerate()
+            .filter(|(_, a)| a.b_prob.is_finite() && !a.is_video() && (a.burst_size < 2 || a.burst_rank == 0))
+            .map(|(i, a)| (a.b_prob, i))
+            .collect();
+        order.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal).then(a.1.cmp(&b.1)));
+        for a in &mut self.assets {
+            a.keep_rank = f32::NAN;
+        }
+        let n = order.len().max(1) as f32;
+        for (rank, (_, i)) in order.into_iter().enumerate() {
+            self.assets[i].keep_rank = rank as f32 / n;
+        }
     }
 
     /// Insert or replace rows (e.g. assets that were just imported).
@@ -991,6 +1017,7 @@ impl Catalog {
             burst: r.get::<_, Option<i64>>(24)?.unwrap_or(0),
             burst_rank: r.get::<_, Option<i64>>(25)?.unwrap_or(0) as u16,
             burst_size: r.get::<_, Option<i64>>(26)?.unwrap_or(0) as u16,
+            keep_rank: f32::NAN,
         };
         Ok((
             rec,

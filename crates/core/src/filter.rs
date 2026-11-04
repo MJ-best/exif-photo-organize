@@ -69,8 +69,12 @@ impl FormatFilter {
 pub enum CullFilter {
     #[default]
     Any,
-    /// Undecided photos whose B-cut probability is at least this many percent.
+    /// Undecided photos (no stars, not picked or rejected) whose B-cut probability is at least
+    /// this many percent.
     Candidates(u8),
+    /// Undecided photos among the best this many percent of the library (A-cut candidates,
+    /// see [`crate::catalog::LibraryIndex::rank_keepers`]).
+    Keepers(u8),
     Rejected,
     Picked,
     Undecided,
@@ -83,6 +87,7 @@ impl CullFilter {
         match self {
             CullFilter::Any => "전체".into(),
             CullFilter::Candidates(_) => "B컷 후보".into(),
+            CullFilter::Keepers(_) => "A컷 후보".into(),
             CullFilter::Rejected => "거절 (B컷)".into(),
             CullFilter::Picked => "픽 (A컷)".into(),
             CullFilter::Undecided => "아직 안 고름".into(),
@@ -93,7 +98,12 @@ impl CullFilter {
     pub fn matches(self, a: &AssetRecord) -> bool {
         match self {
             CullFilter::Any => true,
-            CullFilter::Candidates(t) => a.flag == 0 && a.b_prob.is_finite() && a.b_prob * 100.0 >= t as f32,
+            CullFilter::Candidates(t) => {
+                a.flag == 0 && a.rating == 0 && a.b_prob.is_finite() && a.b_prob * 100.0 >= t as f32
+            }
+            CullFilter::Keepers(t) => {
+                a.flag == 0 && a.rating == 0 && a.keep_rank.is_finite() && a.keep_rank * 100.0 < t as f32
+            }
             CullFilter::Rejected => a.flag < 0,
             CullFilter::Picked => a.flag > 0,
             CullFilter::Undecided => a.flag == 0,
@@ -296,7 +306,8 @@ pub struct Facets {
     pub tags: Vec<(u32, usize)>,
     pub total: usize,
     /// [B-cut candidates (at the filter's threshold, default 60 %), rejected, picked, undecided, burst best]
-    pub cull: [usize; 5],
+    /// B-cut candidates, rejected, picked, undecided, burst best, A-cut candidates.
+    pub cull: [usize; 6],
     pub scenes: Vec<(u8, usize)>,
 }
 
@@ -312,7 +323,7 @@ struct Acc {
     formats: [usize; 6],
     tags: BTreeMap<u32, usize>,
     total: usize,
-    cull: [usize; 5],
+    cull: [usize; 6],
     scenes: BTreeMap<u8, usize>,
 }
 
@@ -331,7 +342,7 @@ impl Acc {
         m(&mut self.shutters, o.shutters);
         m(&mut self.tags, o.tags);
         m(&mut self.scenes, o.scenes);
-        for i in 0..5 {
+        for i in 0..6 {
             self.cull[i] += o.cull[i];
         }
         for i in 0..6 {
@@ -344,16 +355,21 @@ impl Acc {
 }
 
 pub fn facets(idx: &LibraryIndex, f: &Filter) -> Facets {
-    facets_with(idx, f, 60)
+    facets_with(idx, f, 60, 15)
 }
 
-/// Like [`facets`], counting B-cut candidates from `candidate_threshold` percent
-/// (unless the filter itself selects candidates with its own threshold).
-pub fn facets_with(idx: &LibraryIndex, f: &Filter, candidate_threshold: u8) -> Facets {
+/// Like [`facets`], counting B-cut candidates from `candidate_threshold` percent and A-cut
+/// candidates among the best `keeper_pct` percent (unless the filter itself selects them with
+/// its own value).
+pub fn facets_with(idx: &LibraryIndex, f: &Filter, candidate_threshold: u8, keeper_pct: u8) -> Facets {
     let text = f.text.trim().to_lowercase();
     let threshold = match f.cull {
         CullFilter::Candidates(t) => t,
         _ => candidate_threshold,
+    };
+    let keeper_pct = match f.cull {
+        CullFilter::Keepers(t) => t,
+        _ => keeper_pct,
     };
     let acc = idx
         .assets
@@ -399,6 +415,7 @@ pub fn facets_with(idx: &LibraryIndex, f: &Filter, candidate_threshold: u8) -> F
                     CullFilter::Picked,
                     CullFilter::Undecided,
                     CullFilter::BurstBest,
+                    CullFilter::Keepers(keeper_pct),
                 ];
                 for (k, c) in kinds.iter().enumerate() {
                     if c.matches(a) {
@@ -474,7 +491,37 @@ mod tests {
             burst: 0,
             burst_rank: 0,
             burst_size: 0,
+            keep_rank: f32::NAN,
         }
+    }
+
+    #[test]
+    fn keepers_and_candidates_are_undecided_photos() {
+        let mut idx = LibraryIndex::new();
+        let rows: Vec<AssetRow> = (1..=10)
+            .map(|i| {
+                let mut r = rec(i, 100, 50.0, 0, formats::JPEG);
+                r.b_prob = i as f32 / 20.0;
+                AssetRow { rec: r, camera: "Cam".into(), lens: "L".into(), tags: vec![] }
+            })
+            .collect();
+        idx.upsert(rows);
+        let set = |idx: &mut LibraryIndex, id: i64, f: &dyn Fn(&mut AssetRecord)| f(idx.get_mut(id).unwrap());
+        // 1 and 2 are a burst (2 the weaker frame); 3 is picked; 10 has two stars.
+        set(&mut idx, 1, &|a| (a.burst, a.burst_size, a.burst_rank) = (1, 2, 0));
+        set(&mut idx, 2, &|a| (a.burst, a.burst_size, a.burst_rank) = (1, 2, 1));
+        set(&mut idx, 3, &|a| a.flag = 1);
+        set(&mut idx, 10, &|a| a.rating = 2);
+        idx.rank_keepers();
+        let ids = |f: &Filter| -> Vec<i64> { apply(&idx, f).into_iter().map(|i| idx.assets[i].id).collect() };
+        // Ranked: 1, 3, 4, … (2 is not a best frame): the best 30 % are 1, 3 and 4; 3 is decided.
+        let keepers = Filter { cull: CullFilter::Keepers(30), ..Default::default() };
+        assert_eq!(ids(&keepers), vec![1, 4]);
+        assert!(idx.get(2).unwrap().keep_rank.is_nan());
+        // B-cut candidates leave out photos with stars.
+        let candidates = Filter { cull: CullFilter::Candidates(45), ..Default::default() };
+        assert_eq!(ids(&candidates), vec![9]);
+        assert_eq!(facets_with(&idx, &Filter::default(), 45, 30).cull[5], 2);
     }
 
     fn index() -> LibraryIndex {
@@ -596,6 +643,7 @@ mod bench {
                     burst: 0,
                     burst_rank: 0,
                     burst_size: 0,
+                    keep_rank: f32::NAN,
                 },
                 camera: cams[(i % 5) as usize].into(),
                 lens: lenses[(i % 7) as usize].into(),

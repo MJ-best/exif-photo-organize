@@ -75,6 +75,9 @@ impl PhotoApp {
                         if matches!(self.filter.cull, photoorg_core::filter::CullFilter::Candidates(_)) {
                             self.cull_bar(ui);
                         }
+                        if matches!(self.filter.cull, photoorg_core::filter::CullFilter::Keepers(_)) {
+                            self.keeper_bar(ui);
+                        }
                         if let Some(p) = self.works_bar_project() {
                             self.works_bar(ui, p);
                         }
@@ -117,8 +120,10 @@ impl PhotoApp {
         match self.side {
             // "보낸 사진 숨기기" of the send bar is not a filter token either.
             Rated | Picked => 1 + self.filter.project.is_some() as usize,
-            Unrated | Videos | Pairs | Camera(_) | Lens(_) => 1,
-            Candidates | Rejected | BurstBest | Scene(_) => 1,
+            // Not judged yet: no stars and not picked / rejected.
+            Unrated => 2,
+            Videos | Pairs | Camera(_) | Lens(_) => 1,
+            Candidates | Keepers | Rejected | BurstBest | Scene(_) => 1,
             Project(_) | Theme(_) => 1,
             _ => 0,
         }

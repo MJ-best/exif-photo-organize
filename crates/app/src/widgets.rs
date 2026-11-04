@@ -38,6 +38,8 @@ pub enum Icon {
     Stack,
     /// B-cut candidate (eye with a question).
     Suspect,
+    /// A-cut candidate (magnifier with an A).
+    Keeper,
     /// Scene (mountains).
     Scene,
     /// Project (작품): an open photo book.
@@ -165,6 +167,11 @@ pub fn paint_icon(p: &egui::Painter, rect: Rect, icon: Icon, color: Color32) {
             p.circle_stroke(at(7.0, 7.0), 5.0 * s, st);
             line(&[(10.6, 10.6), (14.5, 14.5)]);
             p.text(at(7.0, 7.2), Align2::CENTER_CENTER, "B", bold(6.5 * s), color);
+        }
+        Icon::Keeper => {
+            p.circle_stroke(at(7.0, 7.0), 5.0 * s, st);
+            line(&[(10.6, 10.6), (14.5, 14.5)]);
+            p.text(at(7.0, 7.2), Align2::CENTER_CENTER, "A", bold(6.5 * s), color);
         }
         Icon::Scene => {
             line(&[(1.5, 13.5), (6.0, 6.0), (9.0, 10.0), (11.0, 7.5), (14.5, 13.5), (1.5, 13.5)]);
