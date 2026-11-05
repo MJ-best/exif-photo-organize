@@ -14,3 +14,4 @@ log.workspace = true
 serde.workspace = true
 image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
 tract-onnx = "0.23"
+rayon.workspace = true

@@ -237,6 +237,8 @@ pub struct PhotoApp {
     pub writer: Option<Sender<WriteJob>>,
     pub analysis_job: Option<crate::app_cull::AnalysisJob>,
     pub analysis_pending: bool,
+    /// Photos analysed when the running analysis last triggered a rescore.
+    pub analysed_at_rescore: usize,
     pub export_job: Option<crate::app_export::ExportJob>,
     pub export_dialog: Option<crate::app_export::ExportDialog>,
     /// 작품 폴더: running gather / restore, the dialog, and the status of the shown project.
@@ -315,6 +317,7 @@ impl PhotoApp {
             writer: None,
             analysis_job: None,
             analysis_pending: false,
+            analysed_at_rescore: 0,
             export_job: None,
             export_dialog: None,
             works_job: None,

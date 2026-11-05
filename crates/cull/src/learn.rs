@@ -11,7 +11,11 @@
 use super::scene::Scene;
 use serde::{Deserialize, Serialize};
 
-pub const N: usize = 14;
+pub const N: usize = 16;
+/// Index of the taste features ([`taste_features`]): similarity to the photographer's B-cuts,
+/// then to their A-cuts.
+pub const TASTE_B: usize = 14;
+pub const TASTE_A: usize = 15;
 
 /// Feature names (for the settings / debug view).
 pub const FEATURE_NAMES: [&str; N] = [
@@ -29,6 +33,8 @@ pub const FEATURE_NAMES: [&str; N] = [
     "고감도",
     "얼굴 있음",
     "전체 선명도(같은 장면 대비)",
+    "내 B컷과 닮음",
+    "내 A컷과 닮음",
 ];
 
 /// Reason bits shown to the user.
@@ -41,8 +47,9 @@ pub mod reason {
     pub const UNDER: u16 = 32;
     pub const BURST: u16 = 64;
     pub const NOISE: u16 = 128;
+    pub const TASTE: u16 = 256;
 
-    pub const ALL: [(u16, &str); 8] = [
+    pub const ALL: [(u16, &str); 9] = [
         (BLUR, "초점 흐림"),
         (SHAKE, "흔들림"),
         (FACE_BLUR, "얼굴 초점 빗나감"),
@@ -51,6 +58,7 @@ pub mod reason {
         (UNDER, "노출 부족"),
         (BURST, "연사 중 덜 선명"),
         (NOISE, "고감도 노이즈"),
+        (TASTE, "내가 거절한 사진과 비슷"),
     ];
 
     pub fn labels(mask: u16) -> Vec<&'static str> {
@@ -73,6 +81,8 @@ const FEATURE_REASON: [u16; N] = [
     reason::NOISE,
     0,
     reason::BLUR,
+    reason::TASTE,
+    0,
 ];
 
 pub type Features = [f64; N];
@@ -86,7 +96,8 @@ pub struct Model {
 impl Model {
     /// Hand-tuned defaults: a typical good photo scores ~10 %, a clearly blurred one ~90 %.
     pub fn prior() -> Model {
-        Model { w: vec![2.5, 3.5, 2.0, 3.5, 3.5, 2.5, 3.0, 3.0, 2.5, 0.5, 0.8, 0.3, 0.0, 0.8], b: -4.2 }
+        // Taste starts at zero: only the photographer's own decisions give it weight.
+        Model { w: vec![2.5, 3.5, 2.0, 3.5, 3.5, 2.5, 3.0, 3.0, 2.5, 0.5, 0.8, 0.3, 0.0, 0.8, 0.0, 0.0], b: -4.2 }
     }
 
     pub fn logit(&self, x: &Features) -> f64 {
@@ -250,6 +261,8 @@ pub struct Item {
     pub face_sharp: Option<f32>,
     pub eyes: Option<f32>,
     pub dhash: u64,
+    /// Taste embedding ([`crate::taste::embed`]; empty when unknown).
+    pub embed: Vec<f32>,
 }
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq)]
@@ -451,6 +464,86 @@ pub fn features(items: &[Item]) -> (Vec<Features>, Vec<Score>) {
     (feats, scores)
 }
 
+/// Taste ([`crate::taste`]): for every photo, the mean similarity of the five most similar
+/// photos the photographer rejected (`x[TASTE_B]`) and kept (`x[TASTE_A]`). Photos of the same
+/// moment (one burst, or one camera within a minute) are left out — they look alike because they
+/// show the same scene, and choosing among them is what the burst features are for. A photo is
+/// never compared with itself. Both are standard scores over the library (0 = as similar as a
+/// typical photo), so that small differences can be learned and only a photo noticeably closer to
+/// the B-cuts than most gets that reason. Photos without an embedding, or without judged photos of
+/// a kind, get 0 (no push either way).
+fn taste_features(items: &[Item], labels: &[Option<bool>], scores: &[Score], feats: &mut [Features]) {
+    const K: usize = 5;
+    const MOMENT_MS: i64 = 60_000;
+    let dim = crate::taste::DIM;
+    let n = items.len();
+    let embeds: Vec<&[f32]> = items.iter().map(|it| it.embed.as_slice()).collect();
+    let unit = crate::taste::centred(&embeds);
+    // The judged photos of each kind, their vectors side by side (fast to scan).
+    struct Set {
+        idx: Vec<usize>,
+        vecs: Vec<f32>,
+    }
+    let set = |want: bool| -> Set {
+        let idx: Vec<usize> = (0..n).filter(|&i| labels[i] == Some(want) && unit[i].is_some()).collect();
+        let vecs = idx.iter().flat_map(|&i| unit[i].as_ref().unwrap().iter().copied()).collect();
+        Set { idx, vecs }
+    };
+    let (b_set, a_set) = (set(true), set(false));
+    if b_set.idx.is_empty() && a_set.idx.is_empty() {
+        return;
+    }
+    // Camera names as numbers (compared in the inner loop).
+    let mut cams: Vec<&str> = items.iter().map(|it| it.camera.as_str()).collect();
+    cams.sort_unstable();
+    cams.dedup();
+    let cam: Vec<usize> = items.iter().map(|it| cams.binary_search(&it.camera.as_str()).unwrap_or(0)).collect();
+    let same_moment = |i: usize, j: usize| {
+        (scores[i].burst != 0 && scores[i].burst == scores[j].burst)
+            || (cam[i] == cam[j] && (items[i].captured_ms - items[j].captured_ms).abs() <= MOMENT_MS)
+    };
+    let nearest = |i: usize, s: &Set| -> Option<f64> {
+        let u = unit[i].as_ref()?;
+        let mut top = [f32::MIN; K];
+        let mut found = 0;
+        for (k, &j) in s.idx.iter().enumerate() {
+            if j == i || same_moment(i, j) {
+                continue;
+            }
+            let sim = crate::taste::dot(u, &s.vecs[k * dim..(k + 1) * dim]);
+            found += 1;
+            // Keep the K largest (top is sorted descending).
+            if sim > top[K - 1] {
+                let mut p = K - 1;
+                while p > 0 && top[p - 1] < sim {
+                    top[p] = top[p - 1];
+                    p -= 1;
+                }
+                top[p] = sim;
+            }
+        }
+        let k = found.min(K);
+        (k > 0).then(|| top[..k].iter().map(|v| *v as f64).sum::<f64>() / k as f64)
+    };
+    use rayon::prelude::*;
+    let values: Vec<(Option<f64>, Option<f64>)> =
+        (0..n).into_par_iter().map(|i| (nearest(i, &b_set), nearest(i, &a_set))).collect();
+    let standard = |v: Vec<Option<f64>>| -> Vec<f64> {
+        let known: Vec<f64> = v.iter().flatten().copied().collect();
+        if known.is_empty() {
+            return vec![0.0; v.len()];
+        }
+        let m = known.iter().sum::<f64>() / known.len() as f64;
+        let sd = (known.iter().map(|x| (x - m).powi(2)).sum::<f64>() / known.len() as f64).sqrt().max(0.02);
+        v.into_iter().map(|x| x.map_or(0.0, |x| ((x - m) / sd).clamp(-3.0, 3.0))).collect()
+    };
+    let (b, a): (Vec<_>, Vec<_>) = values.into_iter().unzip();
+    for (x, (b, a)) in feats.iter_mut().zip(standard(b).into_iter().zip(standard(a))) {
+        x[TASTE_B] = b;
+        x[TASTE_A] = a;
+    }
+}
+
 /// Shift a trained model's intercept so that, over the photos not judged yet (`open`), it expects
 /// as many B-cuts as the prior does — scaled by how the prior fared on the judged photos
 /// (`judged`: features and whether the user called it a B-cut).
@@ -486,8 +579,9 @@ pub type Models = Vec<(Option<Scene>, Model)>;
 
 /// Train models from labelled items and score everything.
 pub fn score(items: &[Item], settings: &LearnSettings) -> (Vec<Score>, Report, Models) {
-    let (feats, mut scores) = features(items);
+    let (mut feats, mut scores) = features(items);
     let labels: Vec<Option<bool>> = items.iter().map(|it| settings.label(it.rating, it.flag)).collect();
+    taste_features(items, &labels, &scores, &mut feats);
     let prior = Model::prior();
     let (gx, gy): (Vec<Features>, Vec<bool>) =
         feats.iter().zip(&labels).filter_map(|(x, y)| y.map(|y| (*x, y))).unzip();
@@ -589,6 +683,7 @@ mod tests {
             face_sharp: None,
             eyes: None,
             dhash: (id as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15),
+            embed: Vec::new(),
         }
     }
 
@@ -720,6 +815,12 @@ mod tests {
                 if i % 7 == 0 {
                     it.flag = if it.sharp_peak < 4.0 { -1 } else { 1 };
                 }
+                // A taste embedding, as every analysed photo has.
+                let mut e: Vec<f32> =
+                    (0..crate::taste::DIM).map(|d| ((i as usize * 31 + d * 17) % 97) as f32 - 48.0).collect();
+                let n = e.iter().map(|v| v * v).sum::<f32>().sqrt();
+                e.iter_mut().for_each(|v| *v /= n);
+                it.embed = e;
                 it
             })
             .collect();

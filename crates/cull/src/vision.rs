@@ -1,4 +1,5 @@
-//! Neural networks (run locally with tract): YuNet face detector and MobileNetV2 classifier.
+//! Neural networks (run locally with tract): YuNet face detector and MobileNetV2 classifier
+//! (whose pooled features also describe what a photo shows, see [`crate::taste`]).
 
 use anyhow::{Context, Result};
 use image::{imageops, RgbImage};
@@ -24,9 +25,15 @@ fn nets() -> Result<&'static Nets> {
                 .model_for_read(&mut std::io::Cursor::new(YUNET_ONNX))?
                 .into_optimized()?
                 .into_runnable()?;
-            let mobilenet = tract_onnx::onnx()
-                .model_for_read(&mut std::io::Cursor::new(MOBILENET_ONNX))?
+            let mobilenet = tract_onnx::onnx().model_for_read(&mut std::io::Cursor::new(MOBILENET_ONNX))?;
+            // The class scores, and the pooled features just before the classifier.
+            let outputs = [
+                OutletId::new(mobilenet.node_id_by_name("Gemm_104")?, 0),
+                OutletId::new(mobilenet.node_id_by_name("GlobalAveragePool_97")?, 0),
+            ];
+            let mobilenet = mobilenet
                 .with_input_fact(0, f32::fact([1, 3, 224, 224]).into())?
+                .with_output_outlets(&outputs)?
                 .into_optimized()?
                 .into_runnable()?;
             Ok(Nets { yunet, mobilenet })
@@ -129,6 +136,11 @@ pub fn detect_faces(img: &RgbImage, threshold: f32) -> Result<Vec<DetectedFace>>
 
 /// ImageNet-1k class probabilities (MobileNetV2, 224×224 centre crop).
 pub fn classify(img: &RgbImage) -> Result<Vec<f32>> {
+    Ok(classify_with_features(img)?.0)
+}
+
+/// Class probabilities and the 1280 pooled features the classifier reads them from.
+pub fn classify_with_features(img: &RgbImage) -> Result<(Vec<f32>, Vec<f32>)> {
     let nets = nets()?;
     let (w, h) = img.dimensions();
     let s = 256.0 / w.min(h) as f32;
@@ -145,7 +157,8 @@ pub fn classify(img: &RgbImage) -> Result<Vec<f32>> {
     let max = logits.iter().copied().fold(f32::MIN, f32::max);
     let exps: Vec<f32> = logits.iter().map(|v| (v - max).exp()).collect();
     let sum: f32 = exps.iter().sum();
-    Ok(exps.into_iter().map(|e| e / sum).collect())
+    let pooled: Vec<f32> = out[1].to_plain_array_view::<f32>()?.iter().copied().collect();
+    Ok((exps.into_iter().map(|e| e / sum).collect(), pooled))
 }
 
 /// Load the networks ahead of time (e.g. on a background thread).
