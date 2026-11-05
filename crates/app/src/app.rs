@@ -253,6 +253,8 @@ pub struct PhotoApp {
     pub cull_report: Option<photoorg_core::cull::Report>,
     /// "내 셀렉 정확도" measurements, job and dialog.
     pub accuracy: crate::app_accuracy::Accuracy,
+    /// 설정 → 라이선스.
+    pub license: crate::app_license::LicenseState,
     pub xmp_enabled: Arc<AtomicBool>,
     pub refilter_needed: bool,
     /// Refilter once the focus leaves this photo (themes in "고를 사진": the photo stays until the
@@ -329,6 +331,7 @@ impl PhotoApp {
             labels_dirty_at: None,
             cull_report: None,
             accuracy: Default::default(),
+            license: Default::default(),
             xmp_enabled: Arc::new(AtomicBool::new(true)),
             refilter_needed: false,
             refilter_on_move: None,
@@ -343,6 +346,7 @@ impl PhotoApp {
         };
         app.xmp_enabled.store(app.cfg.write_xmp, Ordering::Relaxed);
         app.apply_theme(&cc.egui_ctx);
+        app.license_init(&cc.egui_ctx);
         if let Some(p) = app.cfg.library.clone() {
             app.open_library(&cc.egui_ctx, p, false);
         }
@@ -1008,6 +1012,7 @@ impl PhotoApp {
         self.poll_export(ctx);
         self.poll_works(ctx);
         self.poll_accuracy(ctx);
+        self.poll_license();
     }
 
     fn finish_import(&mut self, ctx: &egui::Context, r: Result<ImportSummary, String>) {

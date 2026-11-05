@@ -70,7 +70,7 @@ npm test           # 함수 단위 테스트 + 에뮬레이터 API 테스트
 - [ ] 이용약관 · 개인정보처리방침 · 환불 규정은 **초안**입니다. 내용을 검토하세요 (가격 · 기기 수 · 업데이트 기간을 바꾸면 `web/terms.html` 제5조도 함께).
 - [ ] **세금**: 사업자등록증에는 *부가가치세 면세사업자 (업태 정보통신업 · 종목 출판업)* 로 되어 있습니다. 소프트웨어 라이선스 판매가 면세로 처리되는지, 업종 추가나 과세사업자 전환이 필요한지 세무사에게 확인하세요. 지금은 결제 금액 전체를 면세로 보냅니다 — 과세로 바뀌면 `functions/src/catalog.js` 의 `TAX_FREE` 를 `false` 로.
 - [ ] **토스페이먼츠 계약** (사업자등록증 · 통신판매업 신고증 · 정산 계좌, 사이트 심사) 후 라이브 키로 바꿉니다: `TOSS_CLIENT_KEY=live_gck_…`, `TOSS_SECRET_KEY=live_gsk_…`
-- [ ] **앱의 라이선스 등록** (로드맵 M5). 준비되면 `site.config.json` 의 `appActivation` 을 `true` 로 — ‘내 라이선스’ 에 앱 등록 방법이 나옵니다.
+- [ ] **앱과 연결** — 아래 [앱과 연결하기](#앱과-연결하기) 의 세 단계 (앱에 사이트 주소 · 공개 키 넣고 새 버전 릴리스 → `appActivation` 켜기).
 
 `npm run build` 는 비어 있는 사업자 정보를 경고하고, 페이지에는 노란 **［입력 필요］** 로 표시합니다.
 
@@ -78,7 +78,27 @@ npm test           # 함수 단위 테스트 + 에뮬레이터 API 테스트
 
 `functions/src/catalog.js` 의 `price` · `maxDevices` · `updatesMonths` · `features` 를 고치고 `npx firebase deploy --only functions`. 페이지는 `/api/catalog` 를 읽어 보여 주므로 HTML 의 숫자는 처음 그려질 때의 기본값입니다.
 
-## 앱에서 라이선스 확인하기 (M5 연동용)
+## 앱과 연결하기
+
+앱의 **설정 → 라이선스** 에서 키를 넣으면 이 컴퓨터가 등록되고, 서버가 서명한 토큰을 저장해 **시작할 때마다 인터넷 없이** 확인합니다 (`crates/app/src/license.rs`). 일주일에 한 번쯤 서버에 다시 확인해, 환불 · 해지된 라이선스는 그 컴퓨터에서 빠집니다. 연결이 안 되면 그대로 씁니다.
+
+1. 사이트 주소와 서명 공개 키를 `crates/app/assets/license.json` 에 넣습니다 (keygen 이 출력한 PEM 또는 `raw` 줄).
+   ```json
+   { "server": "https://<사이트 도메인>", "publicKey": "<keygen 의 raw 공개 키>" }
+   ```
+   두 값이 비어 있으면 앱의 라이선스 칸은 보이지 않습니다 (지금 상태).
+2. 앱 새 버전을 릴리스합니다.
+3. `site.config.json` 의 `appActivation` 을 `true` 로 바꾸고 사이트를 다시 배포합니다 — ‘내 라이선스’ 에 앱 등록 방법이 나옵니다.
+
+개발할 때는 디버그 빌드에 환경 변수로 로컬 에뮬레이터를 연결할 수 있습니다 (릴리스 빌드는 무시):
+
+```bash
+PHOTO_ORGANIZE_LICENSE_SERVER=http://127.0.0.1:5050 \
+PHOTO_ORGANIZE_LICENSE_PUBLIC_KEY="$(curl -s http://127.0.0.1:5050/api/licenses/public-key | jq -r .pem)" \
+cargo run --bin photo-organize
+```
+
+### API
 
 ```
 POST /api/licenses/activate   { key, machineId, machineName?, os?, appVersion? }

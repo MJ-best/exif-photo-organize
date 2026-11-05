@@ -506,6 +506,7 @@ cargo build --release -p photoorg-app
 | B컷 후보 기준 | 60% | 30–90% |
 | ★1개는 B컷으로 학습 / A컷으로 학습할 별점 | 켬 / ★3+ | ★2+ · ★3+ · ★4+ · 픽만 |
 | 지금 다시 학습 / 모든 사진 다시 분석 | | 학습 현황(장면별 A·B 수, 기준, 교차검증 정확도) 표시 |
+| 라이선스 | | 웹사이트에서 산 키를 이 컴퓨터에 등록 · 해제 (판매 사이트와 연결된 빌드에서 보임) |
 | SD 카드를 연결하면 가져오기 화면 열기 | 켬 | |
 | 가져오기가 끝나면 카드 추출 | 끔 | |
 | 카탈로그 CSV로 내보내기 / 썸네일 모두 다시 만들기 | | |
@@ -703,6 +704,7 @@ crates/
 │   ├── views/         sidebar · toolbar · filters · grid · viewer · info · import
 │   ├── theme.rs       크림 · 코코아 · 클래식 다크/라이트 팔레트
 │   ├── icon.rs        창 아이콘 · 마스코트 (assets/ 의 PNG 내장)
+│   ├── license.rs     라이선스 등록 · 서명 토큰 오프라인 확인 (assets/license.json), app_license.rs 설정 화면
 │   ├── assets/        앱 아이콘: AppIcon.icns(macOS) · icon.ico(Windows, build.rs 로 exe 에 포함) · PNG
 │   └── fonts.rs · widgets.rs
 └── cli/    photoorg        — 명령줄 도구
