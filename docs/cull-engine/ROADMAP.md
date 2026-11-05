@@ -4,7 +4,7 @@
 
 엔진은 `crates/cull` (`photoorg-cull`) 에 있고 [BUSL 1.1](../../crates/cull/LICENSE) 로 배포합니다 ([라이선스 구성](../../LICENSING.md)).
 
-## 1. 지금의 엔진 (0.3.0 + M2 취향 학습)
+## 1. 지금의 엔진 (0.4.0 기준)
 
 | 단계 | 내용 |
 |---|---|
