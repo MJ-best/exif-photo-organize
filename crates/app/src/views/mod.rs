@@ -327,6 +327,8 @@ impl PhotoApp {
                 });
                 ui.add_space(12.0);
 
+                self.license_settings(ui);
+
                 ui.label(egui::RichText::new("화면").font(bold(13.0)).color(pal.text2));
                 ui.horizontal(|ui| {
                     let mut t = self.cfg.theme;
