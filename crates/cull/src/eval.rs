@@ -8,9 +8,10 @@
 
 use crate::learn::{self, Item, LearnSettings};
 use crate::scene::Scene;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Debug, Default, Serialize, PartialEq)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
 pub struct Metrics {
     /// Chance that a random B-cut scores higher than a random A-cut (1 = perfect, 0.5 = guessing;
     /// None without both A- and B-cuts).
@@ -19,6 +20,9 @@ pub struct Metrics {
     pub b_precision: f64,
     /// Of the B-cuts, the share at or above the threshold.
     pub b_recall: f64,
+    /// Of the A-cuts, the share at or above the threshold: keepers the candidate list would
+    /// wrongly suggest throwing away (the most expensive mistake).
+    pub a_false_alarm: f64,
     /// Of the best-ranked judged photos (as many as there are A-cuts), the share that are A-cuts.
     pub a_precision: f64,
     /// Share of the photos not judged yet that are at or above the threshold: the size of the
@@ -26,7 +30,8 @@ pub struct Metrics {
     pub candidate_rate: f64,
 }
 
-#[derive(Clone, Debug, Default, Serialize, PartialEq)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
 pub struct SceneEval {
     pub scene: Scene,
     pub a: usize,
@@ -35,7 +40,8 @@ pub struct SceneEval {
     pub learned_auc: Option<f64>,
 }
 
-#[derive(Clone, Debug, Default, Serialize, PartialEq)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
 pub struct EvalReport {
     pub photos: usize,
     /// Judged photos: A-cuts and B-cuts.
@@ -78,6 +84,7 @@ fn metrics(points: &[(f64, bool)], open_probs: &[f64], threshold: f64) -> Metric
     let above = points.iter().filter(|p| p.0 >= threshold);
     let above_n = above.clone().count();
     let above_b = above.filter(|p| p.1).count();
+    let above_a = above_n - above_b;
     let b = points.iter().filter(|p| p.1).count();
     let a = points.len() - b;
     // The best `a` photos by score (lowest B-cut probability).
@@ -89,6 +96,7 @@ fn metrics(points: &[(f64, bool)], open_probs: &[f64], threshold: f64) -> Metric
         auc: auc(points),
         b_precision: ratio(above_b, above_n),
         b_recall: ratio(above_b, b),
+        a_false_alarm: ratio(above_a, a),
         a_precision: ratio(a_top, a),
         candidate_rate: ratio(open_probs.iter().filter(|p| **p >= threshold).count(), open_probs.len()),
     }
@@ -178,10 +186,11 @@ impl EvalReport {
         let pct = |v: f64| format!("{:5.1}%", v * 100.0);
         let row = |name: &str, m: &Metrics| {
             format!(
-                "{name:<8} AUC {}   B컷 정밀도 {}  재현율 {}   A컷 정밀도 {}   후보 비율 {}",
+                "{name:<8} AUC {}   B컷 정밀도 {}  재현율 {}   A컷 오경보 {}   A컷 정밀도 {}   후보 비율 {}",
                 m.auc.map(|v| format!("{v:.3}")).unwrap_or_else(|| "  -  ".into()),
                 pct(m.b_precision),
                 pct(m.b_recall),
+                pct(m.a_false_alarm),
                 pct(m.a_precision),
                 pct(m.candidate_rate)
             )

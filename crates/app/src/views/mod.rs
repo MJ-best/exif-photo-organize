@@ -105,6 +105,9 @@ impl PhotoApp {
         if self.works_dialog.is_some() {
             self.works_dialog_ui(ui);
         }
+        if self.accuracy.open {
+            self.accuracy_dialog_ui(ui);
+        }
     }
 
     pub fn filter_active(&self) -> bool {
@@ -482,7 +485,7 @@ impl PhotoApp {
                 egui::RichText::new(format!("분석된 사진 {}장 · 학습 현황", format::count(analysed))).font(bold(12.0)),
             );
             egui::Grid::new("learn-report").num_columns(5).spacing(vec2(14.0, 3.0)).striped(true).show(ui, |ui| {
-                for h in ["장면", "A컷", "B컷", "기준", "검증 정확도"] {
+                for h in ["장면", "A컷", "B컷", "기준", "구분 정확도"] {
                     ui.label(egui::RichText::new(h).font(font(11.0)).color(pal.text3));
                 }
                 ui.end_row();
@@ -497,8 +500,13 @@ impl PhotoApp {
                         _ => pal.text2,
                     };
                     ui.label(egui::RichText::new(s.model).font(font(11.5)).color(c));
+                    // From the last "내 셀렉 정확도" measurement (photos not learned from).
+                    let acc = self.accuracy.latest().and_then(|m| match s.scene {
+                        None => m.report.learned.auc,
+                        Some(sc) => m.report.scenes.iter().find(|x| x.scene == sc).and_then(|x| x.learned_auc),
+                    });
                     ui.label(
-                        egui::RichText::new(s.accuracy.map(|a| format!("{:.0}%", a * 100.0)).unwrap_or("–".into()))
+                        egui::RichText::new(acc.map(|a| format!("{:.0}%", a * 100.0)).unwrap_or("–".into()))
                             .font(font(11.5)),
                     );
                     ui.end_row();
@@ -518,6 +526,13 @@ impl PhotoApp {
         ui.horizontal(|ui| {
             if widgets::secondary_button(ui, "지금 다시 학습", &pal).clicked() {
                 self.start_rescore(&ctx, false);
+            }
+            let label = match self.accuracy.headline() {
+                Some(p) => format!("내 셀렉 정확도 {p:.0}%…"),
+                None => "내 셀렉 정확도…".to_string(),
+            };
+            if widgets::secondary_button(ui, &label, &pal).clicked() {
+                self.accuracy.open = true;
             }
             if widgets::secondary_button(ui, "모든 사진 다시 분석", &pal).clicked() {
                 self.reanalyse_all(&ctx);

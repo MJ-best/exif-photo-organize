@@ -296,7 +296,9 @@ impl PhotoApp {
         }
         st.index.rank_keepers();
         refresh_totals(st, threshold);
+        let judged = report.scenes.first().map(|s| (s.a, s.b)).unwrap_or((0, 0));
         self.cull_report = Some(report);
+        self.maybe_measure_accuracy(judged.0, judged.1);
         self.facets = None;
         self.info = None;
         if self.viewer.is_some() {
@@ -321,6 +323,11 @@ impl PhotoApp {
         if matches!(self.filter.cull, CullFilter::Candidates(_)) {
             self.filter.cull = CullFilter::Candidates(t);
             self.refilter();
+        }
+        // Precision / recall are measured at the threshold.
+        let judged = self.cull_report.as_ref().and_then(|r| r.scenes.first()).map(|s| (s.a, s.b));
+        if let Some((a, b)) = judged {
+            self.maybe_measure_accuracy(a, b);
         }
     }
 
@@ -362,7 +369,8 @@ impl PhotoApp {
     pub fn learning_status(&self) -> (String, String) {
         let tip = "거절(X) · ★1 은 B컷, 픽(P) · ★3 이상은 A컷으로 학습합니다 (설정 → 셀렉 도우미에서 바꿀 수 있음). \
                    A · B 가 각각 6장 이상이면 내 기준을 학습하고, 장면마다 10장 이상이면 그 장면만의 기준도 만듭니다. \
-                   학습해도 B컷 비율은 기본 기준(내 판정으로 보정)을 따르고, 어떤 사진이 B컷인지만 내 기준으로 바뀝니다."
+                   학습해도 B컷 비율은 기본 기준(내 판정으로 보정)을 따르고, 어떤 사진이 B컷인지만 내 기준으로 바뀝니다.\n\
+                   누르면 내 셀렉 정확도를 봅니다."
             .to_string();
         let Some(r) = self.cull_report.as_ref().and_then(|r| r.scenes.first()) else {
             return ("기본 기준".into(), tip);
@@ -372,11 +380,16 @@ impl PhotoApp {
             .as_ref()
             .map(|r| r.scenes.iter().filter(|s| s.model == "장면별 학습").count())
             .unwrap_or(0);
-        let text = match r.model {
+        let mut text = match r.model {
             "기본값" => format!("기본 기준 · 학습까지 A {} / B {} (각 6장)", r.a.min(6), r.b.min(6)),
             _ if scenes > 0 => format!("내 기준으로 학습됨 · A {} · B {} · 장면별 {scenes}개", r.a, r.b),
             _ => format!("내 기준으로 학습됨 · A {} · B {}", r.a, r.b),
         };
+        match self.accuracy.headline() {
+            Some(p) => text.push_str(&format!(" · 정확도 {p:.0}% ›")),
+            None if self.accuracy.job.is_some() => text.push_str(" · 정확도 재는 중"),
+            None => text.push_str(" ›"),
+        }
         (text, tip)
     }
 
