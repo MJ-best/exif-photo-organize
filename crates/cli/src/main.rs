@@ -36,6 +36,9 @@ const HELP: &str = "photoorg — EXIF 기반 사진 정리 도구 (CLI)
   photoorg thumb <파일> <출력.jpg>           파일 하나의 썸네일 생성 (디버그)
   photoorg analyze <라이브러리> [--all]      B컷 분석 (초점·흔들림·노출·얼굴/눈·장면·연사) + 학습
   photoorg cull <라이브러리> [--threshold 60] B컷 후보 목록과 이유
+  photoorg cull-eval <라이브러리> [--folds 5] [--threshold 60] [--json]
+                                             셀렉 엔진 정확도 (내 픽 · 거절 · 별점으로 교차검증,
+                                             기본 기준 vs 학습: AUC · B컷 정밀도/재현율 · A컷 정밀도)
   photoorg analyze-file <파일>               사진 하나 분석 (디버그)
 ";
 
@@ -384,6 +387,23 @@ fn run() -> Result<()> {
                 );
             }
             eprintln!("B컷 후보 {}개 (기준 {t}%)", hits.len());
+        }
+        "cull-eval" => {
+            let lib = Library::open(&PathBuf::from(rest.first().context("라이브러리 폴더가 필요합니다")?))?;
+            let folds: usize = arg_value(rest, "--folds").map(|v| v.parse()).transpose()?.unwrap_or(5);
+            let t: f64 = arg_value(rest, "--threshold").map(|v| v.parse()).transpose()?.unwrap_or(60.0);
+            let items = lib.catalog()?.cull_items()?;
+            if items.is_empty() {
+                bail!("분석된 사진이 없습니다 — 먼저 'photoorg analyze <라이브러리>'");
+            }
+            let started = std::time::Instant::now();
+            let r = cull::eval::evaluate(&items, &cull::LearnSettings::default(), folds, t / 100.0);
+            if rest.iter().any(|a| a == "--json") {
+                println!("{}", serde_json::to_string_pretty(&r)?);
+            } else {
+                print!("{}", r.summary());
+                eprintln!("({:.1}초)", started.elapsed().as_secs_f64());
+            }
         }
         "analyze-file" => {
             let src = PathBuf::from(rest.first().context("파일이 필요합니다")?);

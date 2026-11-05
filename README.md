@@ -737,8 +737,9 @@ PHOTOORG_TEST_IMAGES=<폴더> cargo test -p photoorg-core faces -- --ignored  # 
 
 ## 라이선스
 
-[MIT](LICENSE)
+- 앱 · 가져오기 · 카탈로그 등 대부분: [MIT](LICENSE)
+- **셀렉 엔진** (`crates/cull` — B컷 · A컷 후보, 학습): 0.3.0부터 [Business Source License 1.1](crates/cull/LICENSE) — 소스는 공개하지만, Photo Organize 앱 안에서 쓰는 것 말고는 상업적 사용이 허용되지 않습니다. 각 버전은 4년 뒤(2030-11-05까지) MIT 로 바뀝니다. 0.2.6 까지의 코드는 MIT 그대로입니다. 자세한 내용은 [LICENSING.md](LICENSING.md).
 
-셀렉 도우미에 내장된 모델 ([OpenCV Model Zoo](https://github.com/opencv/opencv_zoo), 자세한 내용은 [crates/core/models](crates/core/models/README.md)):
+셀렉 엔진에 내장된 모델 ([OpenCV Model Zoo](https://github.com/opencv/opencv_zoo), 자세한 내용은 [crates/cull/models](crates/cull/models/README.md)):
 - 얼굴 검출 **YuNet** (`face_detection_yunet_2023mar.onnx`) — MIT
 - 이미지 분류 **MobileNetV2** (`image_classification_mobilenetv2_2022apr.onnx`) — Apache-2.0
