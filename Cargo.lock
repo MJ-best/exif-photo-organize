@@ -3121,7 +3121,7 @@ dependencies = [
 
 [[package]]
 name = "photoorg-app"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "anyhow",
  "blake3",
@@ -3145,7 +3145,7 @@ dependencies = [
 
 [[package]]
 name = "photoorg-cli"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "anyhow",
  "chrono",
@@ -3157,7 +3157,7 @@ dependencies = [
 
 [[package]]
 name = "photoorg-core"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "anyhow",
  "blake3",
@@ -3179,7 +3179,7 @@ dependencies = [
 
 [[package]]
 name = "photoorg-cull"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "anyhow",
  "image",
