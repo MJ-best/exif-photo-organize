@@ -202,6 +202,7 @@ impl PhotoApp {
             .expect("spawn analysis");
         self.analysis_job = Some(job);
         self.analysis_pending = false;
+        self.analysed_at_rescore = 0;
     }
 
     pub fn cancel_analysis(&mut self) {
@@ -249,6 +250,14 @@ impl PhotoApp {
                     self.ensure_analysis(ctx);
                 }
             } else {
+                // A long analysis (a big import, or every photo after an engine update): use
+                // what is ready every thousand photos instead of waiting for the end. The scores
+                // are enough here; the index is reloaded once, when the analysis is done.
+                let done = job.done.load(Ordering::Relaxed);
+                if done >= self.analysed_at_rescore + 1000 && self.rescore_rx.is_none() {
+                    self.analysed_at_rescore = done;
+                    self.start_rescore(ctx, false);
+                }
                 ctx.request_repaint_after(std::time::Duration::from_millis(300));
             }
         }
@@ -261,8 +270,9 @@ impl PhotoApp {
                 }
             }
         }
+        // Decisions are learned right away, also while photos are being analysed.
         if let Some(t) = self.labels_dirty_at {
-            if now - t > 1.5 && self.rescore_rx.is_none() && self.analysis_job.is_none() {
+            if now - t > 1.5 && self.rescore_rx.is_none() {
                 self.start_rescore(ctx, false);
             } else {
                 ctx.request_repaint_after(std::time::Duration::from_millis(500));

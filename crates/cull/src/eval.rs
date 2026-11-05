@@ -235,6 +235,84 @@ mod tests {
         assert_eq!(auc(&[(0.5, true)]), None);
     }
 
+    /// A photographer who keeps or rejects photos for *what they show* (here: one kind of
+    /// subject is always out) — invisible to sharpness and exposure. Only the taste features
+    /// can learn this; without embeddings the same decisions stay a coin toss.
+    #[test]
+    fn taste_learns_what_kind_of_photos_are_kept() {
+        let mut seed = 99u64;
+        let rnd = move || {
+            seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            ((seed >> 33) as f64) / (1u64 << 31) as f64
+        };
+        let mut gauss = {
+            let mut r = rnd;
+            move || {
+                let (u1, u2) = (r().max(1e-12), r());
+                (-2.0 * u1.ln()).sqrt() * (std::f64::consts::TAU * u2).cos()
+            }
+        };
+        let dim = crate::taste::DIM;
+        let unit = |v: Vec<f64>| -> Vec<f32> {
+            let n = v.iter().map(|x| x * x).sum::<f64>().sqrt();
+            v.iter().map(|x| (x / n) as f32).collect()
+        };
+        // Four kinds of subjects (random directions); each photo is its kind plus noise.
+        let centres: Vec<Vec<f32>> = (0..4).map(|_| unit((0..dim).map(|_| gauss()).collect())).collect();
+        let mut items: Vec<Item> = (0..900i64)
+            .map(|i| {
+                let kind = (i % 4) as usize;
+                let embed = unit((0..dim).map(|d| centres[kind][d] as f64 + 0.07 * gauss()).collect());
+                let peak = 4.6 + (i % 7) as f32 * 0.3; // all reasonably sharp
+                Item {
+                    id: i + 1,
+                    // Two minutes apart: no bursts, no shared moments.
+                    captured_ms: i * 120_000,
+                    camera: "Cam".into(),
+                    shutter: 1.0 / 500.0,
+                    focal35: 50.0,
+                    iso: 400,
+                    rating: 0,
+                    flag: 0,
+                    scene: Scene::Landscape,
+                    sharp_peak: peak,
+                    sharp_global: peak - 1.0,
+                    motion: 0.3,
+                    clip_high: 0.0,
+                    clip_low: 0.0,
+                    brightness: 0.45,
+                    face_area: 0.0,
+                    face_sharp: None,
+                    eyes: None,
+                    dhash: (i as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15),
+                    embed,
+                }
+            })
+            .collect();
+        // Hidden taste: kind 0 is never kept, the other kinds are.
+        for (i, it) in items.iter_mut().enumerate() {
+            if i % 3 == 0 {
+                it.flag = if i % 4 == 0 { -1 } else { 1 };
+            }
+        }
+        let with = evaluate(&items, &LearnSettings::default(), 5, 0.6);
+        let mut blind = items.clone();
+        blind.iter_mut().for_each(|it| it.embed.clear());
+        let without = evaluate(&blind, &LearnSettings::default(), 5, 0.6);
+        println!("with taste:\n{}without:\n{}", with.summary(), without.summary());
+        let (w, wo) = (with.learned.auc.unwrap(), without.learned.auc.unwrap());
+        assert!(w > 0.95, "taste learned: {w:.3}");
+        assert!(w > wo + 0.3, "with {w:.3} vs without {wo:.3}");
+        assert!(with.learned.a_false_alarm < 0.1, "{:?}", with.learned);
+
+        // The reason names it — on that kind of photo, and on no other.
+        let (scores, _, _) = crate::learn::score(&items, &LearnSettings::default());
+        let open = |k: usize| (0..items.len()).filter(move |&i| i % 4 == k && i % 3 != 0);
+        let tagged = |k: usize| open(k).filter(|&i| scores[i].reasons & crate::learn::reason::TASTE != 0).count();
+        assert!(tagged(0) * 10 >= open(0).count() * 8, "{} of {}", tagged(0), open(0).count());
+        assert_eq!(tagged(1) + tagged(2) + tagged(3), 0);
+    }
+
     /// A photographer who rejects closed eyes much more strictly than the prior assumes:
     /// learning must beat the prior on photos it has not seen, and must not empty the list.
     #[test]
@@ -268,6 +346,7 @@ mod tests {
                     face_sharp: Some(peak - 0.3),
                     eyes: Some(eyes),
                     dhash: (rnd() * u64::MAX as f64) as u64,
+                    embed: Vec::new(),
                 }
             })
             .collect();
@@ -286,5 +365,16 @@ mod tests {
         assert!(learned > prior + 0.05, "prior {prior:.3} learned {learned:.3}");
         assert!(learned > 0.85, "learned {learned:.3}");
         assert!(r.learned.candidate_rate > 0.1, "the candidate list must not collapse: {:?}", r.learned);
+
+        // Embeddings that say nothing about these decisions must not get in the way.
+        for it in items.iter_mut() {
+            let e: Vec<f32> = (0..crate::taste::DIM).map(|_| rnd() as f32 - 0.5).collect();
+            let n = e.iter().map(|v| v * v).sum::<f32>().sqrt();
+            it.embed = e.iter().map(|v| v / n).collect();
+        }
+        let noisy = evaluate(&items, &LearnSettings::default(), 5, 0.6);
+        println!("with unrelated embeddings:\n{}", noisy.summary());
+        let with_noise = noisy.learned.auc.unwrap();
+        assert!(with_noise > learned - 0.02, "unrelated embeddings: {with_noise:.3} vs {learned:.3}");
     }
 }

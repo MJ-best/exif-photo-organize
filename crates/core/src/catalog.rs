@@ -726,6 +726,7 @@ impl Catalog {
                 face_sharp: a.face_sharp(),
                 eyes: a.eyes(),
                 dhash: a.dhash,
+                embed: a.embed,
             });
         }
         Ok(items)

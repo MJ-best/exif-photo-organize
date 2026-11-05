@@ -3095,6 +3095,7 @@ dependencies = [
  "anyhow",
  "image",
  "log",
+ "rayon",
  "serde",
  "tract-onnx",
 ]

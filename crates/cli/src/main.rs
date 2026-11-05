@@ -36,7 +36,7 @@ const HELP: &str = "photoorg — EXIF 기반 사진 정리 도구 (CLI)
   photoorg thumb <파일> <출력.jpg>           파일 하나의 썸네일 생성 (디버그)
   photoorg analyze <라이브러리> [--all]      B컷 분석 (초점·흔들림·노출·얼굴/눈·장면·연사) + 학습
   photoorg cull <라이브러리> [--threshold 60] B컷 후보 목록과 이유
-  photoorg cull-eval <라이브러리> [--folds 5] [--threshold 60] [--json]
+  photoorg cull-eval <라이브러리> [--folds 5] [--threshold 60] [--json] [--model]
                                              셀렉 엔진 정확도 (내 픽 · 거절 · 별점으로 교차검증,
                                              기본 기준 vs 학습: AUC · B컷 정밀도/재현율 · A컷 정밀도)
   photoorg analyze-file <파일>               사진 하나 분석 (디버그)
@@ -403,6 +403,28 @@ fn run() -> Result<()> {
             } else {
                 print!("{}", r.summary());
                 eprintln!("({:.1}초)", started.elapsed().as_secs_f64());
+            }
+            if rest.iter().any(|a| a == "--model") {
+                // The models trained on every decision, next to the prior (for tuning the engine).
+                let (_, _, models) = cull::learn::score(&items, &cull::LearnSettings::default());
+                let prior = cull::learn::Model::prior();
+                print!("\n{:<28} {:>7}", "특징", "기본");
+                for (scene, _) in &models {
+                    print!(" {:>9}", scene.map(|s| s.label()).unwrap_or("전체"));
+                }
+                println!();
+                for (j, name) in cull::learn::FEATURE_NAMES.iter().enumerate() {
+                    print!("{name:<28} {:>7.2}", prior.w[j]);
+                    for (_, m) in &models {
+                        print!(" {:>9.2}", m.w[j]);
+                    }
+                    println!();
+                }
+                print!("{:<28} {:>7.2}", "절편", prior.b);
+                for (_, m) in &models {
+                    print!(" {:>9.2}", m.b);
+                }
+                println!();
             }
         }
         "analyze-file" => {

@@ -15,6 +15,7 @@ pub mod eyes;
 pub mod learn;
 pub mod metrics;
 pub mod scene;
+pub mod taste;
 pub mod vision;
 
 use image::RgbImage;
@@ -24,7 +25,8 @@ pub use learn::{LearnSettings, Report, Score};
 pub use scene::Scene;
 
 /// Bump when the analysis changes so old results are recomputed.
-pub const ANALYSIS_VERSION: u32 = 2;
+/// 3: taste embedding ([`taste`]).
+pub const ANALYSIS_VERSION: u32 = 3;
 /// Long edge of the image the analysis runs on.
 pub const ANALYSIS_EDGE: u32 = 1600;
 
@@ -59,6 +61,10 @@ pub struct Analysis {
     pub dhash: u64,
     /// False when the neural networks could not run (classical metrics only).
     pub nets: bool,
+    /// What the photo shows, for learning the photographer's taste ([`taste::embed`]; empty
+    /// for analyses made before version 3 or without the networks).
+    #[serde(default)]
+    pub embed: Vec<f32>,
 }
 
 impl Analysis {
@@ -142,8 +148,11 @@ pub fn analyze_image(img: &RgbImage) -> Analysis {
             a.nets = false;
         }
     }
-    let probs = match vision::classify(img) {
-        Ok(p) => Some(p),
+    let probs = match vision::classify_with_features(img) {
+        Ok((p, pooled)) => {
+            a.embed = taste::embed(&pooled);
+            Some(p)
+        }
         Err(e) => {
             log::warn!("classification: {e:#}");
             a.nets = false;
@@ -174,6 +183,8 @@ mod tests {
         assert!(a.sharp_peak > 4.0);
         assert!(a.faces.is_empty());
         assert_eq!(a.classes.len(), 3);
+        assert_eq!(a.embed.len(), taste::DIM, "taste embedding from the pooled features");
+        assert!((taste::dot(&a.embed, &a.embed) - 1.0).abs() < 0.01);
         let blurred = analyze_image(&image::imageops::blur(&img, 4.0));
         assert!(blurred.sharp_peak < a.sharp_peak - 1.0);
     }
