@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<!--#include head-->
+<title>구매하기 — Photo Organize</title>
+<meta name="robots" content="noindex">
+</head>
+<body>
+<!--#include icons-->
+<!--#include header-->
+<main id="main" class="page">
+  <div class="wrap">
+    <div class="page-head">
+      <span class="eyebrow">구매하기</span>
+      <h1>라이선스 구매</h1>
+      <p class="muted">로그인하고 결제 수단을 고르면, 바로 라이선스 키가 나와요.</p>
+    </div>
+    <div data-banner></div>
+    <div class="checkout">
+      <aside class="panel">
+        <div class="summary-product">
+          <img src="/assets/img/icon-256.png" alt="" width="64" height="64">
+          <div><b data-plan-name>Photo Organize 라이선스</b><span class="muted small" data-plan-note>한 번 결제 · 구독 없음</span></div>
+        </div>
+        <ul class="feature-list" data-plan-features>
+          <li><svg aria-hidden="true"><use href="#i-check"/></svg><span>가져오기 · 정리 · 셀렉 · 작품 폴더, 모든 기능</span></li>
+          <li><svg aria-hidden="true"><use href="#i-check"/></svg><span>셀렉 도우미 — B컷 · A컷 후보, 내 기준과 취향 학습</span></li>
+          <li><svg aria-hidden="true"><use href="#i-check"/></svg><span>내 컴퓨터 3대까지 (맥 · 윈도우 · 리눅스)</span></li>
+          <li><svg aria-hidden="true"><use href="#i-check"/></svg><span>1년 동안 새 버전 무료 — 그 뒤에도 쓰던 버전은 계속</span></li>
+        </ul>
+        <div class="total"><span>결제 금액</span><span class="won" data-price>89,000원</span></div>
+        <p class="small muted" style="margin:14px 0 0">결제 후 {{refundDays}}일 안에는 이유를 묻지 않고 환불해 드려요. <a href="/refund">환불 규정</a></p>
+      </aside>
+      <div>
+        <section class="panel" data-step-signin>
+          <h2><span class="n">1</span>로그인</h2>
+          <div data-signin><div class="skeleton" style="width:60%"></div></div>
+        </section>
+        <section class="panel" data-step-pay>
+          <h2><span class="n">2</span>결제</h2>
+          <div data-pay-area><p class="muted" style="margin:0">로그인하면 결제 수단이 나와요.</p></div>
+          <div id="payment-method"></div>
+          <div id="agreement"></div>
+          <button class="btn btn-primary pay" type="button" data-pay disabled>결제하기</button>
+          <p class="secure"><svg aria-hidden="true"><use href="#i-lock"/></svg>결제는 토스페이먼츠가 처리해요. 카드 정보는 이 사이트에 저장되지 않습니다.</p>
+        </section>
+      </div>
+    </div>
+  </div>
+</main>
+<!--#include footer-->
+<script type="module" src="/assets/js/checkout.js?v={{v}}"></script>
+</body>
+</html>

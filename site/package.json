@@ -1,0 +1,19 @@
+{
+  "name": "photo-organize-site",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "dev": "node scripts/build.mjs && firebase emulators:start --project demo-photo-organize",
+    "test": "npm --prefix functions test && npm run test:api",
+    "test:api": "node scripts/build.mjs && firebase emulators:exec --project demo-photo-organize --only auth,firestore,functions,hosting \"node scripts/api-test.mjs\"",
+    "deploy": "firebase deploy"
+  },
+  "devDependencies": {
+    "@fontsource/gowun-batang": "5.3.0",
+    "esbuild": "0.28.2",
+    "firebase": "13.1.0",
+    "firebase-tools": "15.34.2",
+    "pretendard": "1.3.9"
+  }
+}

@@ -686,13 +686,15 @@ crates/
 │   ├── library.rs     라이브러리 폴더 · XMP 기록
 │   ├── export.rs      내보내기: 원본 · JPEG만 · 작게(리사이즈 + EXIF, GPS 제외) · 찍은 순서 · 이름 충돌
 │   ├── zip.rs         ZIP 쓰기(무압축, UTF-8 이름, 크기별 나누기)
-│   ├── cull/          셀렉 도우미 (B컷 찾기)
-│   │   ├── metrics.rs   초점(라플라시안) · 흔들림(구조 텐서) · 노출 · dHash
-│   │   ├── vision.rs    YuNet 얼굴 · MobileNetV2 분류 (tract-onnx, 모델 내장)
-│   │   ├── eyes.rs      눈 뜸/감음 추정 · scene.rs 장면 분류
-│   │   └── learn.rs     특징 · 연사 묶기 · 장면별 로지스틱 회귀 · 교차검증
-│   ├── models/        ONNX 모델과 라이선스 (OpenCV Model Zoo)
+│   ├── cull/          셀렉 엔진(crates/cull)을 파일 · 카탈로그와 잇는 부분
 │   ├── tags.rs · template.rs · xmp.rs · volumes.rs · format.rs · media.rs
+├── cull/   photoorg-cull   — 셀렉 엔진 (BUSL 1.1)
+│   ├── metrics.rs     초점(라플라시안) · 흔들림(구조 텐서) · 노출 · dHash
+│   ├── vision.rs      YuNet 얼굴 · MobileNetV2 분류 (tract-onnx, 모델 내장)
+│   ├── eyes.rs        눈 뜸/감음 추정 · scene.rs 장면 분류 · taste.rs 취향 임베딩
+│   ├── learn.rs       특징 · 연사 묶기 · 장면별 로지스틱 회귀 · 기준점 보정
+│   ├── eval.rs        교차검증 정확도 (photoorg cull-eval)
+│   └── models/        ONNX 모델과 라이선스 (OpenCV Model Zoo)
 ├── app/    photo-organize  — egui/eframe 데스크톱 앱
 │   ├── app.rs         상태 · 백그라운드 작업 · 키보드 · 프레임 루프
 │   ├── app_cull.rs    분석 · 재학습 작업, 픽/거절
@@ -704,6 +706,8 @@ crates/
 │   ├── assets/        앱 아이콘: AppIcon.icns(macOS) · icon.ico(Windows, build.rs 로 exe 에 포함) · PNG
 │   └── fonts.rs · widgets.rs
 └── cli/    photoorg        — 명령줄 도구
+
+site/       판매 사이트 — Firebase Hosting · Cloud Functions · 토스페이먼츠 (site/README.md)
 ```
 
 ### 설계에서 신경 쓴 점
@@ -764,7 +768,7 @@ PHOTOORG_TEST_IMAGES=<폴더> cargo test -p photoorg-core faces -- --ignored  # 
 ## 라이선스
 
 - 앱 · 가져오기 · 카탈로그 등 대부분: [MIT](LICENSE)
-- **셀렉 엔진** (`crates/cull` — B컷 · A컷 후보, 학습): 0.3.0부터 [Business Source License 1.1](crates/cull/LICENSE) — 소스는 공개하지만, Photo Organize 앱 안에서 쓰는 것 말고는 상업적 사용이 허용되지 않습니다. 각 버전은 4년 뒤(2030-11-05까지) MIT 로 바뀝니다. 0.2.6 까지의 코드는 MIT 그대로입니다. 자세한 내용은 [LICENSING.md](LICENSING.md).
+- **셀렉 엔진** (`crates/cull` — B컷 · A컷 후보, 학습): 0.3.0부터 [Business Source License 1.1](crates/cull/LICENSE) — 소스는 공개하지만, Photo Organize 앱 안에서 쓰는 것 말고는 상업적 사용이 허용되지 않습니다. 각 버전은 공개 4년 뒤 MIT 로 바뀝니다 (0.4.0 은 2030-11-05). 0.2.6 까지의 코드는 MIT 그대로입니다. 자세한 내용은 [LICENSING.md](LICENSING.md).
 
 셀렉 엔진에 내장된 모델 ([OpenCV Model Zoo](https://github.com/opencv/opencv_zoo), 자세한 내용은 [crates/cull/models](crates/cull/models/README.md)):
 - 얼굴 검출 **YuNet** (`face_detection_yunet_2023mar.onnx`) — MIT

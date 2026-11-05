@@ -1,0 +1,22 @@
+{
+  "repo": "https://github.com/MJ-best/exif-photo-organize",
+  "downloads": {
+    "mac": "https://github.com/MJ-best/exif-photo-organize/releases/latest/download/photo-organize-macos-universal.dmg",
+    "windows": "https://github.com/MJ-best/exif-photo-organize/releases/latest/download/photo-organize-windows-x86_64.zip",
+    "linux": "https://github.com/MJ-best/exif-photo-organize/releases/latest/download/photo-organize-linux-x86_64.tar.gz",
+    "releases": "https://github.com/MJ-best/exif-photo-organize/releases/latest"
+  },
+  "appActivation": false,
+  "refundDays": 7,
+  "business": {
+    "name": "은총",
+    "ceo": "김경아",
+    "registrationNumber": "684-96-01187",
+    "mailOrderNumber": "",
+    "address": "경기도 의정부시 둔야로61번길 28-4, 1층 101호 (가능동)",
+    "email": "",
+    "phone": "",
+    "privacyOfficer": "김경아 (대표)",
+    "effectiveDate": ""
+  }
+}
