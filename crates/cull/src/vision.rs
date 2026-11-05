@@ -5,8 +5,8 @@ use image::{imageops, RgbImage};
 use std::sync::OnceLock;
 use tract_onnx::prelude::*;
 
-static YUNET_ONNX: &[u8] = include_bytes!("../../models/face_detection_yunet_2023mar.onnx");
-static MOBILENET_ONNX: &[u8] = include_bytes!("../../models/image_classification_mobilenetv2_2022apr.onnx");
+static YUNET_ONNX: &[u8] = include_bytes!("../models/face_detection_yunet_2023mar.onnx");
+static MOBILENET_ONNX: &[u8] = include_bytes!("../models/image_classification_mobilenetv2_2022apr.onnx");
 
 type Plan = std::sync::Arc<TypedRunnableModel>;
 

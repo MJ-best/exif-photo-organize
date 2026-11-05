@@ -324,8 +324,8 @@ impl PhotoApp {
             .on_hover_text("X로 거절, 잘못 걸러진 사진은 P(픽)로 표시하세요. 고를 때마다 내 기준을 다시 학습합니다.");
         // What was learned first (is the suggestion mine or the default?), then the keys.
         let (learned, tip) = self.learning_status();
-        if rect.width() > 760.0 {
-            ui.label(egui::RichText::new(learned).font(font(11.5)).color(pal.text2)).on_hover_text(tip);
+        if rect.width() > 760.0 && status_link(ui, &learned, &tip, &pal).clicked() {
+            self.accuracy.open = true;
         }
         if rect.width() > 1040.0 {
             ui.label(egui::RichText::new("· X 거절 · P 잘못 걸러짐").font(font(11.5)).color(pal.text3));
@@ -377,8 +377,8 @@ impl PhotoApp {
             "아직 고르지 않은 사진 중 가장 잘 나온 사진입니다 — 초점 · 흔들림 · 노출 · 눈 · 연사 비교와 \
              내가 고른 A컷을 바탕으로, 연사는 베스트 한 장만. P 로 픽, 별점으로 셀렉하세요.",
         );
-        if rect.width() > 760.0 {
-            ui.label(egui::RichText::new(learned).font(font(11.5)).color(pal.text2)).on_hover_text(tip);
+        if rect.width() > 760.0 && status_link(ui, &learned, &tip, &pal).clicked() {
+            self.accuracy.open = true;
         }
         if rect.width() > 1040.0 {
             ui.label(egui::RichText::new("· P 픽 · X 아님").font(font(11.5)).color(pal.text3));
@@ -527,4 +527,13 @@ fn truncate(s: &str, n: usize) -> String {
     } else {
         format!("{}…", s.chars().take(n - 1).collect::<String>())
     }
+}
+
+/// The learning status in a candidate bar; opens "내 셀렉 정확도" when clicked.
+fn status_link(ui: &mut Ui, text: &str, tip: &str, pal: &crate::theme::Palette) -> egui::Response {
+    let r = ui.add(egui::Label::new(egui::RichText::new(text).font(font(11.5)).color(pal.text2)).sense(Sense::click()));
+    if r.hovered() {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+    }
+    r.on_hover_text(tip)
 }

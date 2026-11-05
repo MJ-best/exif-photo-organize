@@ -249,6 +249,8 @@ pub struct PhotoApp {
     pub rescore_rx: Option<Receiver<crate::app_cull::RescoreResult>>,
     pub labels_dirty_at: Option<f64>,
     pub cull_report: Option<photoorg_core::cull::Report>,
+    /// "내 셀렉 정확도" measurements, job and dialog.
+    pub accuracy: crate::app_accuracy::Accuracy,
     pub xmp_enabled: Arc<AtomicBool>,
     pub refilter_needed: bool,
     /// Refilter once the focus leaves this photo (themes in "고를 사진": the photo stays until the
@@ -323,6 +325,7 @@ impl PhotoApp {
             rescore_rx: None,
             labels_dirty_at: None,
             cull_report: None,
+            accuracy: Default::default(),
             xmp_enabled: Arc::new(AtomicBool::new(true)),
             refilter_needed: false,
             refilter_on_move: None,
@@ -378,6 +381,8 @@ impl PhotoApp {
                     crate::app_cull::refresh_totals(st, self.cfg.cull_threshold);
                 }
                 self.cull_report = None;
+                self.accuracy =
+                    self.lib.as_ref().map(|st| crate::app_accuracy::Accuracy::load(&st.catalog)).unwrap_or_default();
                 self.load_active_project();
                 self.library_place = None;
                 self.select_side(SideSel::All);
@@ -999,6 +1004,7 @@ impl PhotoApp {
         self.poll_cull(ctx);
         self.poll_export(ctx);
         self.poll_works(ctx);
+        self.poll_accuracy(ctx);
     }
 
     fn finish_import(&mut self, ctx: &egui::Context, r: Result<ImportSummary, String>) {
