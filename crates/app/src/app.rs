@@ -253,7 +253,8 @@ pub struct PhotoApp {
     pub cull_report: Option<photoorg_core::cull::Report>,
     /// "내 셀렉 정확도" measurements, job and dialog.
     pub accuracy: crate::app_accuracy::Accuracy,
-    /// 설정 → 라이선스.
+    /// 설정 → 라이선스 (website build).
+    #[cfg(feature = "license")]
     pub license: crate::app_license::LicenseState,
     pub xmp_enabled: Arc<AtomicBool>,
     pub refilter_needed: bool,
@@ -271,6 +272,8 @@ pub struct PhotoApp {
     pub status_band: Option<egui::Rect>,
     pub focus_search: bool,
     pub library_missing_since: Option<f64>,
+    /// App Sandbox: a card or folder waiting to be granted once (see app_access.rs).
+    pub access_request: Option<(PathBuf, Option<Volume>)>,
 }
 
 impl PhotoApp {
@@ -331,6 +334,7 @@ impl PhotoApp {
             labels_dirty_at: None,
             cull_report: None,
             accuracy: Default::default(),
+            #[cfg(feature = "license")]
             license: Default::default(),
             xmp_enabled: Arc::new(AtomicBool::new(true)),
             refilter_needed: false,
@@ -343,10 +347,14 @@ impl PhotoApp {
             status_band: None,
             focus_search: false,
             library_missing_since: None,
+            access_request: None,
         };
         app.xmp_enabled.store(app.cfg.write_xmp, Ordering::Relaxed);
         app.apply_theme(&cc.egui_ctx);
+        #[cfg(feature = "license")]
         app.license_init(&cc.egui_ctx);
+        // App Sandbox: take up the folders granted in earlier runs (library, cards).
+        photoorg_macos::restore();
         if let Some(p) = app.cfg.library.clone() {
             app.open_library(&cc.egui_ctx, p, false);
         }
@@ -360,10 +368,14 @@ impl PhotoApp {
         self.cancel_maintenance();
         self.cancel_analysis();
         if !create && !path.exists() {
-            self.lib_error = Some(format!(
-                "라이브러리를 찾을 수 없습니다: {}\n외장 하드가 연결되어 있는지 확인하세요.",
-                path.display()
-            ));
+            self.lib_error = Some(if photoorg_macos::is_sandboxed() {
+                format!(
+                    "라이브러리 폴더를 열 수 없습니다: {}\n외장 하드를 연결하고, 아래에서 폴더를 한 번 다시 골라 주세요.",
+                    path.display()
+                )
+            } else {
+                format!("라이브러리를 찾을 수 없습니다: {}\n외장 하드가 연결되어 있는지 확인하세요.", path.display())
+            });
             self.view = MainView::Welcome;
             return;
         }
@@ -427,6 +439,7 @@ impl PhotoApp {
             dlg = dlg.set_directory(p);
         }
         if let Some(dir) = dlg.pick_folder() {
+            photoorg_macos::remember(&dir);
             self.open_library(ctx, dir, true);
         }
     }
@@ -766,6 +779,14 @@ impl PhotoApp {
                 return;
             }
         }
+        // App Sandbox: a card or folder is granted once in the folder panel (app_access.rs).
+        if photoorg_macos::is_sandboxed() && !photoorg_macos::can_read(&source) {
+            photoorg_macos::restore();
+            if !photoorg_macos::can_read(&source) {
+                self.access_request = Some((source, volume));
+                return;
+            }
+        }
         let cancel = Arc::new(AtomicBool::new(false));
         let (tx, rx) = unbounded();
         let include_videos = self.cfg.import.include_videos;
@@ -801,7 +822,13 @@ impl PhotoApp {
     }
 
     pub fn pick_import_folder(&mut self) {
-        if let Some(dir) = rfd::FileDialog::new().set_title("가져올 폴더 선택").pick_folder() {
+        let mut dlg = rfd::FileDialog::new().set_title("가져올 폴더 선택");
+        if photoorg_macos::is_sandboxed() {
+            // Cards are here; the sandbox may not let the app find them by itself.
+            dlg = dlg.set_directory("/Volumes");
+        }
+        if let Some(dir) = dlg.pick_folder() {
+            photoorg_macos::remember(&dir);
             self.side = SideSel::Device(dir.clone());
             self.import = None;
             self.start_scan(dir, None);
@@ -882,6 +909,10 @@ impl PhotoApp {
             self.known_volumes = v.iter().map(|x| x.path.clone()).collect();
             self.volumes = v;
             let busy = self.import.as_ref().is_some_and(|s| matches!(s.phase, ImportPhase::Running));
+            if !new.is_empty() {
+                // App Sandbox: a card granted before becomes readable again.
+                photoorg_macos::restore();
+            }
             if let Some(first) = new.first() {
                 if self.cfg.auto_open_import && self.lib.is_some() && !busy {
                     self.side = SideSel::Device(first.path.clone());
@@ -893,10 +924,12 @@ impl PhotoApp {
         // Library drive re-appeared?
         if self.lib.is_none() {
             if let Some(p) = self.cfg.library.clone() {
-                if self.lib_error.is_some() && p.exists() {
-                    let last = self.library_missing_since.unwrap_or(0.0);
-                    if now - last > 2.0 {
-                        self.library_missing_since = Some(now);
+                let last = self.library_missing_since.unwrap_or(0.0);
+                if self.lib_error.is_some() && now - last > 2.0 {
+                    self.library_missing_since = Some(now);
+                    // App Sandbox: the drive's remembered access is taken up once it is back.
+                    photoorg_macos::restore();
+                    if p.exists() {
                         self.open_library(ctx, p, false);
                     }
                 }
@@ -1012,6 +1045,7 @@ impl PhotoApp {
         self.poll_export(ctx);
         self.poll_works(ctx);
         self.poll_accuracy(ctx);
+        #[cfg(feature = "license")]
         self.poll_license();
     }
 
@@ -1068,14 +1102,17 @@ impl PhotoApp {
     }
 
     pub fn eject(&mut self, v: &Volume) {
-        match volumes::eject(&v.path) {
+        // In the App Sandbox through NSWorkspace (helper programs are not allowed there).
+        let res =
+            photoorg_macos::eject(&v.path).unwrap_or_else(|| volumes::eject(&v.path).map_err(|e| format!("{e:#}")));
+        match res {
             Ok(()) => {
                 self.toast(format!("{} 추출됨 — 카드를 안전하게 분리할 수 있습니다", v.name), false);
                 if matches!(self.side, SideSel::Device(ref p) if p == &v.path) {
                     self.side = SideSel::None;
                 }
             }
-            Err(e) => self.toast(format!("{} 추출 실패: {e:#}", v.name), true),
+            Err(e) => self.toast(format!("{} 추출 실패: {e}", v.name), true),
         }
     }
 

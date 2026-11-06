@@ -1,0 +1,79 @@
+name: app-store
+
+# Build the Mac App Store package and, if asked, upload it to App Store Connect.
+# Run it by hand: Actions → app-store → Run workflow. Needs these repository secrets
+# (docs/app-store/README.md "GitHub Actions 로 올리기"):
+#   MAS_APP_CERT_P12          base64 of the "Apple Distribution" certificate (.p12)
+#   MAS_INSTALLER_CERT_P12    base64 of the "Mac Installer Distribution" certificate (.p12)
+#   MAS_CERT_PASSWORD         password of both .p12 files
+#   MAS_PROVISIONING_PROFILE  base64 of the Mac App Store provisioning profile
+#   APPLE_TEAM_ID             the team id
+#   ASC_KEY_ID, ASC_ISSUER_ID, ASC_KEY_P8   App Store Connect API key (the .p8 file's text)
+
+on:
+  workflow_dispatch:
+    inputs:
+      upload:
+        description: "App Store Connect 에 올리기 (끄면 .pkg 만 만듦)"
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+jobs:
+  appstore:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: macos-appstore
+      - name: Certificates, profile and API key
+        env:
+          MAS_APP_CERT_P12: ${{ secrets.MAS_APP_CERT_P12 }}
+          MAS_INSTALLER_CERT_P12: ${{ secrets.MAS_INSTALLER_CERT_P12 }}
+          MAS_CERT_PASSWORD: ${{ secrets.MAS_CERT_PASSWORD }}
+          MAS_PROVISIONING_PROFILE: ${{ secrets.MAS_PROVISIONING_PROFILE }}
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+        run: |
+          set -euo pipefail
+          KEYCHAIN="$RUNNER_TEMP/appstore.keychain-db"
+          KEYCHAIN_PASSWORD="$(openssl rand -hex 16)"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          for cert in "$MAS_APP_CERT_P12" "$MAS_INSTALLER_CERT_P12"; do
+            echo "$cert" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+            security import "$RUNNER_TEMP/cert.p12" -k "$KEYCHAIN" -P "$MAS_CERT_PASSWORD" \
+              -T /usr/bin/codesign -T /usr/bin/productbuild
+            rm -f "$RUNNER_TEMP/cert.p12"
+          done
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN" >/dev/null
+          security list-keychains -d user -s "$KEYCHAIN" $(security list-keychains -d user | tr -d '"')
+          echo "$MAS_PROVISIONING_PROFILE" | base64 --decode > "$RUNNER_TEMP/appstore.provisionprofile"
+          mkdir -p ~/.appstoreconnect/private_keys
+          printf '%s' "$ASC_KEY_P8" > ~/.appstoreconnect/private_keys/AuthKey_${ASC_KEY_ID}.p8
+          echo "APP_IDENTITY=$(security find-identity -v -p codesigning "$KEYCHAIN" | grep -m1 'Apple Distribution' | sed -E 's/.*"(.*)"/\1/')" >> "$GITHUB_ENV"
+          echo "INSTALLER_IDENTITY=$(security find-identity -v "$KEYCHAIN" | grep -m1 'Mac Installer Distribution\|3rd Party Mac Developer Installer' | sed -E 's/.*"(.*)"/\1/')" >> "$GITHUB_ENV"
+      - name: Build, sign and package (and upload)
+        env:
+          TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          PROFILE: ${{ runner.temp }}/appstore.provisionprofile
+          BUILD: ${{ github.run_number }}
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+        run: |
+          if [[ "${{ inputs.upload }}" == "true" ]]; then
+            scripts/macos-appstore.sh --upload
+          else
+            scripts/macos-appstore.sh
+          fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: photo-organize-appstore
+          path: dist-appstore/*.pkg

@@ -689,6 +689,7 @@ crates/
 │   ├── zip.rs         ZIP 쓰기(무압축, UTF-8 이름, 크기별 나누기)
 │   ├── cull/          셀렉 엔진(crates/cull)을 파일 · 카탈로그와 잇는 부분
 │   ├── tags.rs · template.rs · xmp.rs · volumes.rs · format.rs · media.rs
+├── macos/  photoorg-macos  — Mac App Store판(샌드박스): 고른 폴더 · 카드 기억(보안 범위 북마크) · Finder · 추출
 ├── cull/   photoorg-cull   — 셀렉 엔진 (BUSL 1.1)
 │   ├── metrics.rs     초점(라플라시안) · 흔들림(구조 텐서) · 노출 · dHash
 │   ├── vision.rs      YuNet 얼굴 · MobileNetV2 분류 (tract-onnx, 모델 내장)
@@ -710,6 +711,7 @@ crates/
 └── cli/    photoorg        — 명령줄 도구
 
 site/       판매 사이트 — Firebase Hosting · Cloud Functions · 토스페이먼츠 (site/README.md)
+docs/app-store/  Mac App Store 에 올리기 — 절차 · 등록 문구 · 스크린샷 (scripts/macos-appstore.sh)
 ```
 
 ### 설계에서 신경 쓴 점

@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/cull", "crates/core", "crates/app", "crates/cli"]
+members = ["crates/cull", "crates/core", "crates/app", "crates/cli", "crates/macos"]
 
 [workspace.package]
 version = "0.4.1"
@@ -12,6 +12,7 @@ repository = "https://github.com/MJ-best/exif-photo-organize"
 [workspace.dependencies]
 photoorg-core = { path = "crates/core" }
 photoorg-cull = { path = "crates/cull" }
+photoorg-macos = { path = "crates/macos" }
 anyhow = "1"
 log = "0.4"
 env_logger = "0.11"

@@ -280,6 +280,9 @@ impl PhotoApp {
 
     /// Open a folder in the OS file manager.
     pub fn open_folder(&mut self, dir: &std::path::Path) {
+        if photoorg_macos::open_folder(dir) {
+            return;
+        }
         let cmd = if cfg!(target_os = "macos") {
             "open"
         } else if cfg!(target_os = "windows") {

@@ -1,3 +1,7 @@
 target/
 *.swp
 .DS_Store
+
+# macOS packaging output
+dist-appstore/
+dist-sandbox-test/
