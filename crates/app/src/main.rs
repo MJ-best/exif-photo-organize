@@ -3,9 +3,12 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod app;
+mod app_access;
 mod app_accuracy;
 mod app_cull;
+mod app_delete;
 mod app_export;
+#[cfg(feature = "license")]
 mod app_license;
 mod app_projects;
 mod app_works;
@@ -13,6 +16,7 @@ mod config;
 mod fonts;
 mod icon;
 mod layout;
+#[cfg(feature = "license")]
 mod license;
 mod theme;
 mod thumbs;

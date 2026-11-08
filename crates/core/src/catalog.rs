@@ -98,6 +98,22 @@ CREATE TABLE IF NOT EXISTS work_copies (
     PRIMARY KEY (project_id, rel_path)
 );
 CREATE INDEX IF NOT EXISTS work_copies_asset ON work_copies(asset_id);
+-- Photos moved to the trash that had been judged (pick, reject, stars): their decision and
+-- measurements, so the culling assistant keeps learning from them (Catalog::forget_assets).
+CREATE TABLE IF NOT EXISTS learn_memory (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    asset_id INTEGER NOT NULL,
+    captured_ms INTEGER NOT NULL,
+    camera TEXT NOT NULL DEFAULT '',
+    exposure_time REAL,
+    focal REAL,
+    iso INTEGER,
+    rating INTEGER NOT NULL DEFAULT 0,
+    flag INTEGER NOT NULL DEFAULT 0,
+    scene_user INTEGER,
+    data TEXT NOT NULL,
+    deleted_at TEXT NOT NULL
+);
 "#;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -684,8 +700,12 @@ impl Catalog {
     pub fn cull_items(&self) -> Result<Vec<crate::cull::learn::Item>> {
         let mut stmt = self.conn.prepare(
             "SELECT a.id, a.captured_ms, COALESCE(a.camera, ''), a.exposure_time, COALESCE(a.focal_35mm, a.focal_length),
-                    a.iso, a.rating, a.flag, a.scene_user, an.data
-             FROM assets a JOIN analysis an ON an.asset_id = a.id",
+                    a.iso, a.rating, a.flag, a.scene_user, an.data, 0
+             FROM assets a JOIN analysis an ON an.asset_id = a.id
+             UNION ALL
+             SELECT -m.id, m.captured_ms, m.camera, m.exposure_time, m.focal, m.iso, m.rating, m.flag, m.scene_user,
+                    m.data, 1
+             FROM learn_memory m",
         )?;
         let rows = stmt.query_map([], |r| {
             Ok((
@@ -699,11 +719,12 @@ impl Catalog {
                 r.get::<_, i64>(7)?,
                 r.get::<_, Option<i64>>(8)?,
                 r.get::<_, String>(9)?,
+                r.get::<_, i64>(10)? != 0,
             ))
         })?;
         let mut items = Vec::new();
         for row in rows {
-            let (id, ms, camera, shutter, focal, iso, rating, flag, scene_user, data) = row?;
+            let (id, ms, camera, shutter, focal, iso, rating, flag, scene_user, data, gone) = row?;
             let Ok(a) = serde_json::from_str::<crate::cull::Analysis>(&data) else { continue };
             let scene = scene_user.map(|s| crate::cull::Scene::from_u8(s as u8)).unwrap_or(a.scene);
             items.push(crate::cull::learn::Item {
@@ -727,6 +748,7 @@ impl Catalog {
                 eyes: a.eyes(),
                 dhash: a.dhash,
                 embed: a.embed,
+                gone,
             });
         }
         Ok(items)
@@ -817,6 +839,49 @@ impl Catalog {
         let mut v: Vec<FileRecord> = rows.collect::<rusqlite::Result<_>>()?;
         v.sort_by_key(|f| f.kind.preview_priority());
         Ok(v)
+    }
+
+    /// Everything on disk that belongs to these photos: their files and their copies in 작품
+    /// folders (library-relative), per photo.
+    pub fn paths_of(&self, ids: &[i64]) -> Result<Vec<(i64, Vec<String>)>> {
+        let mut files = self.conn.prepare_cached("SELECT rel_path FROM files WHERE asset_id=?1")?;
+        let mut copies = self.conn.prepare_cached("SELECT rel_path FROM work_copies WHERE asset_id=?1")?;
+        let mut out = Vec::with_capacity(ids.len());
+        for &id in ids {
+            let mut rels: Vec<String> = files.query_map([id], |r| r.get(0))?.collect::<rusqlite::Result<_>>()?;
+            for rel in copies.query_map([id], |r| r.get::<_, String>(0))? {
+                rels.push(rel?);
+            }
+            out.push((id, rels));
+        }
+        Ok(out)
+    }
+
+    /// Take photos out of the catalog after their files went to the trash. What the
+    /// photographer decided about them (pick, reject, stars) is kept with the measurements, so the
+    /// culling assistant keeps learning from it. Returns how many decisions were kept.
+    pub fn forget_assets(&mut self, ids: &[i64]) -> Result<usize> {
+        let now = chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
+        let tx = self.conn.transaction()?;
+        let mut kept = 0;
+        {
+            let mut keep = tx.prepare_cached(
+                "INSERT INTO learn_memory(asset_id, captured_ms, camera, exposure_time, focal, iso, rating, flag,
+                                          scene_user, data, deleted_at)
+                 SELECT a.id, a.captured_ms, COALESCE(a.camera, ''), a.exposure_time,
+                        COALESCE(a.focal_35mm, a.focal_length), a.iso, a.rating, a.flag, a.scene_user, an.data, ?2
+                 FROM assets a JOIN analysis an ON an.asset_id = a.id
+                 WHERE a.id = ?1 AND (a.flag != 0 OR a.rating > 0)",
+            )?;
+            // Files, tags, analysis and 작품 copies go with the photo (ON DELETE CASCADE).
+            let mut del = tx.prepare_cached("DELETE FROM assets WHERE id=?1")?;
+            for id in ids {
+                kept += keep.execute(params![id, now])?;
+                del.execute([id])?;
+            }
+        }
+        tx.commit()?;
+        Ok(kept)
     }
 
     /// Files inside the library folder `dir` (library-relative, '/' separated), at any depth.

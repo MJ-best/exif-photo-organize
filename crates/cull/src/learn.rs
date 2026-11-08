@@ -263,6 +263,9 @@ pub struct Item {
     pub dhash: u64,
     /// Taste embedding ([`crate::taste::embed`]; empty when unknown).
     pub embed: Vec<f32>,
+    /// The photo itself was deleted; only the photographer's decision and its measurements are
+    /// kept, so the learned standard does not forget it. Never part of a burst.
+    pub gone: bool,
 }
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq)]
@@ -373,8 +376,9 @@ pub fn features(items: &[Item]) -> (Vec<Features>, Vec<Score>) {
             }
         }
     }
-    // Bursts: consecutive frames of one camera, close in time and visually similar.
-    let mut order: Vec<usize> = (0..n).collect();
+    // Bursts: consecutive frames of one camera, close in time and visually similar. Deleted
+    // photos (kept for learning) stand alone: they are not there to compare with.
+    let mut order: Vec<usize> = (0..n).filter(|&i| !items[i].gone).collect();
     order.sort_by(|&a, &b| items[a].camera.cmp(&items[b].camera).then(items[a].captured_ms.cmp(&items[b].captured_ms)));
     let mut group_of = vec![usize::MAX; n];
     let mut groups: Vec<Vec<usize>> = Vec::new();
@@ -393,6 +397,10 @@ pub fn features(items: &[Item]) -> (Vec<Features>, Vec<Score>) {
             group_of[i] = groups.len();
             groups.push(vec![i]);
         }
+    }
+    for i in (0..n).filter(|&i| items[i].gone) {
+        group_of[i] = groups.len();
+        groups.push(vec![i]);
     }
     let mut scores = vec![Score::default(); n];
     let mut burst_rel = vec![0f64; n];
@@ -684,6 +692,7 @@ mod tests {
             eyes: None,
             dhash: (id as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15),
             embed: Vec::new(),
+            gone: false,
         }
     }
 
@@ -740,6 +749,42 @@ mod tests {
         assert!(report.scenes[0].accuracy.unwrap() > 0.9);
         let land = report.scenes.iter().find(|r| r.scene == Some(Scene::Landscape)).unwrap();
         assert_eq!(land.model, "장면별 학습");
+    }
+
+    #[test]
+    fn deleted_photos_still_teach_but_leave_bursts() {
+        // The same photographer, who deleted every photo they rejected: the decisions are kept
+        // (gone items) and the standard is still learned.
+        let mut items = Vec::new();
+        for i in 0..120i64 {
+            let mut it = item(-(i + 1), i * 60_000, 6.0 + (i % 7) as f32 * 0.1);
+            it.iso = if i % 2 == 0 { 12800 } else { 200 };
+            it.flag = if i % 2 == 0 { -1 } else { 1 };
+            it.gone = it.flag == -1;
+            items.push(it);
+        }
+        let mut test_hi = item(500, 99_000_000, 6.3);
+        test_hi.iso = 12800;
+        let mut test_lo = item(501, 99_900_000, 6.3);
+        test_lo.iso = 200;
+        items.push(test_hi);
+        items.push(test_lo);
+        let (scores, report, _) = score(&items, &LearnSettings::default());
+        let p = |id: i64| scores.iter().find(|s| s.id == id).unwrap().b_prob;
+        assert!(p(500) > 0.45 && p(501) < 0.05, "hi {} lo {}", p(500), p(501));
+        assert_eq!(report.scenes[0].b, 60);
+
+        // A deleted frame is not counted in its burst.
+        let mut items = vec![item(1, 0, 6.5), item(2, 400, 5.0), item(3, 800, 6.8)];
+        for it in &mut items {
+            it.dhash = 0xFFFF_0000_FFFF_0000;
+        }
+        items[2].gone = true;
+        let (scores, _, _) = score(&items, &LearnSettings::default());
+        let s = |id: i64| scores.iter().find(|s| s.id == id).unwrap();
+        assert_eq!(s(1).burst_size, 2);
+        assert_eq!(s(1).burst_rank, 0);
+        assert_eq!(s(3).burst, 0);
     }
 
     #[test]

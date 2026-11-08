@@ -78,6 +78,9 @@ impl PhotoApp {
                         if matches!(self.filter.cull, photoorg_core::filter::CullFilter::Keepers(_)) {
                             self.keeper_bar(ui);
                         }
+                        if matches!(self.filter.cull, photoorg_core::filter::CullFilter::Rejected) {
+                            self.rejected_bar(ui);
+                        }
                         if let Some(p) = self.works_bar_project() {
                             self.works_bar(ui, p);
                         }
@@ -107,6 +110,12 @@ impl PhotoApp {
         }
         if self.accuracy.open {
             self.accuracy_dialog_ui(ui);
+        }
+        if self.access_request.is_some() {
+            self.access_dialog_ui(ui);
+        }
+        if self.delete.dialog.is_some() {
+            self.delete_dialog_ui(ui);
         }
     }
 
@@ -327,6 +336,7 @@ impl PhotoApp {
                 });
                 ui.add_space(12.0);
 
+                #[cfg(feature = "license")]
                 self.license_settings(ui);
 
                 ui.label(egui::RichText::new("화면").font(bold(13.0)).color(pal.text2));

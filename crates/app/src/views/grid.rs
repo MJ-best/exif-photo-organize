@@ -168,6 +168,7 @@ impl PhotoApp {
             _ => Vec::new(),
         };
         let mut export: Option<(Vec<i64>, ExportMode)> = None;
+        let mut trash: Option<Vec<i64>> = None;
         let mut top_date: Option<chrono::NaiveDate> = None;
         let mut top_anchor: Option<(i64, f32)> = None;
         let out = sa.show_viewport(ui, |ui, viewport| {
@@ -444,6 +445,11 @@ impl PhotoApp {
                                 ui.close();
                             }
                         }
+                        ui.separator();
+                        if ui.button(format!("{what}휴지통으로 옮기기…  (Delete)")).clicked() {
+                            trash = Some(sel_ids.clone());
+                            ui.close();
+                        }
                     });
                 }
             }
@@ -529,6 +535,9 @@ impl PhotoApp {
         }
         if let Some((ids, mode)) = export {
             self.open_export(ids, mode);
+        }
+        if let Some(ids) = trash {
+            self.ask_delete(ids);
         }
     }
 

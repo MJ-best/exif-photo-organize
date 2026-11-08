@@ -360,6 +360,22 @@ pub fn primary_button(ui: &mut Ui, text: &str, pal: &Palette, enabled: bool) -> 
     resp
 }
 
+/// A button for something that cannot simply be undone (moving photos to the trash).
+pub fn danger_button(ui: &mut Ui, text: &str, pal: &Palette) -> Response {
+    let g = ui.painter().layout_no_wrap(text.to_owned(), bold(13.0), Color32::WHITE);
+    let (rect, resp) = ui.allocate_exact_size(vec2(g.size().x + 28.0, 28.0), Sense::click());
+    let bg = if resp.is_pointer_button_down_on() {
+        pal.danger.gamma_multiply(0.8)
+    } else if resp.hovered() {
+        pal.danger.gamma_multiply(1.1)
+    } else {
+        pal.danger
+    };
+    ui.painter().rect_filled(rect, 7.0, bg);
+    ui.painter().galley(rect.center() - g.size() / 2.0, g, Color32::WHITE);
+    resp
+}
+
 pub fn secondary_button(ui: &mut Ui, text: &str, pal: &Palette) -> Response {
     let g = ui.painter().layout_no_wrap(text.to_owned(), font(13.0), pal.text);
     let (rect, resp) = ui.allocate_exact_size(vec2(g.size().x + 26.0, 28.0), Sense::click());

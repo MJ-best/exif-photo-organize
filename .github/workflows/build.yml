@@ -87,7 +87,10 @@ jobs:
         with:
           key: macos-universal
       - name: Test
-        run: cargo test --workspace
+        run: |
+          cargo test --workspace
+          # The Mac App Store flavour (sandboxed, no license keys): scripts/macos-appstore.sh
+          cargo test -p photoorg-app --no-default-features
       - name: Build (arm64 + x86_64)
         run: |
           cargo build --release --workspace --target aarch64-apple-darwin
