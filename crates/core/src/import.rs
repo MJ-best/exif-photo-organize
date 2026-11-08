@@ -1047,6 +1047,62 @@ mod tests {
     }
 
     #[test]
+    fn trashing_moves_files_and_keeps_the_decision() {
+        let card = tempfile::tempdir().unwrap();
+        std::fs::write(card.path().join("IMG_0001.JPG"), jpeg("Canon EOS R6", "2026:05:01 10:00:00")).unwrap();
+        std::fs::write(card.path().join("IMG_0001.CR2"), raw("Canon EOS R6", "2026:05:01 10:00:00")).unwrap();
+        std::fs::write(card.path().join("IMG_0002.JPG"), jpeg("Canon EOS R6", "2026:05:02 11:00:00")).unwrap();
+        let libdir = tempfile::tempdir().unwrap();
+        // Freedesktop trash in a place of its own (same file system as the library).
+        let home = tempfile::tempdir_in(libdir.path().parent().unwrap()).unwrap();
+        std::env::set_var("XDG_DATA_HOME", home.path());
+        let lib = Library::open(libdir.path()).unwrap();
+        let cancel = Arc::new(AtomicBool::new(false));
+        let scan = scan_source(card.path(), true, &cancel, &|_, _| {}).unwrap();
+        let (tx, _rx) = crossbeam_channel::unbounded();
+        run_import(&lib, &scan, &ImportOptions::default(), &tx, cancel.clone()).unwrap();
+
+        let mut cat = lib.catalog().unwrap();
+        let idx = cat.load_index().unwrap();
+        let pair = idx.assets.iter().find(|a| a.name == "IMG_0001").unwrap().id;
+        let other = idx.assets.iter().find(|a| a.name == "IMG_0002").unwrap().id;
+        // Rejected, analysed, with a sidecar.
+        cat.set_flag(&[pair], -1).unwrap();
+        cat.put_analysis(pair, &crate::cull::Analysis { sharp_peak: 2.0, ..Default::default() }).unwrap();
+        cat.put_analysis(other, &crate::cull::Analysis { sharp_peak: 6.0, ..Default::default() }).unwrap();
+        lib.write_xmp(&cat, pair).unwrap();
+        let day = lib.root.join("2026/2026-05-01");
+        assert!(day.join("IMG_0001.xmp").is_file());
+
+        let plan = crate::trash::plan(&lib, &cat, &[pair]).unwrap();
+        assert_eq!((plan.photos, plan.files), (1, 3), "RAW, JPEG and the sidecar");
+        assert!(plan.bytes > 0);
+        let report = crate::trash::trash_assets(&lib, &mut cat, &[pair]).unwrap();
+        assert_eq!(report.trashed, vec![pair]);
+        assert!(report.failed.is_empty(), "{:?}", report.failed);
+        assert_eq!(report.files, 3);
+        assert_eq!(report.remembered, 1);
+        for f in ["IMG_0001.JPG", "IMG_0001.CR2", "IMG_0001.xmp"] {
+            assert!(!day.join(f).exists(), "{f} left the library");
+            assert!(home.path().join("Trash/files").join(f).is_file(), "{f} is in the trash");
+        }
+
+        // Gone from the library, still a lesson for the culling assistant.
+        assert_eq!(cat.load_index().unwrap().assets.len(), 1);
+        let items = cat.cull_items().unwrap();
+        assert_eq!(items.len(), 2);
+        let ghost = items.iter().find(|it| it.gone).unwrap();
+        assert!(ghost.id < 0);
+        assert_eq!(ghost.flag, -1);
+        assert!(items.iter().any(|it| it.id == other && !it.gone));
+
+        // Brought back from the trash, it can be imported again.
+        let mut again = scan_source(card.path(), true, &cancel, &|_, _| {}).unwrap();
+        mark_existing(&mut again, &cat).unwrap();
+        assert_eq!(again.summary(true).new_groups, 1);
+    }
+
+    #[test]
     fn write_failure_does_not_cascade() {
         let card = tempfile::tempdir().unwrap();
         for (i, d) in ["2026:07:01 10:00:00", "2026:07:01 10:00:01", "2026:07:01 10:00:02"].iter().enumerate() {

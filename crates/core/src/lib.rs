@@ -13,6 +13,7 @@ pub mod preview;
 pub mod tags;
 pub mod template;
 pub mod tiff;
+pub mod trash;
 pub mod volumes;
 pub mod works;
 pub mod xmp;

@@ -6,6 +6,7 @@ mod app;
 mod app_access;
 mod app_accuracy;
 mod app_cull;
+mod app_delete;
 mod app_export;
 #[cfg(feature = "license")]
 mod app_license;

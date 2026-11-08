@@ -274,6 +274,8 @@ pub struct PhotoApp {
     pub library_missing_since: Option<f64>,
     /// App Sandbox: a card or folder waiting to be granted once (see app_access.rs).
     pub access_request: Option<(PathBuf, Option<Volume>)>,
+    /// 지우기 (휴지통으로): the confirmation and the running job.
+    pub delete: crate::app_delete::DeleteState,
 }
 
 impl PhotoApp {
@@ -348,6 +350,7 @@ impl PhotoApp {
             focus_search: false,
             library_missing_since: None,
             access_request: None,
+            delete: Default::default(),
         };
         app.xmp_enabled.store(app.cfg.write_xmp, Ordering::Relaxed);
         app.apply_theme(&cc.egui_ctx);
@@ -1045,6 +1048,7 @@ impl PhotoApp {
         self.poll_export(ctx);
         self.poll_works(ctx);
         self.poll_accuracy(ctx);
+        self.poll_delete(ctx);
         #[cfg(feature = "license")]
         self.poll_license();
     }
@@ -1117,7 +1121,11 @@ impl PhotoApp {
     }
 
     fn handle_keys(&mut self, ctx: &egui::Context) {
-        if ctx.egui_wants_keyboard_input() || self.settings_open {
+        if ctx.egui_wants_keyboard_input()
+            || self.settings_open
+            || self.delete.dialog.is_some()
+            || self.access_request.is_some()
+        {
             return;
         }
         if self.view != MainView::Library || self.lib.is_none() {
@@ -1178,6 +1186,16 @@ impl PhotoApp {
                 Key::U if !cmd => {
                     let ids = self.target_ids();
                     self.set_flag(ctx, ids, 0);
+                }
+                // 휴지통으로 (asks first): Delete, Backspace, ⌘⌫.
+                Key::Delete | Key::Backspace
+                    if !self.accuracy.open
+                        && self.export_dialog.is_none()
+                        && self.works_dialog.is_none()
+                        && self.project_dialog.is_none() =>
+                {
+                    let ids = self.target_ids();
+                    self.ask_delete(ids);
                 }
                 Key::Num1 if cmd => self.set_mode(GridMode::Years),
                 Key::Num2 if cmd => self.set_mode(GridMode::Months),
