@@ -1053,9 +1053,6 @@ mod tests {
         std::fs::write(card.path().join("IMG_0001.CR2"), raw("Canon EOS R6", "2026:05:01 10:00:00")).unwrap();
         std::fs::write(card.path().join("IMG_0002.JPG"), jpeg("Canon EOS R6", "2026:05:02 11:00:00")).unwrap();
         let libdir = tempfile::tempdir().unwrap();
-        // Freedesktop trash in a place of its own (same file system as the library).
-        let home = tempfile::tempdir_in(libdir.path().parent().unwrap()).unwrap();
-        std::env::set_var("XDG_DATA_HOME", home.path());
         let lib = Library::open(libdir.path()).unwrap();
         let cancel = Arc::new(AtomicBool::new(false));
         let scan = scan_source(card.path(), true, &cancel, &|_, _| {}).unwrap();
@@ -1077,15 +1074,25 @@ mod tests {
         let plan = crate::trash::plan(&lib, &cat, &[pair]).unwrap();
         assert_eq!((plan.photos, plan.files), (1, 3), "RAW, JPEG and the sidecar");
         assert!(plan.bytes > 0);
-        let report = crate::trash::trash_assets(&lib, &mut cat, &[pair]).unwrap();
-        assert_eq!(report.trashed, vec![pair]);
-        assert!(report.failed.is_empty(), "{:?}", report.failed);
-        assert_eq!(report.files, 3);
-        assert_eq!(report.remembered, 1);
-        for f in ["IMG_0001.JPG", "IMG_0001.CR2", "IMG_0001.xmp"] {
-            assert!(!day.join(f).exists(), "{f} left the library");
-            assert!(home.path().join("Trash/files").join(f).is_file(), "{f} is in the trash");
+        // The freedesktop trash can live in a temporary folder; on macOS and Windows the files
+        // would land in the trash of whoever runs the tests, so there only the catalog part runs.
+        #[cfg(all(unix, not(target_os = "macos"), not(target_os = "ios"), not(target_os = "android")))]
+        {
+            // Same file system as the library, so the files go to this trash.
+            let home = tempfile::tempdir_in(libdir.path().parent().unwrap()).unwrap();
+            std::env::set_var("XDG_DATA_HOME", home.path());
+            let report = crate::trash::trash_assets(&lib, &mut cat, &[pair]).unwrap();
+            assert_eq!(report.trashed, vec![pair]);
+            assert!(report.failed.is_empty(), "{:?}", report.failed);
+            assert_eq!(report.files, 3);
+            assert_eq!(report.remembered, 1);
+            for f in ["IMG_0001.JPG", "IMG_0001.CR2", "IMG_0001.xmp"] {
+                assert!(!day.join(f).exists(), "{f} left the library");
+                assert!(home.path().join("Trash/files").join(f).is_file(), "{f} is in the trash");
+            }
         }
+        #[cfg(not(all(unix, not(target_os = "macos"), not(target_os = "ios"), not(target_os = "android"))))]
+        assert_eq!(cat.forget_assets(&[pair]).unwrap(), 1);
 
         // Gone from the library, still a lesson for the culling assistant.
         assert_eq!(cat.load_index().unwrap().assets.len(), 1);
