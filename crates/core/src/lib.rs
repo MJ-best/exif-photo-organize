@@ -10,6 +10,7 @@ pub mod library;
 pub mod media;
 pub mod metadata;
 pub mod preview;
+pub mod source;
 pub mod tags;
 pub mod template;
 pub mod tiff;

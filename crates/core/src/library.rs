@@ -41,6 +41,10 @@ impl Library {
     pub fn catalog_path(&self) -> PathBuf {
         self.data_dir().join("catalog.db")
     }
+    /// Where deleted photos go on systems without a trash for apps (Android).
+    pub fn trash_dir(&self) -> PathBuf {
+        self.data_dir().join("trash")
+    }
     pub fn thumbs_path(&self) -> PathBuf {
         self.data_dir().join("thumbs.db")
     }

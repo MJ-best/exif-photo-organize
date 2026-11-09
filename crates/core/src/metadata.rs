@@ -160,6 +160,19 @@ pub struct Probe {
 /// no capture date can be found.
 pub fn probe(path: &Path, kind: FileKind) -> Result<Probe> {
     let file = File::open(path).with_context(|| format!("open {}", path.display()))?;
+    let mut p = probe_file(file, kind, &path.display().to_string());
+    if p.meta.captured_at.is_none() {
+        if let Some(t) = file_time(path) {
+            p.meta.captured_at = Some(t);
+            p.meta.date_source = DateSource::FileTime;
+        }
+    }
+    Ok(p)
+}
+
+/// [`probe`] of an open file (e.g. one handed over by Android), without the file time fallback.
+/// `what` names the file in log messages.
+pub fn probe_file(file: File, kind: FileKind, what: &str) -> Probe {
     let file_len = file.metadata().map(|m| m.len()).unwrap_or(0);
     let mut r = BufReader::with_capacity(64 * 1024, file);
     let mut p = Probe { meta: Metadata { orientation: 1, ..Default::default() }, previews: Vec::new() };
@@ -173,18 +186,12 @@ pub fn probe(path: &Path, kind: FileKind) -> Result<Probe> {
         FileKind::Video => Ok(()),
     };
     if let Err(e) = res {
-        log::debug!("metadata of {}: {e:#}", path.display());
+        log::debug!("metadata of {what}: {e:#}");
     }
     if p.meta.orientation == 0 || p.meta.orientation > 8 {
         p.meta.orientation = 1;
     }
-    if p.meta.captured_at.is_none() {
-        if let Some(t) = file_time(path) {
-            p.meta.captured_at = Some(t);
-            p.meta.date_source = DateSource::FileTime;
-        }
-    }
-    Ok(p)
+    p
 }
 
 pub fn read_metadata(path: &Path, kind: FileKind) -> Metadata {

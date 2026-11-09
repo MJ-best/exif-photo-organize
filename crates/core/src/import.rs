@@ -8,9 +8,10 @@
 //! speed of the slower device rather than the sum of both.
 
 use crate::catalog::{naive_to_ms, Catalog, NewFile, ThumbStore};
-use crate::library::{Library, DATA_DIR};
-use crate::media::{is_junk_name, FileKind};
-use crate::metadata::{self, JpegRef, Metadata};
+use crate::library::Library;
+use crate::media::FileKind;
+use crate::metadata::{self, DateSource, JpegRef, Metadata};
+use crate::source::Source;
 use crate::{preview, tags, template, xmp};
 use anyhow::{bail, Context, Result};
 use crossbeam_channel::{bounded, Sender};
@@ -22,7 +23,7 @@ use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime};
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(default)]
@@ -107,6 +108,8 @@ pub struct ScanResult {
     pub label: String,
     pub groups: Vec<SourceGroup>,
     pub errors: Vec<String>,
+    /// Where the files are read from.
+    pub fs: Source,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -166,52 +169,6 @@ pub fn source_label(source: &Path) -> String {
         .unwrap_or_else(|| source.display().to_string())
 }
 
-fn walk(source: &Path, include_videos: bool, cancel: &AtomicBool) -> (Vec<SourceFile>, Vec<String>) {
-    let mut files = Vec::new();
-    let mut errors = Vec::new();
-    let mut stack = vec![(source.to_path_buf(), 0usize)];
-    while let Some((dir, depth)) = stack.pop() {
-        if cancel.load(Ordering::Relaxed) {
-            break;
-        }
-        let rd = match std::fs::read_dir(&dir) {
-            Ok(rd) => rd,
-            Err(e) => {
-                errors.push(format!("{}: {e}", dir.display()));
-                continue;
-            }
-        };
-        for entry in rd.flatten() {
-            let name = entry.file_name().to_string_lossy().into_owned();
-            if is_junk_name(&name) {
-                continue;
-            }
-            let Ok(ft) = entry.file_type() else { continue };
-            let path = entry.path();
-            if ft.is_dir() {
-                let skip = name == DATA_DIR
-                    || name.eq_ignore_ascii_case("$RECYCLE.BIN")
-                    || name.eq_ignore_ascii_case("System Volume Information");
-                if !skip && depth < 16 {
-                    stack.push((path, depth + 1));
-                }
-                continue;
-            }
-            let Some(kind) = FileKind::from_path(&path) else { continue };
-            if kind.is_video() && !include_videos {
-                continue;
-            }
-            let Ok(md) = entry.metadata() else { continue };
-            if md.len() == 0 {
-                continue;
-            }
-            let mtime = md.modified().ok().and_then(|t| t.duration_since(UNIX_EPOCH).ok()).map(|d| d.as_secs() as i64);
-            files.push(SourceFile { path, name, kind, size: md.len(), mtime, existing: None });
-        }
-    }
-    (files, errors)
-}
-
 /// Folder a file is paired in. RAW files kept in a `RAW` sub folder (as this app does with the
 /// "RAW sub folder" option, and many photographers do by hand) pair with the JPEGs one level up.
 fn pairing_dir(path: &Path, kind: FileKind) -> PathBuf {
@@ -242,7 +199,19 @@ pub fn scan_source(
         bail!("{}은(는) 폴더가 아닙니다", source.display());
     }
     let source = &std::path::absolute(source).unwrap_or_else(|_| source.to_path_buf());
-    let (files, errors) = walk(source, include_videos, cancel);
+    scan_in(&Source::local(), source, include_videos, cancel, progress)
+}
+
+/// [`scan_source`] of files that are not plain paths on this computer (e.g. a card opened
+/// through Android's Storage Access Framework), under the made-up folder `root`.
+pub fn scan_in(
+    fs: &Source,
+    source: &Path,
+    include_videos: bool,
+    cancel: &AtomicBool,
+    progress: &(dyn Fn(usize, usize) + Sync),
+) -> Result<ScanResult> {
+    let (files, errors) = fs.walk(source, include_videos, cancel);
     let mut map: HashMap<(PathBuf, String, bool), Vec<SourceFile>> = HashMap::new();
     for f in files {
         let dir = pairing_dir(&f.path, f.kind);
@@ -264,17 +233,22 @@ pub fn scan_source(
             return;
         }
         let primary = g.files[0].clone();
-        match metadata::probe(&primary.path, primary.kind) {
+        let probe = |f: &SourceFile| fs.open(&f.path).map(|file| metadata::probe_file(file, f.kind, &f.name));
+        match probe(&primary) {
             Ok(p) => {
                 g.meta = p.meta;
                 g.previews = p.previews;
             }
-            Err(_) => g.meta.captured_at = metadata::file_time(&primary.path),
+            Err(e) => log::debug!("open {}: {e}", primary.path.display()),
+        }
+        if g.meta.captured_at.is_none() {
+            g.meta.captured_at = fs.file_time(&primary.path);
+            g.meta.date_source = DateSource::FileTime;
         }
         // RAW files hold the most complete EXIF (e.g. lens); fill gaps from them.
         if g.meta.lens.is_none() || g.meta.make.is_none() {
             for f in g.files.iter().skip(1).filter(|f| f.kind == FileKind::Raw) {
-                if let Ok(p) = metadata::probe(&f.path, f.kind) {
+                if let Ok(p) = probe(f) {
                     g.meta.merge_missing(&p.meta);
                 }
             }
@@ -286,9 +260,11 @@ pub fn scan_source(
         'find: for dir in dirs {
             for ext in ["xmp", "XMP"] {
                 let p = dir.join(format!("{}.{ext}", g.stem));
-                if p.is_file() {
+                if fs.is_file(&p) {
                     if g.meta.rating.is_none() {
-                        g.meta.apply_xmp_rating(std::fs::read(&p).ok().and_then(|b| metadata::xmp_rating(&b)));
+                        let mut b = Vec::new();
+                        let read = fs.open(&p).and_then(|mut f| f.read_to_end(&mut b)).is_ok();
+                        g.meta.apply_xmp_rating(if read { metadata::xmp_rating(&b) } else { None });
                     }
                     g.sidecar = Some(p);
                     break 'find;
@@ -304,7 +280,7 @@ pub fn scan_source(
         bail!("취소됨");
     }
     groups.sort_by(|a, b| a.captured_ms().cmp(&b.captured_ms()).then_with(|| a.stem.cmp(&b.stem)));
-    Ok(ScanResult { source: source.to_path_buf(), label: source_label(source), groups, errors })
+    Ok(ScanResult { source: source.to_path_buf(), label: source_label(source), groups, errors, fs: fs.clone() })
 }
 
 /// Mark files that are already in the catalog.
@@ -534,7 +510,7 @@ enum Chunk {
 
 const CHUNK: usize = 4 << 20;
 
-fn spawn_reader(paths: Vec<PathBuf>, cancel: Arc<AtomicBool>) -> crossbeam_channel::Receiver<Chunk> {
+fn spawn_reader(fs: Source, paths: Vec<PathBuf>, cancel: Arc<AtomicBool>) -> crossbeam_channel::Receiver<Chunk> {
     let (tx, rx) = bounded::<Chunk>(8);
     std::thread::Builder::new()
         .name("import-reader".into())
@@ -543,7 +519,7 @@ fn spawn_reader(paths: Vec<PathBuf>, cancel: Arc<AtomicBool>) -> crossbeam_chann
                 if cancel.load(Ordering::Relaxed) {
                     return;
                 }
-                let mut f = match File::open(&p) {
+                let mut f = match fs.open(&p) {
                     Ok(f) => f,
                     Err(e) => {
                         if tx.send(Chunk::Error(format!("{}: {e}", p.display()))).is_err() {
@@ -617,7 +593,8 @@ pub fn run_import(
 ) -> Result<ImportSummary> {
     let start = Instant::now();
     let mut catalog = lib.catalog()?;
-    let in_place = lib.contains(&scan.source);
+    // Files already inside the library are adopted where they are.
+    let in_place = scan.fs.is_local() && lib.contains(&scan.source);
     let (planned, duplicates) = plan(lib, &catalog, scan, opts, in_place)?;
     let mut summary = ImportSummary { duplicates, ..Default::default() };
     let import_id = catalog.begin_import(&scan.source.display().to_string(), &scan.label)?;
@@ -642,6 +619,7 @@ pub fn run_import(
         None
     } else {
         Some(spawn_reader(
+            scan.fs.clone(),
             planned.iter().flat_map(|p| p.files.iter().map(|f| f.src.path.clone())).collect(),
             cancel.clone(),
         ))
@@ -732,7 +710,14 @@ pub fn run_import(
                 if let Some(anchor) = anchor {
                     let dest = xmp::sidecar_path(&anchor.dest);
                     if !dest.exists() {
-                        let _ = std::fs::copy(sc, &dest);
+                        let copied = scan.fs.open(sc).and_then(|mut from| {
+                            let mut to = File::create(&dest)?;
+                            std::io::copy(&mut from, &mut to)
+                        });
+                        if let Err(e) = copied {
+                            log::warn!("sidecar {}: {e}", sc.display());
+                            let _ = std::fs::remove_file(&dest);
+                        }
                     }
                 }
             }
