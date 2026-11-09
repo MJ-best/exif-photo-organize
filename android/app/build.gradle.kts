@@ -36,12 +36,14 @@ val signing = Properties().apply {
 val canSign = listOf("storeFile", "storePassword", "keyAlias", "keyPassword").all { !signing.getProperty(it).isNullOrBlank() }
 
 android {
+    // The Kotlin package of the sources (never shown to anyone); the store identity is applicationId.
     namespace = "io.github.mj_best.photoorganize"
     compileSdk = 36
     ndkVersion = "28.2.13676358"
 
     defaultConfig {
-        applicationId = "io.github.mj_best.photoorganize"
+        // LOUPE on Google Play. Fixed for good with the first upload.
+        applicationId = "io.github.mj_best.loupe"
         minSdk = 26
         targetSdk = 36
         versionCode = (findProperty("versionCode") as String?)?.toInt() ?: versionCodeOf(appVersion)
