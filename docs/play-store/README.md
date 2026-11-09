@@ -43,7 +43,7 @@ keytool -genkeypair -v -keystore upload.jks -alias upload -keyalg RSA -keysize 2
 ## 3. 빌드
 
 - **CI**: `android` 워크플로가 PR · main 에서 돌고, 아티팩트 `photo-organize-android` 에 **`app-release.aab`** (Play 업로드용)와 테스트용 APK 가 있습니다. 화면 스크린샷은 `android-screenshots`.
-- **직접**: Rust · Android SDK · NDK 28 · `cargo install cargo-ndk` 가 있으면
+- **직접**: Rust · **JDK 21** · Android SDK · NDK 28 · `cargo install cargo-ndk` 가 있으면 (JDK 17 에서는 앱 테스트가 모두 실패합니다 — Robolectric 이 안드로이드 16 을 Java 21 에서만 돌림)
   ```bash
   cd android
   ./gradlew :app:testDebugUnitTest      # 엔진(JNA) + 화면 스크린샷
