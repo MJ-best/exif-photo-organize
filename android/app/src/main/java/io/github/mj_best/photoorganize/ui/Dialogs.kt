@@ -117,11 +117,11 @@ fun SettingsDialog(
                 Text(libraryPath, color = p.text2, fontSize = 12.sp)
                 Text(
                     "앱을 지우면 이 폴더의 사진도 함께 지워집니다. 고른 사진은 컴퓨터로 옮겨 두세요 — " +
-                        "별점 · 거절은 XMP 사이드카에 있어 Photo Organize 데스크톱 앱과 라이트룸에서 그대로 보입니다.",
+                        "별점 · 거절은 XMP 사이드카에 있어 LOUPE 데스크톱 앱과 라이트룸에서 그대로 보입니다.",
                     color = p.text3, fontSize = 13.sp,
                 )
                 HorizontalDivider(color = p.separator)
-                Text("Photo Organize $version", color = p.text2, fontSize = 13.sp)
+                Text("LOUPE $version — 사진가의 서랍, 사진을 고르는 시간", color = p.text2, fontSize = 13.sp)
                 Text(
                     "사진은 기기 밖으로 나가지 않습니다 (인터넷 권한 없음). 얼굴 인식 YuNet(MIT), 장면 인식 MobileNetV2(Apache-2.0) 모델을 씁니다.",
                     color = p.text3, fontSize = 12.sp,

@@ -1,8 +1,8 @@
-//! Photo Organize culling engine: finds likely B-cuts (out of focus, shaken, closed eyes, badly
+//! LOUPE culling engine: finds likely B-cuts (out of focus, shaken, closed eyes, badly
 //! exposed, weaker frame of a burst), ranks the best A-cuts and learns the photographer's own A/B
 //! decisions per scene.
 //!
-//! Licensed separately from the rest of Photo Organize under the Business Source License 1.1
+//! Licensed separately from the rest of LOUPE under the Business Source License 1.1
 //! (see `LICENSE` in this crate).
 //!
 //! Pipeline per photo: decode the embedded preview at [`ANALYSIS_EDGE`] px → classical

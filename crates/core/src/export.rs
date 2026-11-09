@@ -583,7 +583,7 @@ pub fn exif_block(m: &Metadata, dims: Option<(u32, u32)>, orientation: u8) -> Ve
 
     let mut ifd0: Vec<(u16, Val)> = vec![
         (tag::ORIENTATION, Val::Short(vec![orientation as u16])),
-        (tag::SOFTWARE, Val::Text(format!("Photo Organize {}", env!("CARGO_PKG_VERSION")))),
+        (tag::SOFTWARE, Val::Text(format!("LOUPE {}", env!("CARGO_PKG_VERSION")))),
     ];
     if let Some(v) = &m.make {
         ifd0.push((tag::MAKE, Val::Text(v.clone())));

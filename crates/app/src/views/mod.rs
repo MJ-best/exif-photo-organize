@@ -159,11 +159,11 @@ impl PhotoApp {
         let (ir, _) = ui.allocate_exact_size(vec2(112.0, 112.0), Sense::hover());
         crate::icon::paint_mascot(&ctx, ui.painter(), ir);
         ui.add_space(8.0);
-        ui.label(egui::RichText::new("Photo Organize").font(bold(24.0)));
+        ui.label(egui::RichText::new("LOUPE").font(bold(24.0)));
         ui.add_space(4.0);
         ui.label(
             egui::RichText::new(
-                "SD 카드의 사진을 외장 하드로 옮기면서\nEXIF 기준으로 자동 정리하고, 별점으로 셀렉하세요.",
+                "사진가의 서랍, 사진을 고르는 시간\nSD 카드의 사진을 옮기면서 자동 정리하고, 별점으로 셀렉하세요.",
             )
             .font(font(13.0))
             .color(pal.text2),

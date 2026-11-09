@@ -1,4 +1,4 @@
-//! Photo Organize on Android: what the Kotlin app calls, through UniFFI.
+//! LOUPE on Android: what the Kotlin app calls, through UniFFI.
 //!
 //! The library, the import and the culling assistant are the same code as on the desktop
 //! (`photoorg-core`, `photoorg-cull`); this crate only gives them an interface the app can call.

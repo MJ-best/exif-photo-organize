@@ -53,7 +53,7 @@ keytool -genkeypair -v -keystore upload.jks -alias upload -keyalg RSA -keysize 2
 
 ## 4. Play Console 에 앱 만들기
 
-1. **앱 만들기** → 앱 이름 `Photo Organize` · 기본 언어 **한국어** · **앱** · **유료** (한 번 무료로 낸 앱은 유료로 바꿀 수 없습니다)
+1. **앱 만들기** → 앱 이름 `LOUPE - 사진가의 서랍, 사진을 고르는 시간` · 기본 언어 **한국어** · **앱** · **유료** (한 번 무료로 낸 앱은 유료로 바꿀 수 없습니다)
 2. **앱 콘텐츠** (모두 [listing.md](listing.md) 에 답이 있음)
    - 개인정보처리방침 URL — 판매 사이트의 `/privacy` (안드로이드판 문단 포함)
    - 광고: 없음 · 앱 액세스: 로그인 없이 모든 기능 사용 가능

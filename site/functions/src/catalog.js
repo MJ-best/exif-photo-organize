@@ -13,9 +13,9 @@ export const TAX_FREE = true;
 export const PRODUCTS = [
   {
     id: 'license',
-    name: 'Photo Organize 라이선스',
+    name: 'LOUPE 라이선스',
     // Shown in the payment window and on the receipt (max 100 characters).
-    orderName: 'Photo Organize 라이선스 (영구)',
+    orderName: 'LOUPE 라이선스 (영구)',
     price: 89000,
     priceNote: '한 번 결제 · 구독 없음',
     maxDevices: 3,

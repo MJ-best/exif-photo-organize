@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# Wrap the release binary into "Photo Organize.app".
+# Wrap the release binary into "LOUPE.app".
 # Usage: scripts/macos-bundle.sh target/release/photo-organize <out-dir>
 set -euo pipefail
 BIN="${1:-target/release/photo-organize}"
 OUT="${2:-dist}"
 VERSION="$(grep -m1 '^version' Cargo.toml | sed -E 's/.*"(.*)".*/\1/')"
-APP="$OUT/Photo Organize.app"
+APP="$OUT/LOUPE.app"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN" "$APP/Contents/MacOS/photo-organize"
 cp "$(dirname "$0")/../crates/app/assets/AppIcon.icns" "$APP/Contents/Resources/AppIcon.icns"
@@ -14,8 +14,8 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-  <key>CFBundleName</key><string>Photo Organize</string>
-  <key>CFBundleDisplayName</key><string>Photo Organize</string>
+  <key>CFBundleName</key><string>LOUPE</string>
+  <key>CFBundleDisplayName</key><string>LOUPE</string>
   <key>CFBundleIdentifier</key><string>io.github.mj-best.photo-organize</string>
   <key>CFBundleExecutable</key><string>photo-organize</string>
   <key>CFBundleIconFile</key><string>AppIcon</string>

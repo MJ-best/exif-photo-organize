@@ -1,6 +1,6 @@
 [package]
 name = "photoorg-android"
-description = "Photo Organize on Android: the library, import and culling assistant for the Kotlin app (UniFFI)."
+description = "LOUPE on Android: the library, import and culling assistant for the Kotlin app (UniFFI)."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

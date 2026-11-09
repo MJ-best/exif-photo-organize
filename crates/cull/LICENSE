@@ -3,13 +3,14 @@ Business Source License 1.1
 Parameters
 
 Licensor:             MJ-best
-Licensed Work:        Photo Organize Cull Engine — the contents of the crates/cull
+Licensed Work:        LOUPE Cull Engine (formerly "Photo Organize Cull Engine") —
+                      the contents of the crates/cull
                       directory of https://github.com/MJ-best/exif-photo-organize,
                       version 0.3.0 and later (excluding the third-party model files
                       in crates/cull/models, which keep their own licenses).
                       The Licensed Work is (c) 2026 MJ-best.
 Additional Use Grant: You may make production use of the Licensed Work only as part
-                      of the Photo Organize application as distributed by the
+                      of the LOUPE application (formerly "Photo Organize") as distributed by the
                       Licensor, including for professional photography work. You
                       may not use the Licensed Work, or any derivative work of it,
                       in any other product or service, nor provide it to third

@@ -1,4 +1,4 @@
-//! Photo Organize — a fast, EXIF-driven photo importer, organiser and culling tool.
+//! LOUPE — a fast, EXIF-driven photo importer, organiser and culling tool.
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
@@ -28,7 +28,7 @@ use eframe::egui;
 fn main() -> eframe::Result {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn")).init();
     let mut viewport = egui::ViewportBuilder::default()
-        .with_title("Photo Organize")
+        .with_title("LOUPE")
         .with_app_id("photo-organize")
         .with_inner_size([1360.0, 860.0])
         .with_min_inner_size([960.0, 600.0])
@@ -38,5 +38,5 @@ fn main() -> eframe::Result {
         viewport = viewport.with_fullsize_content_view(true).with_titlebar_shown(false).with_title_shown(false);
     }
     let options = eframe::NativeOptions { viewport, ..Default::default() };
-    eframe::run_native("Photo Organize", options, Box::new(|cc| Ok(Box::new(app::PhotoApp::new(cc)))))
+    eframe::run_native("LOUPE", options, Box::new(|cc| Ok(Box::new(app::PhotoApp::new(cc)))))
 }

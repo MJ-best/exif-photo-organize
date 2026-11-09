@@ -1,4 +1,4 @@
-//! `photoorg` — command line companion of Photo Organize.
+//! `photoorg` — command line companion of LOUPE.
 //!
 //! Useful for scripting, headless machines and debugging metadata parsing.
 

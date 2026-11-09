@@ -119,14 +119,14 @@ jobs:
           ./scripts/macos-bundle.sh target/universal/photo-organize dist
           # Developer ID signature + notarization when the secrets exist, ad-hoc otherwise
           # (ad-hoc is still needed so Apple Silicon accepts the merged binary).
-          ./scripts/macos-sign.sh "dist/Photo Organize.app"
+          ./scripts/macos-sign.sh "dist/LOUPE.app"
           cp target/universal/photoorg dist/
-          ditto -c -k --keepParent "dist/Photo Organize.app" photo-organize-macos-universal.zip
-          mkdir dmg && cp -R "dist/Photo Organize.app" dmg/ && ln -s /Applications dmg/Applications
+          ditto -c -k --keepParent "dist/LOUPE.app" photo-organize-macos-universal.zip
+          mkdir dmg && cp -R "dist/LOUPE.app" dmg/ && ln -s /Applications dmg/Applications
           # hdiutil's own size estimate is too tight for the larger binary (embedded models in
           # both architectures) and fails with "No space left on device": give it headroom.
           size_mb=$(( $(du -sm dmg | cut -f1) * 12 / 10 + 20 ))
-          hdiutil create -volname "Photo Organize" -srcfolder dmg -size "${size_mb}m" -ov -format UDZO photo-organize-macos-universal.dmg
+          hdiutil create -volname "LOUPE" -srcfolder dmg -size "${size_mb}m" -ov -format UDZO photo-organize-macos-universal.dmg
       - uses: actions/upload-artifact@v4
         with:
           name: photo-organize-macos-universal

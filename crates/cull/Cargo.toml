@@ -1,6 +1,6 @@
 [package]
 name = "photoorg-cull"
-description = "Photo Organize culling engine: finds likely B-cuts and the best A-cuts, and learns a photographer's own taste."
+description = "LOUPE culling engine: finds likely B-cuts and the best A-cuts, and learns a photographer's own taste."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

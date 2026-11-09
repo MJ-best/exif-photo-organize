@@ -15,7 +15,7 @@ shift 2
 NOTES="docs/releases/$TAG.md"
 
 if ! gh release view "$TAG" >/dev/null 2>&1; then
-  args=(--target "$TARGET" --title "Photo Organize $TAG")
+  args=(--target "$TARGET" --title "LOUPE $TAG")
   if [[ -f "$NOTES" ]]; then
     args+=(--notes-file "$NOTES")
   else

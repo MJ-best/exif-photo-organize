@@ -1,6 +1,6 @@
 [package]
 name = "photoorg-macos"
-description = "Photo Organize on macOS: App Sandbox file access (security-scoped bookmarks), Finder and eject."
+description = "LOUPE on macOS: App Sandbox file access (security-scoped bookmarks), Finder and eject."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

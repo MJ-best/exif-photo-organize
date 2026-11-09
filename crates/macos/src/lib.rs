@@ -1,4 +1,4 @@
-//! macOS integration for Photo Organize.
+//! macOS integration for LOUPE.
 //!
 //! The Mac App Store build runs in the App Sandbox: it may only use folders the person chose in a
 //! folder panel, and only until it quits. [`remember`] keeps that permission (a security-scoped

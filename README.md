@@ -1,10 +1,10 @@
 <div align="center">
 
-<img src="crates/app/assets/icon-256.png" alt="Photo Organize 아이콘 — 사진을 들고 있는 로봇" width="128">
+<img src="crates/app/assets/icon-256.png" alt="LOUPE 아이콘 — 사진을 들고 있는 로봇" width="128">
 
-# Photo Organize
+# LOUPE
 
-**SD 카드를 꽂으면, 외장 하드로 옮기면서 알아서 정리되는 사진 앱**
+**사진가의 서랍, 사진을 고르는 시간 — SD 카드를 꽂으면 알아서 정리되고, 셀렉에만 집중하는 사진 앱**
 
 EXIF 를 읽어 날짜별 폴더로 정리하고 · RAW 와 JPEG 를 한 장으로 묶고 · F1~F5 로 별점을 매겨 셀렉합니다.<br>
 초점이 나가거나 흔들리고 눈을 감은 **B컷은 자동으로 찾아 주고**, 내가 고르는 기준을 — *어떤 사진을 남기는지* 취향까지 — 장면별로 학습합니다.<br>
@@ -47,7 +47,7 @@ EXIF 를 읽어 날짜별 폴더로 정리하고 · RAW 와 JPEG 를 한 장으�
 
 ## 이런 분께 필요합니다
 
-| 늘 겪던 일 | Photo Organize 에서는 |
+| 늘 겪던 일 | LOUPE 에서는 |
 |---|---|
 | SD 카드를 외장 하드에 통째로 복사해 두고, 정리는 "나중에"… | 카드를 꽂으면 가져오기 화면이 뜨고, **복사하는 동시에 날짜별 폴더로 정리**됩니다. |
 | 같은 카드를 또 복사해서 중복 파일이 쌓인다 | 이미 가져온 사진은 **자동으로 건너뜁니다.** 카드 화면에 `가져옴` 으로 표시돼요. |
@@ -88,10 +88,10 @@ Apple Silicon(M1·M2·M3·M4)과 Intel 맥 모두에서 실행되는 **유니버
 
 1. **[Releases](https://github.com/MJ-best/exif-photo-organize/releases/latest)** 에서 `photo-organize-macos-universal.dmg` 를 내려받습니다.
 2. *(최신 개발 버전을 원하면)* [Actions → build](https://github.com/MJ-best/exif-photo-organize/actions/workflows/build.yml) 에서 가장 최근의 초록색(✓) 실행 → **Artifacts** 의 `photo-organize-macos-universal` 을 받아 압축을 풉니다. *(GitHub 로그인 필요)*
-3. `.dmg` 를 열고 **Photo Organize** 를 **Applications** 폴더로 끌어 놓습니다.
-4. **처음 한 번은 직접 허용해야 합니다.** 앱을 열면 *"Apple은 'Photo Organize'에 Mac에 손상을 입히거나 개인정보를 침해할 수 있는 **악성 코드가 없음을 확인할 수 없습니다**"* 라는 창이 뜹니다.
+3. `.dmg` 를 열고 **LOUPE** 를 **Applications** 폴더로 끌어 놓습니다.
+4. **처음 한 번은 직접 허용해야 합니다.** 앱을 열면 *"Apple은 'LOUPE'에 Mac에 손상을 입히거나 개인정보를 침해할 수 있는 **악성 코드가 없음을 확인할 수 없습니다**"* 라는 창이 뜹니다.
    - **완료**를 누릅니다 (*휴지통으로 이동* 아님).
-   - **시스템 설정 → 개인정보 보호 및 보안** 을 열고 맨 아래 **보안** 항목의 *"'Photo Organize'이(가) Mac을 보호하기 위해 차단되었습니다"* 옆 **그래도 열기** → 암호(또는 Touch ID) → 다시 뜨는 창에서 **그래도 열기**.
+   - **시스템 설정 → 개인정보 보호 및 보안** 을 열고 맨 아래 **보안** 항목의 *"'LOUPE'이(가) Mac을 보호하기 위해 차단되었습니다"* 옆 **그래도 열기** → 암호(또는 Touch ID) → 다시 뜨는 창에서 **그래도 열기**.
    - 한 번만 하면 다음부터는 그냥 열립니다. (macOS 14 이하는 Finder 에서 **우클릭 → 열기 → 열기** 로도 됩니다. macOS 15 부터는 우클릭으로는 열리지 않습니다.)
 5. SD 카드나 외장 하드에 처음 접근할 때 *"이동식 볼륨의 파일에 접근하려고 합니다"* 창이 뜨면 **허용**을 누릅니다.
 
@@ -101,12 +101,12 @@ Apple Silicon(M1·M2·M3·M4)과 Intel 맥 모두에서 실행되는 **유니버
 
 ```bash
 curl -fL https://github.com/MJ-best/exif-photo-organize/releases/latest/download/photo-organize-macos-universal.zip -o /tmp/photo-organize.zip \
-  && rm -rf "/Applications/Photo Organize.app" \
+  && rm -rf "/Applications/LOUPE.app" "/Applications/Photo Organize.app" \
   && ditto -x -k /tmp/photo-organize.zip /Applications \
-  && open "/Applications/Photo Organize.app"
+  && open "/Applications/LOUPE.app"
 ```
 
-이미 브라우저로 받아 *Applications* 에 넣었다면 이것만 실행해도 됩니다: `xattr -dr com.apple.quarantine "/Applications/Photo Organize.app"`
+이미 브라우저로 받아 *Applications* 에 넣었다면 이것만 실행해도 됩니다: `xattr -dr com.apple.quarantine "/Applications/LOUPE.app"`
 
 > 새 버전 릴리스: `Cargo.toml` 의 `version` 을 올리고 `docs/releases/v<버전>.md` 에 릴리스 노트를 써서 main 에 머지하면, CI 가 빌드한 뒤 태그와 [Releases](https://github.com/MJ-best/exif-photo-organize/releases) 를 자동으로 만듭니다. 태그(`v*`)를 직접 푸시하거나 *Actions → build → Run workflow* 에서 `release_tag` 를 입력해도 됩니다.
 
@@ -139,7 +139,7 @@ cargo run --release -p photoorg-app          # 앱 실행
 
 # macOS .app 만들기
 cargo build --release -p photoorg-app
-./scripts/macos-bundle.sh target/release/photo-organize dist   # → dist/Photo Organize.app
+./scripts/macos-bundle.sh target/release/photo-organize dist   # → dist/LOUPE.app
 ```
 
 ---
@@ -592,7 +592,7 @@ Apple 공증을 받지 않은 앱이라 생기는 메시지입니다 (무엇이 
    (macOS 14 이하는 Finder 에서 **우클릭 → 열기 → 열기**.)
 2. *그래도 열기* 버튼이 안 보이거나 *손상되었다* 고 나오면 터미널에서 "인터넷에서 받음" 표시를 지웁니다:
    ```bash
-   xattr -dr com.apple.quarantine "/Applications/Photo Organize.app"
+   xattr -dr com.apple.quarantine "/Applications/LOUPE.app"
    ```
 3. 처음부터 경고 없이 설치하려면 [터미널로 설치하기](#macos-맥북--권장) 의 명령을 쓰세요.
 </details>
@@ -602,7 +602,7 @@ Apple 공증을 받지 않은 앱이라 생기는 메시지입니다 (무엇이 
 
 - 카드에 `DCIM` 폴더가 있어야 카메라 카드로 인식합니다. (디지털카메라 카드는 모두 있습니다)
 - 앱이 카드 목록을 1.5초마다 확인합니다. 잠시 기다려 보세요.
-- macOS 에서 *이동식 볼륨* 접근을 거절했다면 **시스템 설정 → 개인정보 보호 및 보안 → 파일 및 폴더 → Photo Organize → 이동식 볼륨**을 켜 주세요.
+- macOS 에서 *이동식 볼륨* 접근을 거절했다면 **시스템 설정 → 개인정보 보호 및 보안 → 파일 및 폴더 → LOUPE → 이동식 볼륨**을 켜 주세요.
 - 설정의 *"SD 카드를 연결하면 가져오기 화면 열기"* 가 꺼져 있으면 사이드바의 카드 이름을 직접 누르세요.
 - 카드 리더가 아닌 폴더라면 **폴더에서 가져오기…** 를 쓰세요.
 </details>
@@ -802,7 +802,7 @@ PHOTOORG_TEST_IMAGES=<폴더> cargo test -p photoorg-core faces -- --ignored  # 
 ## 라이선스
 
 - 앱 · 가져오기 · 카탈로그 등 대부분: [MIT](LICENSE)
-- **셀렉 엔진** (`crates/cull` — B컷 · A컷 후보, 학습): 0.3.0부터 [Business Source License 1.1](crates/cull/LICENSE) — 소스는 공개하지만, Photo Organize 앱 안에서 쓰는 것 말고는 상업적 사용이 허용되지 않습니다. 각 버전은 공개 4년 뒤 MIT 로 바뀝니다 (0.4.0 은 2030-11-05, 0.5.0 은 2030-11-08). 0.2.6 까지의 코드는 MIT 그대로입니다. 자세한 내용은 [LICENSING.md](LICENSING.md).
+- **셀렉 엔진** (`crates/cull` — B컷 · A컷 후보, 학습): 0.3.0부터 [Business Source License 1.1](crates/cull/LICENSE) — 소스는 공개하지만, LOUPE 앱 안에서 쓰는 것 말고는 상업적 사용이 허용되지 않습니다. 각 버전은 공개 4년 뒤 MIT 로 바뀝니다 (0.4.0 은 2030-11-05, 0.5.0 은 2030-11-08). 0.2.6 까지의 코드는 MIT 그대로입니다. 자세한 내용은 [LICENSING.md](LICENSING.md).
 
 셀렉 엔진에 내장된 모델 ([OpenCV Model Zoo](https://github.com/opencv/opencv_zoo), 자세한 내용은 [crates/cull/models](crates/cull/models/README.md)):
 - 얼굴 검출 **YuNet** (`face_detection_yunet_2023mar.onnx`) — MIT

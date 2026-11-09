@@ -12,7 +12,7 @@
 
 ## 앱 정보
 
-- 앱 이름: **Photo Organize**
+- 앱 이름: **LOUPE - 사진가의 서랍, 사진을 고르는 시간** (기기의 홈 화면 아이콘 이름은 `LOUPE`)
 - 카테고리: **사진** (Photography)
 - 태그: 사진 편집기 아님 — *사진 관리*, *카메라 도구* 계열
 - 연락처 이메일: (사업자 이메일 — 판매 사이트 `site.config.json` 의 `business.email` 과 같게)
@@ -22,14 +22,15 @@
 
 **간단한 설명** (80자 이내)
 
-> 카드에서 바로 가져와, 흔들리고 눈 감은 컷부터 걸러 주는 사진가용 셀렉 앱
+> 사진가의 서랍, 사진을 고르는 시간 — 카드에서 바로 가져와 B컷부터 걸러 주는 셀렉 앱
 
 **자세한 설명** (4,000자 이내)
 
 ```
+사진가의 서랍, 사진을 고르는 시간.
 촬영 현장에서 SD 카드를 꽂고, 집에 가기 전에 B컷부터 걸러 두세요.
 
-Photo Organize 는 사진가를 위한 셀렉 앱입니다. 카드의 사진을 날짜별로 정리해 가져오고, 셀렉 도우미가 흐리거나 흔들리거나 눈 감은 컷을 먼저 찾아 보여 줍니다. 마지막 결정은 언제나 사진가가 합니다.
+LOUPE 는 사진가를 위한 셀렉 앱입니다. 카드의 사진을 날짜별로 정리해 가져오고, 셀렉 도우미가 흐리거나 흔들리거나 눈 감은 컷을 먼저 찾아 보여 줍니다. 마지막 결정은 언제나 사진가가 합니다.
 
 ■ 카드에서 바로
 · 태블릿의 SD 카드 슬롯, 또는 USB-C 카드 리더로 연결한 카드에서 가져오기
@@ -56,9 +57,9 @@ Photo Organize 는 사진가를 위한 셀렉 앱입니다. 카드의 사진을 
 ■ 사진은 기기 밖으로 나가지 않아요
 · 분석도 학습도 모두 이 기기에서. 인터넷 권한이 없습니다
 · 계정 · 로그인 · 구독 없음
-· 별점 · 거절은 XMP 사이드카에도 기록 — Photo Organize 데스크톱 앱, 라이트룸에서 그대로
+· 별점 · 거절은 XMP 사이드카에도 기록 — LOUPE 데스크톱 앱, 라이트룸에서 그대로
 
-Photo Organize 데스크톱 앱(맥 · 윈도우 · 리눅스)과 같은 엔진을 씁니다.
+LOUPE 데스크톱 앱(맥 · 윈도우 · 리눅스)과 같은 엔진을 씁니다.
 ```
 
 **새 소식** (출시 노트, 500자 이내)
@@ -81,7 +82,7 @@ Photo Organize 데스크톱 앱(맥 · 윈도우 · 리눅스)과 같은 엔진�
 ```
 Plug in the SD card on location and clear out the misses before you head home.
 
-Photo Organize is a culling app for photographers. It imports photos from the card into dated folders, and its culling assistant shows you the blurred, shaky and closed-eye shots first. The final call is always yours.
+LOUPE is a culling app for photographers. It imports photos from the card into dated folders, and its culling assistant shows you the blurred, shaky and closed-eye shots first. The final call is always yours.
 
 ■ Straight from the card
 · Import from a tablet's SD card slot or a USB-C card reader
@@ -108,9 +109,9 @@ Photo Organize is a culling app for photographers. It imports photos from the ca
 ■ Your photos stay on the device
 · Analysis and learning run on the device; the app has no internet permission
 · No account, no sign-in, no subscription
-· Ratings and rejects also go to XMP sidecars, for the Photo Organize desktop app and Lightroom
+· Ratings and rejects also go to XMP sidecars, for the LOUPE desktop app and Lightroom
 
-Same engine as the Photo Organize desktop app (macOS, Windows, Linux).
+Same engine as the LOUPE desktop app (macOS, Windows, Linux).
 ```
 
 ## 데이터 보안 (Data safety) 답

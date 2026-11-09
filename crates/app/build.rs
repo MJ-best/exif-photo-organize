@@ -8,8 +8,8 @@ fn main() {
     if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows") {
         let mut res = winresource::WindowsResource::new();
         res.set_icon("assets/icon.ico");
-        res.set("ProductName", "Photo Organize");
-        res.set("FileDescription", "Photo Organize");
+        res.set("ProductName", "LOUPE");
+        res.set("FileDescription", "LOUPE");
         if let Err(e) = res.compile() {
             // A missing resource compiler should not break the build; the app still runs.
             println!("cargo:warning=could not embed the Windows icon: {e}");

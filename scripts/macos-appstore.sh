@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build "Photo Organize" for the Mac App Store: the sandboxed App Store flavour (no license keys,
+# Build "LOUPE" for the Mac App Store: the sandboxed App Store flavour (no license keys,
 # no network), universal (Apple Silicon + Intel), signed for the App Store, as an installer package —
 # and upload it to App Store Connect with --upload.
 #
@@ -30,7 +30,7 @@ OUT=dist-appstore
 rm -rf "$OUT"
 mkdir -p "$OUT"
 
-echo "== Photo Organize $VERSION ($BUILD) for the Mac App Store, $BUNDLE_ID"
+echo "== LOUPE $VERSION ($BUILD) for the Mac App Store, $BUNDLE_ID"
 
 # 1. The App Store flavour for both architectures, merged.
 for target in aarch64-apple-darwin x86_64-apple-darwin; do
@@ -43,7 +43,7 @@ lipo -create \
 
 # 2. The bundle, with what App Store Connect expects in Info.plist.
 scripts/macos-bundle.sh "$OUT/photo-organize" "$OUT"
-APP="$OUT/Photo Organize.app"
+APP="$OUT/LOUPE.app"
 PLIST="$APP/Contents/Info.plist"
 pb() { /usr/libexec/PlistBuddy -c "$1" "$PLIST"; }
 pb "Set :CFBundleIdentifier $BUNDLE_ID"
@@ -61,7 +61,7 @@ codesign --verify --strict --verbose=2 "$APP"
 codesign --display --entitlements - "$APP"
 
 # 4. The installer package App Store Connect takes.
-PKG="$OUT/PhotoOrganize-$VERSION-$BUILD.pkg"
+PKG="$OUT/LOUPE-$VERSION-$BUILD.pkg"
 productbuild --component "$APP" /Applications --sign "$INSTALLER_IDENTITY" "$PKG"
 echo "== $PKG"
 

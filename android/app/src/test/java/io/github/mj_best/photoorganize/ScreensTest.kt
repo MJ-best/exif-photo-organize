@@ -233,9 +233,9 @@ private fun FeatureGraphic(photos: List<ImageBitmap>) {
             )
             androidx.compose.foundation.layout.Spacer(androidx.compose.ui.Modifier.size(14.dp))
             androidx.compose.foundation.layout.Column(androidx.compose.ui.Modifier.weight(1f)) {
-                androidx.compose.material3.Text("Photo Organize", color = p.text, fontSize = 24.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold, softWrap = false)
+                androidx.compose.material3.Text("LOUPE", color = p.text, fontSize = 30.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold, softWrap = false)
                 androidx.compose.foundation.layout.Spacer(androidx.compose.ui.Modifier.height(8.dp))
-                androidx.compose.material3.Text("흔들린 컷은 먼저,\n고르는 건 사진가가", color = p.text, fontSize = 16.sp, lineHeight = 22.sp, softWrap = false)
+                androidx.compose.material3.Text("사진가의 서랍,\n사진을 고르는 시간", color = p.text, fontSize = 16.sp, lineHeight = 22.sp, softWrap = false)
                 androidx.compose.foundation.layout.Spacer(androidx.compose.ui.Modifier.height(10.dp))
                 androidx.compose.material3.Text("카드에서 바로 · 기기 안에서만", color = p.text2, fontSize = 11.sp, softWrap = false)
             }

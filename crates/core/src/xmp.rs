@@ -33,7 +33,7 @@ fn fresh(rating: i8, keywords: &[String]) -> String {
     }
     let mut out = String::new();
     out.push_str("<?xpacket begin=\"\u{feff}\" id=\"W5M0MpCehiHzreSzNTczkc9d\"?>\n");
-    out.push_str("<x:xmpmeta xmlns:x=\"adobe:ns:meta/\" x:xmptk=\"Photo Organize\">\n");
+    out.push_str("<x:xmpmeta xmlns:x=\"adobe:ns:meta/\" x:xmptk=\"LOUPE\">\n");
     out.push_str(" <rdf:RDF xmlns:rdf=\"http://www.w3.org/1999/02/22-rdf-syntax-ns#\">\n");
     out.push_str("  <rdf:Description rdf:about=\"\"\n");
     out.push_str("    xmlns:xmp=\"http://ns.adobe.com/xap/1.0/\"\n");

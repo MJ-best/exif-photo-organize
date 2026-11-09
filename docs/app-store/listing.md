@@ -6,9 +6,9 @@ App Store Connect → 앱 → (버전) 화면에 그대로 옮겨 적으면 됩�
 
 | 항목 | 값 |
 |---|---|
-| 이름 (30자) | Photo Organize — 이미 쓰는 앱이 있으면 `Photo Organize: 사진 셀렉` |
+| 이름 (30자) | `LOUPE - 사진가의 서랍, 사진을 고르는 시간` (또는 이름 `LOUPE`, 부제 `사진가의 서랍, 사진을 고르는 시간`) |
 | 번들 ID | `io.github.mj-best.photo-organize` (첫 업로드 뒤에는 바꿀 수 없음) |
-| SKU | `PHOTOORGANIZE-MAC` |
+| SKU | `LOUPE-MAC` |
 | 카테고리 | 기본 **사진 (Photography)**, 보조 **생산성 (Productivity)** |
 | 연령 등급 | 4+ (설문에서 모두 ‘없음’) |
 | 저작권 | © 2026 은총 |
@@ -23,17 +23,18 @@ App Store Connect → 앱 → (버전) 화면에 그대로 옮겨 적으면 됩�
 ## 한국어
 
 **부제 (30자)**
-SD 카드 정리부터 B컷 셀렉까지
+사진가의 서랍, 사진을 고르는 시간
 
 **프로모션 텍스트 (170자)**
-고를수록 내 눈을 닮아 가는 셀렉. 흔들리고 핀 나간 B컷은 먼저 걸러 두고, 잘 나온 A컷은 앞에 모아 둡니다. 사진은 기기 밖으로 나가지 않아요.
+사진가의 서랍, 사진을 고르는 시간 — 고를수록 내 눈을 닮아 가는 셀렉. 흔들리고 핀 나간 B컷은 먼저 걸러 두고, 잘 나온 A컷은 앞에 모아 둡니다. 사진은 기기 밖으로 나가지 않아요.
 
 **설명**
 
 ```
+사진가의 서랍, 사진을 고르는 시간.
 SD 카드를 꽂고, 고르고, 작품 폴더로. 사진가를 위한 정리 · 셀렉 앱입니다.
 
-Photo Organize 는 촬영한 사진을 날짜별로 정리하고, 수천 장 가운데 흔들리고 핀 나간 B컷은 먼저 걸러 두고, 잘 나온 A컷은 앞에 모아 둡니다. 평소처럼 고르기만 하면 당신의 기준과 취향을 배워요. 편집 기능은 일부러 넣지 않았습니다 — 고르는 일에만 집중한, 가볍고 빠른 앱입니다.
+LOUPE 는 촬영한 사진을 날짜별로 정리하고, 수천 장 가운데 흔들리고 핀 나간 B컷은 먼저 걸러 두고, 잘 나온 A컷은 앞에 모아 둡니다. 평소처럼 고르기만 하면 당신의 기준과 취향을 배워요. 편집 기능은 일부러 넣지 않았습니다 — 고르는 일에만 집중한, 가볍고 빠른 앱입니다.
 
 ■ 가져오기 · 정리
 · SD 카드나 폴더의 사진을 복사하면서 날짜별 폴더로 정리
@@ -87,7 +88,7 @@ Culling that learns your eye. Blurry and missed-focus shots are set aside first,
 **Description**
 
 ```
-Plug in the card, pick, and gather your work. Photo Organize is an importer and culling tool for photographers.
+Plug in the card, pick, and gather your work. LOUPE is an importer and culling tool for photographers.
 
 It sorts what you shot into date folders, sets aside the blurry, shaken and missed-focus frames among thousands, and brings your best shots to the front. Just pick as you always do — it learns your standards and your taste. There is deliberately no editing: a light, fast app for choosing.
 
@@ -133,11 +134,11 @@ First release on the Mac App Store.
 ## 심사 메모 (App Review Information → Notes, 영어)
 
 ```
-Photo Organize is a photo importer and culling tool for photographers. No account or sign-in.
+LOUPE is a photo importer and culling tool for photographers. No account or sign-in.
 
 To try it:
 1. On first launch click "라이브러리 폴더 선택…" (Choose library folder…) and choose or create any folder,
-   e.g. ~/Pictures/Photo Organize.
+   e.g. ~/Pictures/LOUPE.
 2. In the sidebar click "폴더에서 가져오기…" (Import from folder…) and choose any folder with JPEG or RAW
    photos, then "새 항목 모두 가져오기" (Import all new).
 3. Rate with keys 1–5, pick with P, reject with X. The sidebar's "B컷 후보" (likely rejects) and

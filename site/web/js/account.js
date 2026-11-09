@@ -30,7 +30,7 @@ function licenseCard(l) {
   return `
     <section class="panel license">
       <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">
-        <h2 style="margin:0">Photo Organize 라이선스</h2>
+        <h2 style="margin:0">LOUPE 라이선스</h2>
         <span class="status${active ? '' : ' off'}">${active ? '사용 중' : '해지됨'}</span>
       </div>
       <div class="license-key">
@@ -49,7 +49,7 @@ function licenseCard(l) {
 const howTo = () =>
   SITE.appActivation
     ? `<section class="panel"><h2>앱에서 쓰는 법</h2><ol class="muted" style="margin:0;padding-left:20px">
-        <li>Photo Organize를 열고 <b>설정 → 라이선스</b>로 가세요.</li>
+        <li>LOUPE를 열고 <b>설정 → 라이선스</b>로 가세요.</li>
         <li>위의 라이선스 키를 붙여 넣고 <b>등록</b>을 누르세요.</li>
         <li>컴퓨터를 바꿀 때는 이 페이지에서 쓰지 않는 컴퓨터를 빼 주세요.</li></ol></section>`
     : `<section class="panel"><h2>앱에서 쓰는 법</h2><p class="muted" style="margin:0">앱에 키를 넣는 기능은 다음 업데이트에서 열려요. 그때까지 모든 기능을 그대로 쓰실 수 있고, 키는 이 페이지에 안전하게 보관됩니다.</p></section>`;

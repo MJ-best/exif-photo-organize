@@ -15,7 +15,7 @@ OUT=dist-sandbox-test
 rm -rf "$OUT"
 cargo build --release -p photoorg-app --no-default-features
 scripts/macos-bundle.sh target/release/photo-organize "$OUT"
-APP="$OUT/Photo Organize.app"
+APP="$OUT/LOUPE.app"
 codesign --force --sign - --entitlements packaging/macos/sandbox-test.entitlements "$APP"
 codesign --display --entitlements - "$APP"
 echo "Opening the sandboxed build (log: Console.app, process photo-organize)…"

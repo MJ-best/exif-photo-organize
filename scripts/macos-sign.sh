@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Sign "Photo Organize.app" — and notarize it when the Apple secrets are available.
+# Sign "LOUPE.app" — and notarize it when the Apple secrets are available.
 #
-# Usage: scripts/macos-sign.sh "dist/Photo Organize.app"
+# Usage: scripts/macos-sign.sh "dist/LOUPE.app"
 #
 # Without a Developer ID certificate the app gets an ad-hoc signature (it runs, but macOS shows
 # "Apple은 … 악성 코드가 없음을 확인할 수 없습니다" until the user allows it once).
