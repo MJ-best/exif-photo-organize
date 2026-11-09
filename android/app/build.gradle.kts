@@ -161,6 +161,13 @@ val robolectricJars by tasks.registering(Copy::class) {
 }
 
 tasks.withType<Test>().configureEach {
+    // Robolectric 4.16 runs SDK 36 only on Java 21+; otherwise every test class fails with an
+    // UnsupportedOperationException from DefaultSdkProvider.
+    doFirst {
+        check(JavaVersion.current() >= JavaVersion.VERSION_21) {
+            "Android unit tests need Java 21 or newer (Robolectric, SDK 36); this Gradle runs on Java ${JavaVersion.current()}."
+        }
+    }
     dependsOn(buildHostRust, robolectricJars)
     systemProperty("jna.library.path", hostLib.parentFile.path)
     systemProperty("robolectric.offline", "true")

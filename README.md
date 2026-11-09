@@ -121,7 +121,7 @@ Linux 는 X11/Wayland, Vulkan 또는 OpenGL 드라이버(Mesa), `libxkbcommon-x1
 
 촬영 현장에서 SD 카드(태블릿 슬롯 또는 USB-C 카드 리더)로 사진을 가져와 B컷을 걸러 두는 **셀렉 앱**입니다. 엔진(가져오기 · 셀렉 도우미 · 학습)은 데스크톱과 같고, 위로 밀면 픽 · 아래로 밀면 거절합니다. 권한 · 인터넷 · 로그인 없이 동작합니다.
 
-Google Play 출시를 준비하고 있습니다 ([docs/play-store](docs/play-store/README.md)). 그전에 써 보려면 [Actions → android](https://github.com/MJ-best/exif-photo-organize/actions/workflows/android.yml) 의 아티팩트 `photo-organize-android` 에 있는 `app-debug.apk` 를 설치하세요. 직접 빌드: `cd android && ./gradlew :app:assembleDebug` (Android SDK · NDK 28 · `cargo install cargo-ndk` 필요).
+Google Play 출시를 준비하고 있습니다 ([docs/play-store](docs/play-store/README.md)). 그전에 써 보려면 [Actions → android](https://github.com/MJ-best/exif-photo-organize/actions/workflows/android.yml) 의 아티팩트 `photo-organize-android` 에 있는 `app-debug.apk` 를 설치하세요. 직접 빌드: `cd android && ./gradlew :app:assembleDebug` (JDK 21 · Android SDK · NDK 28 · `cargo install cargo-ndk` 필요).
 
 <p align="center">
   <img src="docs/play-store/graphics/tablet10-1-library.jpg" alt="안드로이드 태블릿 — 라이브러리" width="64%">

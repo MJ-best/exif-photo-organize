@@ -26,7 +26,8 @@ jobs:
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: 17
+          # Robolectric runs Android 16 (SDK 36) only on Java 21+.
+          java-version: 21
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: aarch64-linux-android,x86_64-linux-android
