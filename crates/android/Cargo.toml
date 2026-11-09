@@ -1,0 +1,35 @@
+[package]
+name = "photoorg-android"
+description = "Photo Organize on Android: the library, import and culling assistant for the Kotlin app (UniFFI)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lib]
+name = "photoorg_android"
+crate-type = ["cdylib", "lib"]
+
+[[bin]]
+# Generates the Kotlin bindings: cargo run -p photoorg-android --features bindgen --bin uniffi-bindgen -- ...
+name = "uniffi-bindgen"
+required-features = ["bindgen"]
+
+[features]
+bindgen = ["uniffi/cli"]
+
+[dependencies]
+photoorg-core.workspace = true
+anyhow.workspace = true
+log.workspace = true
+chrono.workspace = true
+crossbeam-channel.workspace = true
+uniffi = "0.29"
+thiserror = "2"
+
+[target.'cfg(target_os = "android")'.dependencies]
+android_logger = "0.15"
+
+[dev-dependencies]
+tempfile = "3"

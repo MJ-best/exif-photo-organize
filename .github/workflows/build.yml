@@ -93,8 +93,9 @@ jobs:
           cargo test -p photoorg-app --no-default-features
       - name: Build (arm64 + x86_64)
         run: |
-          cargo build --release --workspace --target aarch64-apple-darwin
-          cargo build --release --workspace --target x86_64-apple-darwin
+          # The Android bridge is built by android.yml.
+          cargo build --release --workspace --exclude photoorg-android --target aarch64-apple-darwin
+          cargo build --release --workspace --exclude photoorg-android --target x86_64-apple-darwin
       - name: Universal binaries
         run: |
           mkdir -p target/universal
@@ -161,7 +162,7 @@ jobs:
       - name: Test
         run: cargo test --workspace
       - name: Build
-        run: cargo build --release --workspace
+        run: cargo build --release --workspace --exclude photoorg-android
       - name: Package (Windows)
         if: runner.os == 'Windows'
         shell: pwsh

@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<lint>
+    <!-- The UniFFI bindings check at run time that java.lang.ref.Cleaner exists (Android 13+)
+         and fall back to JNA's cleaner otherwise. -->
+    <issue id="NewApi">
+        <ignore path="build/generated/uniffi/**" />
+    </issue>
+    <!-- abiFilters comes from a Gradle property (x86_64 is included by default). -->
+    <issue id="ChromeOsAbiSupport" severity="ignore" />
+    <!-- Versions are pinned on purpose (AGP 8.13, compileSdk 36); updated together. -->
+    <issue id="GradleDependency" severity="ignore" />
+    <issue id="NewerVersionAvailable" severity="ignore" />
+</lint>

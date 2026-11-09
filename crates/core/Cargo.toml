@@ -21,8 +21,11 @@ rusqlite = { version = "0.41", features = ["bundled"] }
 dirs = "7"
 photoorg-cull.workspace = true
 crc32fast = "1"
-# 휴지통으로 옮기기 (Delete). On macOS through NSFileManager, which also works in the App Sandbox.
-trash = "5"
 
 [dev-dependencies]
 tempfile = "3"
+
+# Android has no system trash for files of an app; deleted photos go to a folder of the library.
+[target.'cfg(not(target_os = "android"))'.dependencies]
+# 휴지통으로 옮기기 (Delete). On macOS through NSFileManager, which also works in the App Sandbox.
+trash = "5"
