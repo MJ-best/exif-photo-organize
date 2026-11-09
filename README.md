@@ -117,6 +117,17 @@ Windows 에서 *"Windows의 PC 보호"* 창이 뜨면 **추가 정보 → 실행
 Microsoft Defender 가 압축 파일이나 `photo-organize.exe` 를 *위협* 으로 격리했다면 서명 없는 새 실행 파일에 대한 오탐입니다: **Windows 보안 → 바이러스 및 위협 방지 → 보호 기록** 에서 해당 항목을 **허용** 하고 다시 압축을 푸세요.
 Linux 는 X11/Wayland, Vulkan 또는 OpenGL 드라이버(Mesa), `libxkbcommon-x11` 이 필요합니다.
 
+### 안드로이드 (태블릿 · 폰) — 준비 중
+
+촬영 현장에서 SD 카드(태블릿 슬롯 또는 USB-C 카드 리더)로 사진을 가져와 B컷을 걸러 두는 **셀렉 앱**입니다. 엔진(가져오기 · 셀렉 도우미 · 학습)은 데스크톱과 같고, 위로 밀면 픽 · 아래로 밀면 거절합니다. 권한 · 인터넷 · 로그인 없이 동작합니다.
+
+Google Play 출시를 준비하고 있습니다 ([docs/play-store](docs/play-store/README.md)). 그전에 써 보려면 [Actions → android](https://github.com/MJ-best/exif-photo-organize/actions/workflows/android.yml) 의 아티팩트 `photo-organize-android` 에 있는 `app-debug.apk` 를 설치하세요. 직접 빌드: `cd android && ./gradlew :app:assembleDebug` (Android SDK · NDK 28 · `cargo install cargo-ndk` 필요).
+
+<p align="center">
+  <img src="docs/play-store/graphics/tablet10-1-library.jpg" alt="안드로이드 태블릿 — 라이브러리" width="64%">
+  <img src="docs/play-store/graphics/phone-3-viewer.jpg" alt="안드로이드 폰 — 사진 보기와 셀렉 도우미" width="20%">
+</p>
+
 ### 직접 빌드
 
 [Rust](https://rustup.rs) 1.95 이상이 필요합니다.
@@ -699,11 +710,14 @@ crates/
 │   ├── catalog.rs     SQLite 카탈로그 · 썸네일 DB · 메모리 인덱스(LibraryIndex)
 │   ├── filter.rs      필터 · 패싯 계산 (rayon 병렬)
 │   ├── library.rs     라이브러리 폴더 · XMP 기록
+│   ├── source.rs      가져오기의 원본: 이 컴퓨터의 폴더, 또는 앱이 나열해 준 파일(안드로이드 SAF)
 │   ├── export.rs      내보내기: 원본 · JPEG만 · 작게(리사이즈 + EXIF, GPS 제외) · 찍은 순서 · 이름 충돌
 │   ├── zip.rs         ZIP 쓰기(무압축, UTF-8 이름, 크기별 나누기)
 │   ├── cull/          셀렉 엔진(crates/cull)을 파일 · 카탈로그와 잇는 부분
 │   ├── tags.rs · template.rs · xmp.rs · volumes.rs · format.rs · media.rs
 ├── macos/  photoorg-macos  — Mac App Store판(샌드박스): 고른 폴더 · 카드 기억(보안 범위 북마크) · Finder · 추출
+├── android/ photoorg-android — 안드로이드 앱이 부르는 엔진 인터페이스 (UniFFI → Kotlin): 카드 살펴보기 ·
+│                              가져오기(앱이 연 파일 디스크립터로) · 셀렉 도우미 · 학습 · 지우기
 ├── cull/   photoorg-cull   — 셀렉 엔진 (BUSL 1.1)
 │   ├── metrics.rs     초점(라플라시안) · 흔들림(구조 텐서) · 노출 · dHash
 │   ├── vision.rs      YuNet 얼굴 · MobileNetV2 분류 (tract-onnx, 모델 내장)
@@ -726,6 +740,8 @@ crates/
 
 site/       판매 사이트 — Firebase Hosting · Cloud Functions · 토스페이먼츠 (site/README.md)
 docs/app-store/  Mac App Store 에 올리기 — 절차 · 등록 문구 · 스크린샷 (scripts/macos-appstore.sh)
+android/    안드로이드 앱 — Kotlin · Jetpack Compose (Gradle 이 cargo-ndk 로 엔진을 빌드)
+docs/play-store/ Google Play 에 올리기 — 절차 · 등록 문구 · 데이터 보안 답 · 그림
 ```
 
 ### 설계에서 신경 쓴 점

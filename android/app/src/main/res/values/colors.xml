@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 크림: the paper of the app icon. -->
+    <color name="paper">#FDF6EC</color>
+    <color name="ic_launcher_background">#FDF3E6</color>
+</resources>
