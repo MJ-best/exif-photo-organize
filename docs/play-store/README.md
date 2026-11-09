@@ -5,18 +5,21 @@
 | | |
 |---|---|
 | 개발자 계정 ID | `7524051614722683224` (공개 개발자 페이지: https://play.google.com/store/apps/dev?id=7524051614722683224 — 앱이 공개된 뒤에 보임) |
-| 패키지 이름 | `io.github.mj_best.photoorganize` — **첫 업로드 뒤에는 바꿀 수 없습니다.** 다른 이름을 원하면 업로드 전에 `android/app/build.gradle.kts` 의 `applicationId` 를 바꾸세요 |
+| 패키지 이름 | **`io.github.mj_best.loupe`** (LOUPE 에 맞춤) — Play 주소 https://play.google.com/store/apps/details?id=io.github.mj_best.loupe. **첫 업로드 뒤에는 바꿀 수 없습니다.** (`android/app/build.gradle.kts` 의 `applicationId`. 소스 코드의 Kotlin 패키지 `io.github.mj_best.photoorganize` 는 밖에 보이지 않아 그대로) |
 | 판매 방식 | 유료 앱 (Mac App Store 와 같음). 라이선스 키 · 로그인 · 구독 없음 |
 | 최소 · 대상 버전 | Android 8.0 (API 26) 이상 · targetSdk 36 (2026년 Play 요건) |
 | 기기 | 64비트 ARM (거의 모든 폰 · 태블릿), x86_64 (크롬북 · 에뮬레이터) |
 | 권한 | **없음** — 카드는 시스템 폴더 선택기(SAF)로 읽고, 인터넷 권한도 없음 |
 | 16 KB 페이지 | 모든 네이티브 라이브러리 16 KB 정렬 (Play 요건) — 확인함 |
 
-## 1. 개발자 계정 확인 (사용자가 할 일)
+## 1. 개발자 계정 (개인 계정 · 구글 검토 중)
 
-- Play Console → 설정 → **개발자 계정** 에서 계정 유형을 확인하세요.
-  - **개인 계정**(2023년 11월 13일 이후 생성)은 처음 정식 출시 전에 **테스터 12명 이상이 14일 동안 비공개 테스트**에 참여해야 합니다. 아래 5단계.
-  - **조직 계정**(D-U-N-S 번호로 인증)은 이 요건이 없는 것으로 알려져 있습니다. 사업자(은총)로 운영할 생각이면 조직 계정이 맞습니다. 정확한 요건은 가입 화면에서 확인하세요.
+- **개인 계정**이라 처음 정식 출시 전에 **테스터 12명 이상이 14일 연속 비공개 테스트**에 참여해야 합니다 (아래 5단계). 계정 검토가 끝나야 앱을 만들고 올릴 수 있습니다.
+- **검토를 기다리는 동안 해 둘 것**
+  1. 업로드 키 만들기 · GitHub 시크릿 넣기 (2단계) — 그래야 CI 가 서명된 AAB 를 만듭니다
+  2. **테스터 12명 이상 모으기** — 안드로이드 기기와 Google 계정(Gmail)이 있는 사람. 이메일 주소 목록을 받아 두면 계정이 열리자마자 비공개 테스트를 시작할 수 있습니다. 넉넉히 15명 이상 권장 (중간에 빠지는 사람이 있으면 14일을 채우지 못함)
+  3. 판매 사이트를 배포해 **개인정보처리방침** (`/privacy`) 을 공개하고, `site/site.config.json` 의 `business.email` 등을 채우기 — Play Console 이 방침 URL 과 연락 이메일을 요구합니다
+- 조직 계정(D-U-N-S 번호로 인증)은 이 테스트 요건이 없는 것으로 알려져 있습니다. 나중에 사업자(은총) 명의로 옮길 수도 있지만, 지금 계정으로 진행하면 됩니다.
 - **결제 프로필(판매자 계정)**: 유료 앱을 팔려면 Play Console → 설정 → 결제 프로필에서 만들고 정산 계좌를 등록합니다. 수수료는 연 매출 100만 달러까지 15% 입니다.
 - 사업자 정보(상호 · 주소 · 연락처)는 스토어의 개발자 연락처에 공개됩니다. 대표자 생년월일 같은 개인 정보는 넣지 마세요.
 
@@ -49,7 +52,7 @@ keytool -genkeypair -v -keystore upload.jks -alias upload -keyalg RSA -keysize 2
   ./gradlew :app:testDebugUnitTest      # 엔진(JNA) + 화면 스크린샷
   ./gradlew :app:bundleRelease          # app/build/outputs/bundle/release/app-release.aab
   ```
-- 버전은 `Cargo.toml` 의 버전을 그대로 씁니다 (0.5.0 → versionCode 5000). 같은 버전을 다시 올려야 하면 `-PversionCode=5001`.
+- 버전은 `Cargo.toml` 의 버전을 그대로 씁니다 (0.6.0 → versionCode 6000). 같은 버전을 다시 올려야 하면 `-PversionCode=6001` (CI 는 저장소 변수 `ANDROID_VERSION_CODE`).
 
 ## 4. Play Console 에 앱 만들기
 
@@ -68,7 +71,8 @@ keytool -genkeypair -v -keystore upload.jks -alias upload -keyalg RSA -keysize 2
 ## 5. 테스트 → 출시
 
 1. **내부 테스트** (최대 100명, 심사 없이 바로): AAB 를 올리고 내 계정을 테스터로 넣어 내 폰 · 태블릿에서 확인. 아래 *기기에서 꼭 볼 것*.
-2. **비공개 테스트** (개인 계정이면 필수): 테스터 12명 이상, **14일 연속** 참여 → Play Console 에서 *프로덕션 액세스 신청*.
+2. **비공개 테스트** (개인 계정이라 필수): 테스터 12명 이상이 테스트 링크로 **참여(opt-in)한 채 14일 연속** 유지 → Play Console 대시보드에서 *프로덕션 액세스 신청* (테스트를 어떻게 했는지 · 받은 의견 등을 묻습니다). 중간에 새 버전을 올려도 되고, 의견을 받아 고치면 신청할 때 도움이 됩니다.
+   - 유료 앱은 테스터도 결제해야 설치할 수 있습니다. 테스터 이메일을 Play Console → 설정 → **라이선스 테스트** 에도 넣으면 결제 없이 설치할 수 있습니다 (계정이 열리면 콘솔에서 확인).
 3. **프로덕션** 출시 → 심사(보통 며칠).
 
 ### 기기에서 꼭 볼 것 (이 환경에는 실기기가 없어 아직 못 본 것)
