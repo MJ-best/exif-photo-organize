@@ -11,8 +11,23 @@
 | 업데이트 | 터미널 한 줄 / 직접 받기 | App Store 가 알아서 (매 버전 심사) |
 | 수수료 | 결제 수수료(약 3%) | 애플 15% (소규모 사업자 프로그램) |
 | 빌드 | `cargo build` (기본) | `scripts/macos-appstore.sh` (`--no-default-features`) |
+| 번들 ID | `io.github.mj-best.photo-organize` (지금 쓰는 분들의 설정 · 권한 유지) | **`io.github.mj-best.loupe`** |
 
-## 1. 애플 개발자 프로그램 가입 (사용자가 할 일)
+## 지금 할 일 (개발자 계정 가입 완료 뒤)
+
+순서대로입니다. 1–6 은 애플 웹사이트 · Mac 에서 직접 하셔야 하고, 7 의 빌드 · 업로드는 GitHub Actions 가 합니다.
+
+1. App Store Connect → 비즈니스: **유료 앱 계약 · 은행 계좌 · 세금** (2단계)
+2. **앱 ID** `io.github.mj-best.loupe` 등록 (3단계)
+3. **인증서 두 개** 만들고 `.p12` 로 내보내기 (3단계)
+4. **프로필** (Mac App Store Connect) 내려받기 (3단계)
+5. **App Store Connect API 키** 만들기 (6단계 표의 `ASC_*`)
+6. App Store Connect 에 **앱 만들기** (4단계)
+7. GitHub 저장소에 **시크릿 8개** 넣고 Actions → **app-store** → *Run workflow* (6단계) → 15–30분 뒤 App Store Connect 에 빌드가 나타나면 **심사 제출** (7단계)
+
+> 인증서(`.p12`) · API 키(`.p8`) · 암호는 **GitHub 시크릿에만** 넣으세요. 채팅 · 이메일 · 저장소에 올리면 안 됩니다 (`.cer` 인증서 파일만으로는 서명할 수 없고, 서명에는 개인 키가 든 `.p12` 가 필요합니다).
+
+## 1. 애플 개발자 프로그램 가입 (완료)
 
 - https://developer.apple.com/programs/enroll 에서 가입. **연 99달러**(원화로 결제, 정확한 금액은 가입 화면).
 - 애플 규정상 **개인사업자(1인 사업자)는 ‘개인’으로 가입**합니다. 앱스토어의 판매자 이름은 가입한 사람의 **실명**으로 나옵니다. ‘은총’ 같은 상호로 나오려면 법인과 D-U-N-S 번호가 필요합니다.
@@ -33,13 +48,14 @@
 1. **인증서 두 개** — Xcode → 설정 → Accounts → 팀 선택 → Manage Certificates → `+`
    - **Apple Distribution** (앱 서명)
    - **Mac Installer Distribution** (설치 패키지 서명 · 키체인에는 *3rd Party Mac Developer Installer* 로 보임)
+   - GitHub Actions 에 넣으려면 `.p12` 로 내보냅니다: **키체인 접근** → *로그인* → *내 인증서* → 인증서를 우클릭 → *내보내기* → 파일 형식 `.p12` → 암호 지정 (두 인증서에 같은 암호를 쓰면 시크릿이 하나로 됩니다)
 2. **앱 ID** — developer.apple.com → Certificates, Identifiers & Profiles → Identifiers → `+` → App IDs → App
-   - Bundle ID: `io.github.mj-best.photo-organize` (웹사이트판과 같음). 자기 도메인을 쓰려면 지금 정하세요 — 첫 업로드 뒤에는 못 바꿉니다 (`BUNDLE_ID` 로 넘기고 `scripts/macos-bundle.sh` 기본값도 함께).
-3. **프로필** — Profiles → `+` → Distribution → **Mac App Store Connect** → 위 앱 ID → Apple Distribution 인증서 → 내려받기 (`.provisionprofile`)
+   - Bundle ID (Explicit): **`io.github.mj-best.loupe`** · 설명 `LOUPE`. 추가 기능(Capabilities)은 고르지 않아도 됩니다 (샌드박스는 권한 파일로 켬). **첫 업로드 뒤에는 바꿀 수 없습니다.** 다른 ID 를 쓰려면 저장소 변수 `MAS_BUNDLE_ID` 로 넘기세요.
+3. **프로필** — Profiles → `+` → Distribution → **Mac App Store Connect** → 위 앱 ID → Apple Distribution 인증서 → 이름 `LOUPE App Store` → 내려받기 (`.provisionprofile`)
 
 ## 4. App Store Connect 에 앱 만들기
 
-앱 → `+` → 새로운 앱 → macOS, 이름, 기본 언어 **한국어**, 번들 ID, SKU. 그다음 [`listing.md`](listing.md) 의 내용을 옮겨 적습니다 — 부제 · 설명 · 키워드 · 카테고리 · 연령 등급 · 개인정보(데이터 수집 안 함) · 심사 메모 · 가격. 스크린샷은 [`screenshots/`](screenshots/) (2880 × 1800).
+앱 → `+` → 새로운 앱 → 플랫폼 **macOS**, 이름, 기본 언어 **한국어**, 번들 ID `io.github.mj-best.loupe`, SKU `LOUPE-MAC`, 사용자 액세스 *전체 액세스*. 앱 이름은 **App Store 전체에서 하나뿐이어야** 해서 `LOUPE` 만으로는 이미 쓰이고 있을 수 있습니다 — 그러면 `LOUPE - 사진가의 서랍, 사진을 고르는 시간` 처럼 붙여 쓰세요 (30자 이내). 그다음 [`listing.md`](listing.md) 의 내용을 옮겨 적습니다 — 부제 · 설명 · 키워드 · 카테고리 · 연령 등급 · 개인정보(데이터 수집 안 함) · 심사 메모 · 가격. 스크린샷은 [`screenshots/`](screenshots/) (2880 × 1800).
 
 개인정보처리방침 URL 이 필요합니다. 판매 사이트를 배포했다면 `https://<도메인>/privacy` (앱스토어판 문단이 들어 있음).
 
@@ -59,9 +75,11 @@ scripts/macos-sandbox-test.sh
 - [ ] 카드 추출
 - [ ] 설정에 *라이선스* 칸이 없다
 
-샌드박스판의 설정은 `~/Library/Containers/io.github.mj-best.photo-organize` 에 따로 저장됩니다 (라이브러리 폴더 안의 카탈로그 · 썸네일은 웹사이트판과 함께 씀).
+샌드박스판의 설정은 `~/Library/Containers/<번들 ID>` 에 따로 저장됩니다 — 이 시험판은 웹사이트판의 ID, 앱스토어판은 `io.github.mj-best.loupe`. 라이브러리 폴더 안의 카탈로그 · 썸네일은 웹사이트판과 함께 씁니다.
 
 ## 6. 빌드 올리기
+
+**인증서 없이 미리 확인:** `scripts/macos-appstore.sh --dry-run` — 애플 서명만 빼고 같은 과정으로 `.pkg` 를 만들어 봅니다 (올릴 수는 없음). 이 스크립트 · 권한 파일이 바뀌는 PR 마다 CI(app-store)가 Mac 에서 돌립니다.
 
 **Mac 에서 직접:**
 
@@ -69,13 +87,13 @@ scripts/macos-sandbox-test.sh
 TEAM_ID=ABCDE12345 \
 APP_IDENTITY="Apple Distribution: 김경아 (ABCDE12345)" \
 INSTALLER_IDENTITY="3rd Party Mac Developer Installer: 김경아 (ABCDE12345)" \
-PROFILE=~/Downloads/Photo_Organize_App_Store.provisionprofile \
+PROFILE=~/Downloads/LOUPE_App_Store.provisionprofile \
 scripts/macos-appstore.sh
 ```
 
-`dist-appstore/PhotoOrganize-<버전>-<빌드>.pkg` 가 나옵니다. **Transporter** 앱(Mac App Store, 무료)에 끌어다 놓고 *전송*. App Store Connect API 키가 있으면 `--upload` 로 바로 올릴 수도 있습니다 (`ASC_KEY_ID`, `ASC_ISSUER_ID`, 키 파일 `~/.appstoreconnect/private_keys/AuthKey_<ID>.p8`).
+`dist-appstore/LOUPE-<버전>-<빌드>.pkg` 가 나옵니다. Xcode 는 최신 정식판을 쓰세요 — App Store Connect 는 오래된 Xcode · SDK 로 만든 빌드를 받지 않습니다 (스크립트가 쓴 Xcode · SDK 버전을 출력하고 Info.plist 에도 적습니다). **Transporter** 앱(Mac App Store, 무료)에 끌어다 놓고 *전송*. App Store Connect API 키가 있으면 `--upload` 로 바로 올릴 수도 있습니다 (`ASC_KEY_ID`, `ASC_ISSUER_ID`, 키 파일 `~/.appstoreconnect/private_keys/AuthKey_<ID>.p8`).
 
-**GitHub Actions 로:** 저장소 Settings → Secrets 에 아래를 넣고 Actions → **app-store** → Run workflow.
+**GitHub Actions 로 (권장 — Mac 은 인증서 · 프로필을 만들 때만 필요):** 저장소 Settings → Secrets and variables → Actions → *New repository secret* 으로 아래 8개를 넣고, Actions → **app-store** → *Run workflow* (`upload` 켠 채로). 러너에 있는 가장 새 Xcode 로 빌드 · 서명 · 검증 · 업로드하고, `.pkg` 는 아티팩트 `loupe-appstore` 로도 남습니다.
 
 | 시크릿 | 내용 |
 |---|---|
@@ -84,7 +102,7 @@ scripts/macos-appstore.sh
 | `MAS_CERT_PASSWORD` | 두 .p12 의 암호 |
 | `MAS_PROVISIONING_PROFILE` | 프로필 파일의 base64 |
 | `APPLE_TEAM_ID` | 팀 ID |
-| `ASC_KEY_ID` · `ASC_ISSUER_ID` · `ASC_KEY_P8` | App Store Connect → 사용자 및 액세스 → 통합 → API 키 (`.p8` 파일 내용 그대로) |
+| `ASC_KEY_ID` · `ASC_ISSUER_ID` · `ASC_KEY_P8` | App Store Connect → 사용자 및 액세스 → 통합 → App Store Connect API → *팀 키* `+` (액세스: **App 관리**) → 키 ID · 발급자 ID, 내려받은 `.p8` 파일 내용 그대로 (한 번만 내려받을 수 있음) |
 
 빌드 번호는 실행 번호로 자동으로 올라갑니다.
 

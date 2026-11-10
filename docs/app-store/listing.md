@@ -6,8 +6,8 @@ App Store Connect → 앱 → (버전) 화면에 그대로 옮겨 적으면 됩�
 
 | 항목 | 값 |
 |---|---|
-| 이름 (30자) | `LOUPE - 사진가의 서랍, 사진을 고르는 시간` (또는 이름 `LOUPE`, 부제 `사진가의 서랍, 사진을 고르는 시간`) |
-| 번들 ID | `io.github.mj-best.photo-organize` (첫 업로드 뒤에는 바꿀 수 없음) |
+| 이름 (30자) | `LOUPE - 사진가의 서랍, 사진을 고르는 시간` (또는 이름 `LOUPE`, 부제 `사진가의 서랍, 사진을 고르는 시간`). 이름은 App Store 전체에서 하나뿐이어야 해서 `LOUPE` 만으로는 이미 쓰이고 있을 수 있습니다 |
+| 번들 ID | `io.github.mj-best.loupe` (첫 업로드 뒤에는 바꿀 수 없음. 웹사이트판은 `io.github.mj-best.photo-organize` 그대로) |
 | SKU | `LOUPE-MAC` |
 | 카테고리 | 기본 **사진 (Photography)**, 보조 **생산성 (Productivity)** |
 | 연령 등급 | 4+ (설문에서 모두 ‘없음’) |
