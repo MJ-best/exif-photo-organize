@@ -6,8 +6,8 @@ App Store Connect → 앱 → (버전) 화면에 그대로 옮겨 적으면 됩�
 
 | 항목 | 값 |
 |---|---|
-| 이름 (30자) | `LOUPE - 사진가의 서랍, 사진을 고르는 시간` (또는 이름 `LOUPE`, 부제 `사진가의 서랍, 사진을 고르는 시간`) |
-| 번들 ID | `io.github.mj-best.photo-organize` (첫 업로드 뒤에는 바꿀 수 없음) |
+| 이름 (30자) | `LOUPE - 사진가의 서랍, 사진을 고르는 시간` (또는 이름 `LOUPE`, 부제 `사진가의 서랍, 사진을 고르는 시간`). 이름은 App Store 전체에서 하나뿐이어야 해서 `LOUPE` 만으로는 이미 쓰이고 있을 수 있습니다 |
+| 번들 ID | `io.github.mj-best.loupe` (첫 업로드 뒤에는 바꿀 수 없음. 웹사이트판은 `io.github.mj-best.photo-organize` 그대로) |
 | SKU | `LOUPE-MAC` |
 | 카테고리 | 기본 **사진 (Photography)**, 보조 **생산성 (Productivity)** |
 | 연령 등급 | 4+ (설문에서 모두 ‘없음’) |
@@ -18,7 +18,12 @@ App Store Connect → 앱 → (버전) 화면에 그대로 옮겨 적으면 됩�
 | 개인정보처리방침 URL | `https://<사이트 도메인>/privacy` (판매 사이트 배포 뒤) |
 | 지원 URL | `https://<사이트 도메인>/` — 사이트 배포 전에는 `https://github.com/MJ-best/exif-photo-organize` |
 
-스크린샷(2880 × 1800): `docs/app-store/screenshots/` 의 5장, 이 순서로 — 라이브러리, B컷 후보, A컷 후보, 작품, 크게 보기. 지금 것은 견본 사진(그림)으로 찍었으니, 실제 작품 사진으로 다시 찍으면 훨씬 좋습니다.
+스크린샷(2880 × 1800): `docs/app-store/screenshots/`, 이 순서로 —
+1. `real-1-acut.jpg` — A컷 후보 (실제 사진 · 내 기준으로 학습된 상태)
+2. `real-2-viewer.jpg` — 크게 보기의 B컷 99% 와 이유 (노출 과다 · 고감도 노이즈)
+3. 그다음 견본 그림으로 찍은 `1-library.jpg` · `2-bcut.jpg` · `4-works.jpg` — 라이브러리 · B컷 후보 · 작품도 실제 사진으로 다시 찍으면 훨씬 좋습니다 (맥 화면을 찍어 주면 같은 모양으로 맞춰 넣음: 창만 잘라 크림색 바탕에 얹기, 라이브러리 경로 같은 개인 정보와 Dock 말풍선은 빼기)
+
+사진에 나오는 사람은 공개 스토어에 실려도 괜찮은지 미리 확인하세요.
 
 ## 한국어
 
