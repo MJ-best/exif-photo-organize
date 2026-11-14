@@ -127,8 +127,16 @@ pub struct Selection {
 pub struct Viewer {
     pub id: i64,
     /// `None` = fit to window; `Some(center)` = 100% zoom centred at the normalised point.
+    /// Kept when stepping to the next photo (comparing focus across a burst), reset when the
+    /// viewer is opened from the grid.
     pub zoom: Option<egui::Vec2>,
 }
+
+/// 100% zoom on the middle of the photo (Z, Space twice).
+pub const ZOOM_CENTER: egui::Vec2 = egui::vec2(0.5, 0.5);
+
+/// Two Space presses within this many seconds zoom in instead of going back to the grid.
+const DOUBLE_TAP: f64 = 0.3;
 
 pub struct InfoCache {
     pub id: i64,
@@ -221,6 +229,10 @@ pub struct PhotoApp {
     pub facets: Option<Facets>,
     pub sel: Selection,
     pub viewer: Option<Viewer>,
+    /// When Space was last pressed: a second press within [`DOUBLE_TAP`] zooms in.
+    pub space_at: Option<f64>,
+    /// Space in the viewer goes back to the grid only once no second press came (this time).
+    pub space_close_at: Option<f64>,
     pub thumbs: Option<ImageCache<i64>>,
     pub previews: Option<ImageCache<PreviewKey>>,
     pub import: Option<ImportSession>,
@@ -308,6 +320,8 @@ impl PhotoApp {
             facets: None,
             sel: Selection::default(),
             viewer: None,
+            space_at: None,
+            space_close_at: None,
             thumbs: None,
             previews: None,
             import: None,
@@ -641,6 +655,7 @@ impl PhotoApp {
             self.sel.ids = [id].into();
         }
         self.viewer = Some(Viewer { id, zoom: None });
+        self.space_close_at = None;
     }
 
     pub fn close_viewer(&mut self) {
@@ -658,8 +673,9 @@ impl PhotoApp {
         let Some(v) = &self.viewer else { return };
         let Some(&p) = self.filtered_pos.get(&v.id) else { return };
         let np = (p as i64 + delta).clamp(0, self.filtered.len() as i64 - 1) as usize;
+        let zoom = v.zoom;
         if let Some(id) = self.asset_at(np).map(|a| a.id) {
-            self.viewer = Some(Viewer { id, zoom: None });
+            self.viewer = Some(Viewer { id, zoom });
             self.sel.ids = [id].into();
             self.sel.focus = Some(id);
             self.sel.anchor = Some(np);
@@ -1131,18 +1147,19 @@ impl PhotoApp {
         if self.view != MainView::Library || self.lib.is_none() {
             return;
         }
-        let keys: Vec<(Key, Option<Key>, egui::Modifiers)> = ctx.input(|i| {
+        let now = ctx.input(|i| i.time);
+        let keys: Vec<(Key, Option<Key>, egui::Modifiers, bool)> = ctx.input(|i| {
             i.events
                 .iter()
                 .filter_map(|e| match e {
-                    egui::Event::Key { key, physical_key, pressed: true, modifiers, .. } => {
-                        Some((*key, *physical_key, *modifiers))
+                    egui::Event::Key { key, physical_key, pressed: true, modifiers, repeat } => {
+                        Some((*key, *physical_key, *modifiers, *repeat))
                     }
                     _ => None,
                 })
                 .collect()
         });
-        for (key, physical, mods) in keys {
+        for (key, physical, mods, repeat) in keys {
             let (cmd, shift) = (mods.command, mods.shift);
             // ⇧1–9: themes of the active project (the logical key is "!", "@", … with Shift).
             let digit = match physical.unwrap_or(key) {
@@ -1220,20 +1237,17 @@ impl PhotoApp {
                         self.sel.ids.clear();
                     }
                 }
-                Key::Space | Key::Enter => {
+                // Space: the grid <-> one photo; twice quickly: 100% on the middle of the photo.
+                Key::Space if !repeat => self.space_key(now),
+                Key::Space => {}
+                Key::Enter => {
                     if self.viewer.is_some() {
                         self.close_viewer();
-                    } else if let Some(id) = self.sel.focus.or_else(|| self.sel.ids.iter().next().copied()) {
-                        self.open_viewer(id);
-                    } else if let Some(id) = self.asset_at(0).map(|a| a.id) {
-                        self.open_viewer(id);
+                    } else {
+                        self.open_focused();
                     }
                 }
-                Key::Z if self.viewer.is_some() => {
-                    if let Some(v) = &mut self.viewer {
-                        v.zoom = if v.zoom.is_some() { None } else { Some(egui::vec2(0.5, 0.5)) };
-                    }
-                }
+                Key::Z if self.viewer.is_some() => self.toggle_zoom(),
                 Key::ArrowLeft | Key::ArrowRight | Key::ArrowUp | Key::ArrowDown => {
                     if self.viewer.is_some() {
                         match key {
@@ -1274,6 +1288,50 @@ impl PhotoApp {
     pub fn zoom_tiles(&mut self, f: f32) {
         self.cfg.tile_size = (self.cfg.tile_size * f).clamp(64.0, 420.0);
     }
+
+    /// Opens the viewer on the focused (or first selected, or first) photo.
+    fn open_focused(&mut self) {
+        let id =
+            self.sel.focus.or_else(|| self.sel.ids.iter().next().copied()).or_else(|| self.asset_at(0).map(|a| a.id));
+        if let Some(id) = id {
+            self.open_viewer(id);
+        }
+    }
+
+    /// Fit <-> 100% on the middle of the photo.
+    pub fn toggle_zoom(&mut self) {
+        if let Some(v) = &mut self.viewer {
+            v.zoom = if v.zoom.is_some() { None } else { Some(ZOOM_CENTER) };
+        }
+    }
+
+    /// Space opens the photo at once; in the photo, going back to the grid waits [`DOUBLE_TAP`]
+    /// for a second press, which zooms in (or back out) instead.
+    fn space_key(&mut self, now: f64) {
+        if self.space_at.take().is_some_and(|t| now - t < DOUBLE_TAP) {
+            self.space_close_at = None;
+            self.toggle_zoom();
+            return;
+        }
+        self.space_at = Some(now);
+        if self.viewer.is_some() {
+            self.space_close_at = Some(now + DOUBLE_TAP);
+        } else {
+            self.open_focused();
+        }
+    }
+
+    /// Goes back to the grid once a single Space press has had no second one.
+    fn space_tick(&mut self, ctx: &egui::Context) {
+        let Some(t) = self.space_close_at else { return };
+        let now = ctx.input(|i| i.time);
+        if now >= t {
+            self.space_close_at = None;
+            self.close_viewer();
+        } else {
+            ctx.request_repaint_after(Duration::from_secs_f64(t - now));
+        }
+    }
 }
 
 impl eframe::App for PhotoApp {
@@ -1297,6 +1355,7 @@ impl eframe::App for PhotoApp {
         {
             self.refilter();
         }
+        self.space_tick(&ctx);
         self.handle_keys(&ctx);
 
         self.draw(ui);

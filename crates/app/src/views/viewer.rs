@@ -14,12 +14,13 @@ impl PhotoApp {
         let ctx = ui.ctx().clone();
         let Some(v) = &self.viewer else { return };
         let id = v.id;
-        let zoom = v.zoom;
         let Some(st) = &self.lib else { return };
         let Some(a) = st.index.get(id).cloned() else {
             self.viewer = None;
             return;
         };
+        // Videos are shown fitted; the zoom stays for the next photo.
+        let zoom = if a.is_video() { None } else { v.zoom };
         let pos = self.filtered_pos.get(&id).copied();
         let full = ui.available_rect_before_wrap();
         ui.painter().rect_filled(full, 0.0, pal.viewer_bg);
@@ -62,10 +63,10 @@ impl PhotoApp {
         if widgets::icon_button(&mut rui, Icon::Info, self.cfg.show_info, &pal, "정보 (⌘I)").clicked() {
             self.cfg.show_info = !self.cfg.show_info;
         }
-        let zr = widgets::icon_button(&mut rui, Icon::Search, zoom.is_some(), &pal, "100% 확대 (Z)");
+        let zr = widgets::icon_button(&mut rui, Icon::Search, zoom.is_some(), &pal, "100% 확대 (Z · 스페이스 두 번)");
         if zr.clicked() {
             if let Some(v) = &mut self.viewer {
-                v.zoom = if v.zoom.is_some() { None } else { Some(vec2(0.5, 0.5)) };
+                v.zoom = if v.zoom.is_some() { None } else { Some(crate::app::ZOOM_CENTER) };
             }
         }
         let mut flag_to = None;
@@ -96,14 +97,19 @@ impl PhotoApp {
         let thumb = self.thumbs.as_mut().and_then(|t| t.get(id));
         let previews = self.previews.as_mut().unwrap();
         let fit_tex = previews.get(PreviewKey { id, edge: fit_edge });
-        let full_tex = if zoom.is_some() { previews.get(PreviewKey { id, edge: max_side.min(16384) }) } else { None };
-        // Prefetch neighbours for fast culling.
+        let full_edge = max_side.min(16384);
+        let full_tex = if zoom.is_some() { previews.get(PreviewKey { id, edge: full_edge }) } else { None };
+        // Prefetch neighbours for fast culling; zoomed in, the next one at full size too (the zoom
+        // stays when stepping).
         if let Some(p) = pos {
             for d in [1i64, -1, 2] {
                 let np = p as i64 + d;
                 if np >= 0 && (np as usize) < self.filtered.len() {
                     let nid = st.index.assets[self.filtered[np as usize]].id;
                     previews.prefetch(PreviewKey { id: nid, edge: fit_edge });
+                    if d == 1 && zoom.is_some() {
+                        previews.prefetch(PreviewKey { id: nid, edge: full_edge });
+                    }
                 }
             }
         }
