@@ -161,8 +161,11 @@ impl<K: Copy + Eq + Hash + Send + std::fmt::Debug + 'static> ImageCache<K> {
     }
 
     /// Schedule a load without needing the texture now (prefetch). Lower priority than `get`.
+    /// A prefetched texture that is already loaded counts as used, so it is not evicted first.
     pub fn prefetch(&mut self, key: K) {
-        if !self.tex.contains_key(&key) && !self.missing.contains_key(&key) && self.wanted_set.insert(key) {
+        if let Some(e) = self.tex.get_mut(&key) {
+            e.last_used = self.frame;
+        } else if !self.missing.contains_key(&key) && self.wanted_set.insert(key) {
             self.wanted.push(key);
         }
     }
