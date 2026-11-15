@@ -138,7 +138,16 @@ pub fn plan_info(catalog: &Catalog, ids: &[i64]) -> Result<ExportPlanInfo> {
 
 enum Source {
     Copy(PathBuf),
-    Render { src: PathBuf, kind: FileKind, meta: Box<Metadata>, edge: u32, quality: u8, from_raw: bool },
+    Render {
+        src: PathBuf,
+        kind: FileKind,
+        meta: Box<Metadata>,
+        edge: u32,
+        quality: u8,
+        from_raw: bool,
+        /// Straighten / crop (크롭 · 수평) set in LOUPE.
+        framing: Option<crate::framing::Framing>,
+    },
 }
 
 struct Job {
@@ -193,6 +202,9 @@ pub fn export(
                 (true, Some(t)) => t.format("%Y-%m-%d_%H%M%S_").to_string(),
                 _ => String::new(),
             };
+            // Straightened / cropped in LOUPE: every JPEG made for this photo is framed that way
+            // (originals stay originals).
+            let framing = catalog.framing(id).ok().flatten().filter(|f| !f.is_identity());
             let render = |f: &FileRecord, edge: u32, quality: u8, from_raw: bool| Source::Render {
                 src: lib.abs(&f.rel_path),
                 kind: f.kind,
@@ -200,6 +212,7 @@ pub fn export(
                 edge,
                 quality,
                 from_raw,
+                framing,
             };
             match opts.kind {
                 ExportKind::Originals => {
@@ -219,7 +232,12 @@ pub fn export(
                 }
                 ExportKind::JpegOnly => {
                     let jpegs: Vec<&FileRecord> = files.iter().filter(|f| f.kind == FileKind::Jpeg).collect();
-                    if !jpegs.is_empty() {
+                    if let (Some(_), Some(f)) = (framing, jpegs.first()) {
+                        // The camera JPEG, framed: a new full-size JPEG.
+                        let name = names.take_group(&[format!("{prefix}{}", file_name(&f.rel_path))]).remove(0);
+                        let source = render(f, u32::MAX, FROM_RAW_QUALITY, false);
+                        jobs.push(Job { name: format!("{sub}{name}"), source, modified: when });
+                    } else if !jpegs.is_empty() {
                         let given: Vec<String> =
                             jpegs.iter().map(|f| format!("{prefix}{}", file_name(&f.rel_path))).collect();
                         for (f, name) in jpegs.into_iter().zip(names.take_group(&given)) {
@@ -354,7 +372,9 @@ fn tally(sum: &mut ExportSummary, job: &Job, res: Result<u64>) {
 fn produce(source: &Source) -> Result<Vec<u8>> {
     match source {
         Source::Copy(src) => std::fs::read(src).with_context(|| format!("읽을 수 없습니다 {}", src.display())),
-        Source::Render { src, kind, meta, edge, quality, .. } => render(src, *kind, meta, *edge, *quality),
+        Source::Render { src, kind, meta, edge, quality, framing, .. } => {
+            render(src, *kind, meta, *edge, *quality, *framing)
+        }
     }
 }
 
@@ -436,6 +456,11 @@ fn render_source(files: &[FileRecord]) -> std::result::Result<&FileRecord, Strin
     Err("파일 없음".into())
 }
 
+#[cfg(test)]
+pub(crate) fn tests_file_name(rel: &str) -> String {
+    file_name(rel)
+}
+
 fn file_name(rel: &str) -> String {
     Path::new(rel).file_name().map(|s| s.to_string_lossy().into_owned()).unwrap_or_else(|| rel.to_string())
 }
@@ -514,15 +539,36 @@ pub(crate) fn copy_file(src: &Path, dst: &Path) -> Result<u64> {
     })
 }
 
-fn render(src: &Path, kind: FileKind, meta: &Metadata, edge: u32, quality: u8) -> Result<Vec<u8>> {
-    let img = preview::load_image(src, kind, meta.orientation, edge, None)
+fn render(
+    src: &Path,
+    kind: FileKind,
+    meta: &Metadata,
+    edge: u32,
+    quality: u8,
+    framing: Option<crate::framing::Framing>,
+) -> Result<Vec<u8>> {
+    // A crop needs more pixels from the photo for the same long edge.
+    let load_edge = match framing {
+        Some(f) if edge != u32::MAX => (edge as f32 / f.w.max(f.h).max(0.05)).ceil() as u32,
+        _ => edge,
+    };
+    let mut img = preview::load_image(src, kind, meta.orientation, load_edge, None)
         .with_context(|| format!("읽을 수 없습니다 {}", src.display()))?;
+    if let Some(f) = framing {
+        img = f.apply(&img);
+        if edge != u32::MAX && img.width().max(img.height()) > edge {
+            let s = edge as f32 / img.width().max(img.height()) as f32;
+            let (w, h) =
+                (((img.width() as f32 * s).round() as u32).max(1), ((img.height() as f32 * s).round() as u32).max(1));
+            img = image::imageops::resize(&img, w, h, image::imageops::FilterType::Lanczos3);
+        }
+    }
     let jpeg = preview::encode_jpeg(&img, quality)?;
     let mut out = with_exif(&jpeg, &exif_block(meta, Some((img.width(), img.height())), 1))?;
     // Not downscaled and not smaller than the camera JPEG (it was already compressed harder):
     // keep its image data as is and only replace the metadata, so the export never grows.
     let downscaled = edge != u32::MAX && img.width().max(img.height()) >= edge;
-    if kind == FileKind::Jpeg && !downscaled {
+    if kind == FileKind::Jpeg && !downscaled && framing.is_none() {
         let original = std::fs::read(src).with_context(|| format!("읽을 수 없습니다 {}", src.display()))?;
         if out.len() >= original.len() {
             if let Ok(b) = rewrap(&original, &exif_block(meta, None, meta.orientation.max(1))) {

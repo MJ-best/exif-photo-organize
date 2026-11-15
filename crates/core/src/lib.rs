@@ -5,6 +5,7 @@ pub mod cull;
 pub mod export;
 pub mod filter;
 pub mod format;
+pub mod framing;
 pub mod import;
 pub mod library;
 pub mod media;

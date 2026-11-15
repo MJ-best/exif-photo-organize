@@ -762,6 +762,57 @@ impl Composition {
         })
     }
 
+    /// The same measurements on the photo turned by `angle` degrees (clockwise) and cropped:
+    /// `map` takes a point of the photo to the framed photo (both normalised), `sw`, `sh` are the
+    /// crop's size relative to the photo. Sharpness and the background lines' strength stay as
+    /// measured; how much of the face the crop cuts off is added to what the frame already cut.
+    pub fn reframed(&self, angle: f32, map: impl Fn(f32, f32) -> (f32, f32), sw: f32, sh: f32) -> Composition {
+        let mut c = self.clone();
+        let (sw, sh) = (sw.max(1e-3), sh.max(1e-3));
+        c.aspect = self.aspect * sw / sh;
+        (c.kx, c.ky) = map(self.kx, self.ky);
+        if self.subject != subject::NONE {
+            let corners = [
+                map(self.bx, self.by),
+                map(self.bx + self.bw, self.by),
+                map(self.bx, self.by + self.bh),
+                map(self.bx + self.bw, self.by + self.bh),
+            ];
+            let (x0, x1) = corners.iter().fold((f32::MAX, f32::MIN), |a, p| (a.0.min(p.0), a.1.max(p.0)));
+            let (y0, y1) = corners.iter().fold((f32::MAX, f32::MIN), |a, p| (a.0.min(p.1), a.1.max(p.1)));
+            let (cx0, cy0, cx1, cy1) = (x0.clamp(0.0, 1.0), y0.clamp(0.0, 1.0), x1.clamp(0.0, 1.0), y1.clamp(0.0, 1.0));
+            (c.bx, c.by, c.bw, c.bh) = (cx0, cy0, (cx1 - cx0).max(0.0), (cy1 - cy0).max(0.0));
+            c.area = (self.area / (sw * sh)).min(1.0);
+        }
+        if self.face_h > 0.0 {
+            c.face_h = self.face_h / sh;
+            c.face_x = map(self.face_x, self.ky).0;
+            // The face's box, roughly (eyes 40 % down a box about 0.8 as wide as tall).
+            let fw = self.face_h * 0.8 / self.aspect;
+            let (fx0, fx1, fy0, fy1) =
+                (self.face_x - fw / 2.0, self.face_x + fw / 2.0, self.ky - 0.4 * self.face_h, self.ky + 0.6 * self.face_h);
+            let pts = [map(fx0, fy0), map(fx1, fy0), map(fx0, fy1), map(fx1, fy1)];
+            let (x0, x1) = pts.iter().fold((f32::MAX, f32::MIN), |a, p| (a.0.min(p.0), a.1.max(p.0)));
+            let (y0, y1) = pts.iter().fold((f32::MAX, f32::MIN), |a, p| (a.0.min(p.1), a.1.max(p.1)));
+            let area = ((x1 - x0) * (y1 - y0)).max(1e-6);
+            let ix = (x1.min(1.0) - x0.max(0.0)).max(0.0);
+            let iy = (y1.min(1.0) - y0.max(0.0)).max(0.0);
+            let lost = 1.0 - ix * iy / area;
+            let lost_top = ((-y0).max(0.0) / (y1 - y0).max(1e-6)).min(lost);
+            c.face_cut = (self.face_cut + lost).min(1.0);
+            c.face_cut_top = (self.face_cut_top + lost_top).min(c.face_cut);
+        }
+        if let Some(ht) = self.head_top {
+            c.head_top = Some(map(self.face_x, ht).1.max(0.0));
+        }
+        c.pole_x = map(self.pole_x, self.head_top.unwrap_or(self.ky)).0;
+        c.neck_y = map(self.face_x, self.neck_y).1;
+        // A line turned with the photo; its place moves with the crop.
+        c.tilt = self.tilt + angle;
+        c.tilt_at = if self.tilt_vertical { map(self.tilt_at, 0.5).0 } else { map(0.5, self.tilt_at).1 };
+        c
+    }
+
     /// The level line is the horizon of a scene without a subject, when it is clear.
     fn horizon(&self) -> Option<f32> {
         (!self.tilt_vertical && self.tilt_conf >= 0.5).then_some(self.tilt_at)
