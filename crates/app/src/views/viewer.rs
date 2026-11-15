@@ -3,6 +3,7 @@ use super::titlebar_pad;
 use crate::app::{PhotoApp, PreviewKey};
 use crate::theme::{bold, font};
 use crate::widgets::{self, Icon};
+use chrono::Datelike;
 use eframe::egui::{self, pos2, vec2, Align2, Color32, Id, Pos2, Rect, Sense, Stroke, StrokeKind, Ui, UiBuilder};
 use photoorg_core::cull::composition::{self, Composition};
 use photoorg_core::cull::learn::reason;
@@ -43,28 +44,12 @@ impl PhotoApp {
             pos2(bar.left() + 10.0, bar.top() + titlebar_pad()),
             pos2(bar.right() - 12.0, bar.bottom()),
         );
-        let mut bui =
-            ui.new_child(UiBuilder::new().max_rect(inner).layout(egui::Layout::left_to_right(egui::Align::Center)));
-        let back = bui.add(egui::Button::new(egui::RichText::new("‹  돌아가기").font(font(13.0))).frame(false));
-        if back.clicked() {
-            self.close_viewer();
-            return;
-        }
-        let captured = a.captured();
-        let title = format::datetime_ko(captured);
-        let sub = format!(
-            "{}  ·  {}{}",
-            a.name,
-            photoorg_core::media::formats::label(a.formats),
-            pos.map(|p| format!("  ·  {} / {}", p + 1, self.filtered.len())).unwrap_or_default()
-        );
-        let tp = ui.painter();
-        tp.text(pos2(inner.center().x, inner.center().y - 8.0), Align2::CENTER_CENTER, &title, bold(14.0), pal.text);
-        tp.text(pos2(inner.center().x, inner.center().y + 10.0), Align2::CENTER_CENTER, &sub, font(11.5), pal.text2);
-        let right = Rect::from_min_max(pos2(inner.center().x + 180.0, inner.top()), inner.max);
+        // A narrow viewer (window small, sidebar and info panel open): tighter tools, shorter title.
+        let narrow = inner.width() < 640.0;
+        // The tools first, from the right; the title gets the room that is left.
         let mut rui =
-            ui.new_child(UiBuilder::new().max_rect(right).layout(egui::Layout::right_to_left(egui::Align::Center)));
-        rui.spacing_mut().item_spacing.x = 8.0;
+            ui.new_child(UiBuilder::new().max_rect(inner).layout(egui::Layout::right_to_left(egui::Align::Center)));
+        rui.spacing_mut().item_spacing.x = if narrow { 2.0 } else { 6.0 };
         if widgets::icon_button(&mut rui, Icon::Info, self.cfg.show_info, &pal, "정보 (⌘I)").clicked() {
             self.cfg.show_info = !self.cfg.show_info;
         }
@@ -96,9 +81,70 @@ impl PhotoApp {
             if widgets::icon_button(&mut rui, Icon::Flag, a.flag > 0, &pal, "픽 — A컷 (P)").clicked() {
                 flag_to = Some(if a.flag > 0 { 0 } else { 1 });
             }
-            rui.add_space(4.0);
+            rui.add_space(if narrow { 2.0 } else { 6.0 });
         }
-        let rate_to = widgets::stars(&mut rui, a.rating, 18.0, &pal);
+        let rate_to = widgets::stars(&mut rui, a.rating, if narrow { 14.0 } else { 18.0 }, &pal);
+        let tools_left = rui.min_rect().left();
+        let mut bui =
+            ui.new_child(UiBuilder::new().max_rect(inner).layout(egui::Layout::left_to_right(egui::Align::Center)));
+        let back = bui
+            .add(
+                egui::Button::new(egui::RichText::new(if narrow { "‹" } else { "‹  돌아가기" }).font(font(13.0)))
+                    .frame(false),
+            )
+            .on_hover_text("돌아가기 (Esc · Space)");
+        if back.clicked() {
+            self.close_viewer();
+            return;
+        }
+        // Title between the two: on the middle of the bar when it fits there, otherwise in the
+        // room that is left — the longest wording that fits, then cut with "…".
+        let (left, right) = (back.rect.right() + 14.0, tools_left - 14.0);
+        if right - left >= 48.0 {
+            let room = right - left;
+            let captured = a.captured();
+            let place = pos.map(|p| format!("{} / {}", p + 1, self.filtered.len()));
+            let titles = [
+                format::datetime_ko(captured),
+                format!("{} {}", format::date_medium(captured.date()), format::time_ko(captured)),
+                format::date_medium(captured.date()),
+                format!("{}. {}. {}.", captured.year(), captured.month(), captured.day()),
+            ];
+            let kind = photoorg_core::media::formats::label(a.formats);
+            let mut subs = vec![match &place {
+                Some(pl) => format!("{}  ·  {kind}  ·  {pl}", a.name),
+                None => format!("{}  ·  {kind}", a.name),
+            }];
+            if let Some(pl) = &place {
+                subs.push(format!("{}  ·  {pl}", a.name));
+                subs.push(pl.clone());
+            }
+            let fit = |texts: &[String], f: egui::FontId, color: Color32| {
+                let p = ui.painter();
+                let one = |t: &str, wrap: f32| {
+                    let mut job = egui::text::LayoutJob::single_section(
+                        t.to_owned(),
+                        egui::TextFormat { font_id: f.clone(), color, ..Default::default() },
+                    );
+                    job.wrap = egui::text::TextWrapping::truncate_at_width(wrap);
+                    p.layout_job(job)
+                };
+                texts
+                    .iter()
+                    .map(|t| one(t, f32::INFINITY))
+                    .find(|g| g.size().x <= room)
+                    .unwrap_or_else(|| one(texts.last().map(|s| s.as_str()).unwrap_or(""), room))
+            };
+            let tg = fit(&titles, bold(14.0), pal.text);
+            let sg = fit(&subs, font(11.5), pal.text2);
+            let w = tg.size().x.max(sg.size().x);
+            let mid = inner.center().x;
+            let cx = if mid - w / 2.0 >= left && mid + w / 2.0 <= right { mid } else { (left + right) / 2.0 };
+            let tp = ui.painter();
+            let (ty, sy) = (inner.center().y - 8.0, inner.center().y + 10.0);
+            tp.galley(pos2(cx - tg.size().x / 2.0, ty - tg.size().y / 2.0), tg, pal.text);
+            tp.galley(pos2(cx - sg.size().x / 2.0, sy - sg.size().y / 2.0), sg, pal.text2);
+        }
 
         // Image area.
         let strip_h = if self.cfg.show_filmstrip { FILMSTRIP_H } else { 0.0 };
@@ -250,32 +296,6 @@ impl PhotoApp {
             self.close_viewer();
             return;
         }
-        if let (true, Some(r), false) = (self.cfg.show_composition, shown, a.is_video()) {
-            let p = ui.painter_at(area);
-            match self.comp_cache.as_ref().filter(|c| c.0 == id).and_then(|c| c.1.as_ref()) {
-                // Judged as framed.
-                Some(c) => {
-                    let c = framing.map(|f| f.composition(c)).unwrap_or_else(|| c.clone());
-                    paint_composition(&p, r, &c, self.cfg.learn.off)
-                }
-                None => {
-                    let msg = if self.analysis_job.is_some() {
-                        "구도: 분석 중…"
-                    } else {
-                        "구도: 아직 분석되지 않은 사진"
-                    };
-                    widgets::badge(
-                        &p,
-                        area.left_bottom() + vec2(14.0, -12.0),
-                        Align2::LEFT_BOTTOM,
-                        msg,
-                        11.0,
-                        Color32::from_black_alpha(150),
-                        Color32::WHITE,
-                    );
-                }
-            }
-        }
         // Pick / reject / B-cut candidate status.
         let status = if a.flag < 0 {
             Some((Icon::Reject, "거절 (B컷)".to_string(), pal.danger))
@@ -302,22 +322,12 @@ impl PhotoApp {
         } else {
             None
         };
-        let has_status = status.is_some();
+        // Status and the active project's themes, as badges in the top left: measured first so
+        // the composition labels keep clear of them, painted last so nothing crosses them.
+        let mut badge_rows: Vec<(Icon, Color32, std::sync::Arc<egui::Galley>)> = Vec::new();
         if let Some((icon, text, color)) = status {
-            let y = if zoom.is_some() { 40.0 } else { 12.0 };
-            let g = ui.painter().layout_no_wrap(text, bold(11.5), Color32::WHITE);
-            let r = Rect::from_min_size(area.left_top() + vec2(14.0, y), vec2(g.size().x + 38.0, 26.0));
-            let p = ui.painter_at(area);
-            p.rect_filled(r, 13.0, Color32::from_black_alpha(160));
-            widgets::paint_icon(
-                &p,
-                Rect::from_center_size(pos2(r.left() + 16.0, r.center().y), vec2(14.0, 14.0)),
-                icon,
-                color,
-            );
-            p.galley(pos2(r.left() + 30.0, r.center().y - g.size().y / 2.0), g, Color32::WHITE);
+            badge_rows.push((icon, color, one_line(ui.painter(), text, bold(11.5), area.width() - 70.0)));
         }
-        // Themes of the active project on this photo.
         if let (Some(pid), Some(st)) = (self.active_project, &self.lib) {
             let names: Vec<String> = st
                 .index
@@ -330,19 +340,53 @@ impl PhotoApp {
             if !names.is_empty() {
                 let pname = st.index.project(pid).map(|p| p.name.as_str()).unwrap_or("");
                 let text = format!("{pname}: {}", names.join(" · "));
-                let y = if zoom.is_some() { 40.0 } else { 12.0 } + if has_status { 32.0 } else { 0.0 };
-                let g = ui.painter().layout_no_wrap(text, bold(11.5), Color32::WHITE);
-                let r = Rect::from_min_size(area.left_top() + vec2(14.0, y), vec2(g.size().x + 38.0, 26.0));
-                let p = ui.painter_at(area);
-                p.rect_filled(r, 13.0, Color32::from_black_alpha(160));
-                widgets::paint_icon(
-                    &p,
-                    Rect::from_center_size(pos2(r.left() + 16.0, r.center().y), vec2(14.0, 14.0)),
-                    Icon::Tag,
-                    pal.accent,
-                );
-                p.galley(pos2(r.left() + 30.0, r.center().y - g.size().y / 2.0), g, Color32::WHITE);
+                badge_rows.push((Icon::Tag, pal.accent, one_line(ui.painter(), text, bold(11.5), area.width() - 70.0)));
             }
+        }
+        let top = if zoom.is_some() { 40.0 } else { 12.0 };
+        let badges: Vec<Rect> = badge_rows
+            .iter()
+            .enumerate()
+            .map(|(k, (_, _, g))| {
+                Rect::from_min_size(area.left_top() + vec2(14.0, top + 32.0 * k as f32), vec2(g.size().x + 38.0, 26.0))
+            })
+            .collect();
+        if let (true, Some(r), false) = (self.cfg.show_composition, shown, a.is_video()) {
+            let p = ui.painter_at(area);
+            match self.comp_cache.as_ref().filter(|c| c.0 == id).and_then(|c| c.1.as_ref()) {
+                // Judged as framed.
+                Some(c) => {
+                    let c = framing.map(|f| f.composition(c)).unwrap_or_else(|| c.clone());
+                    paint_composition(&p, r, &c, self.cfg.learn.off, &badges)
+                }
+                None => {
+                    let msg = if self.analysis_job.is_some() {
+                        "구도: 분석 중…"
+                    } else {
+                        "구도: 아직 분석되지 않은 사진"
+                    };
+                    widgets::badge(
+                        &p,
+                        area.left_bottom() + vec2(14.0, -12.0),
+                        Align2::LEFT_BOTTOM,
+                        msg,
+                        11.0,
+                        Color32::from_black_alpha(150),
+                        Color32::WHITE,
+                    );
+                }
+            }
+        }
+        let p = ui.painter_at(area);
+        for ((icon, color, g), r) in badge_rows.into_iter().zip(&badges) {
+            p.rect_filled(*r, 13.0, Color32::from_black_alpha(160));
+            widgets::paint_icon(
+                &p,
+                Rect::from_center_size(pos2(r.left() + 16.0, r.center().y), vec2(14.0, 14.0)),
+                icon,
+                color,
+            );
+            p.galley(pos2(r.left() + 30.0, r.center().y - g.size().y / 2.0), g, Color32::WHITE);
         }
         if let Some(r) = rate_to {
             self.rate(&ctx, vec![id], r);
@@ -445,7 +489,7 @@ impl PhotoApp {
 /// The composition check drawn over the photo shown in `r`: thirds, the subject and the point the
 /// composition hangs on, headroom, where the face looks, background lines merging with the head
 /// and the strongest straight line. Rules turned off (`off`, [`reason`] bits) are not drawn.
-fn paint_composition(p: &egui::Painter, r: Rect, c: &Composition, off: u32) {
+fn paint_composition(p: &egui::Painter, r: Rect, c: &Composition, off: u32, badges: &[Rect]) {
     use composition::subject;
     let j = composition::judge(c);
     let at = |x: f32, y: f32| pos2(r.left() + x * r.width(), r.top() + y * r.height());
@@ -457,8 +501,33 @@ fn paint_composition(p: &egui::Painter, r: Rect, c: &Composition, off: u32) {
         p.line_segment([a, b], Stroke::new(w + 2.0, Color32::from_black_alpha(80)));
         p.line_segment([a, b], Stroke::new(w, col));
     };
-    let tag = |pos: Pos2, align: Align2, text: &str, col: Color32| {
-        widgets::badge(p, pos, align, text, 10.5, Color32::from_black_alpha(165), col);
+    // Labels: inside the photo, clear of each other and of the status badges.
+    let mut placed: Vec<Rect> = badges.to_vec();
+    let bounds = r.shrink(4.0).intersect(p.clip_rect().shrink(4.0));
+    let mut tag = |pos: Pos2, align: Align2, text: &str, col: Color32| {
+        let g = p.layout_no_wrap(text.to_owned(), bold(10.5), col);
+        let size = g.size() + vec2(10.0, 4.0);
+        let mut b = align.anchor_size(pos, size);
+        let keep_in = |b: Rect| {
+            let dx = (bounds.left() - b.left()).max(0.0) + (bounds.right() - b.right()).min(0.0);
+            let dy = (bounds.top() - b.top()).max(0.0) + (bounds.bottom() - b.bottom()).min(0.0);
+            b.translate(vec2(dx, dy))
+        };
+        b = keep_in(b);
+        for _ in 0..8 {
+            let Some(o) = placed.iter().find(|o| o.expand(2.0).intersects(b)).copied() else { break };
+            // Below what is in the way; above it near the bottom.
+            let down = b.translate(vec2(0.0, o.bottom() + 3.0 - b.top()));
+            b = if down.bottom() <= bounds.bottom() {
+                down
+            } else {
+                b.translate(vec2(0.0, o.top() - 3.0 - b.bottom()))
+            };
+            b = keep_in(b);
+        }
+        p.rect_filled(b, b.height() / 2.0, Color32::from_black_alpha(165));
+        p.galley(b.center() - g.size() / 2.0, g, col);
+        placed.push(b);
     };
     let on = |rule: u32| off & rule == 0;
 
@@ -536,4 +605,14 @@ fn paint_composition(p: &egui::Painter, r: Rect, c: &Composition, off: u32) {
         };
         tag(if c.tilt_vertical { b - vec2(0.0, 30.0) } else { b - vec2(8.0, 0.0) }, Align2::RIGHT_BOTTOM, &text, col);
     }
+}
+
+/// One line of white text, cut with "…" to `width`.
+fn one_line(p: &egui::Painter, text: String, f: egui::FontId, width: f32) -> std::sync::Arc<egui::Galley> {
+    let mut job = egui::text::LayoutJob::single_section(
+        text,
+        egui::TextFormat { font_id: f, color: Color32::WHITE, ..Default::default() },
+    );
+    job.wrap = egui::text::TextWrapping::truncate_at_width(width.max(40.0));
+    p.layout_job(job)
 }

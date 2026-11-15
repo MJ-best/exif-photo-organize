@@ -174,7 +174,9 @@ impl PhotoApp {
             }
         }
         let aspect = s.aspect;
-        let tools_h = 54.0;
+        // One row of tools when there is room for it, two otherwise (nothing runs into anything).
+        let two_rows = area.width() < 900.0;
+        let tools_h = if two_rows { 92.0 } else { 54.0 };
         let canvas_area = Rect::from_min_max(area.min, pos2(area.max.x, area.max.y - tools_h)).shrink(28.0);
         let canvas = crate::views::grid::contain_rect([(aspect * 1000.0) as usize, 1000], canvas_area);
         let p = ui.painter_at(canvas);
@@ -358,14 +360,24 @@ impl PhotoApp {
         // Tools under the photo.
         let tools = Rect::from_min_max(
             pos2(area.left() + 12.0, area.bottom() - tools_h),
-            pos2(area.right() - 12.0, area.bottom()),
+            pos2(area.right() - 12.0, area.bottom() - if two_rows { 6.0 } else { 0.0 }),
         );
+        let (row1, row2) = if two_rows {
+            let mid = tools.center().y;
+            (
+                Rect::from_min_max(tools.min, pos2(tools.right(), mid)),
+                Rect::from_min_max(pos2(tools.left(), mid), tools.max),
+            )
+        } else {
+            (tools, tools)
+        };
         let mut tui =
-            ui.new_child(UiBuilder::new().max_rect(tools).layout(egui::Layout::left_to_right(egui::Align::Center)));
+            ui.new_child(UiBuilder::new().max_rect(row1).layout(egui::Layout::left_to_right(egui::Align::Center)));
         tui.spacing_mut().item_spacing.x = 8.0;
         tui.label(egui::RichText::new("수평").font(bold(12.0)).color(pal.text2));
         let mut angle = s.f.angle;
-        tui.spacing_mut().slider_width = 170.0;
+        // The slider takes what the buttons beside it leave (100–170 pt).
+        tui.spacing_mut().slider_width = (row1.width() - if two_rows { 300.0 } else { 690.0 }).clamp(100.0, 170.0);
         let slider = tui
             .add(egui::Slider::new(&mut angle, -MAX_ANGLE..=MAX_ANGLE).step_by(0.1).fixed_decimals(1).suffix("°"))
             .on_hover_text("끌어서 돌리기 (두 번 누르면 0°)");
@@ -382,20 +394,26 @@ impl PhotoApp {
         let auto_compose = widgets::secondary_button(&mut tui, "자동 구도", &pal).on_hover_text(
             "수평을 맞추고, 3분할 · 헤드룸 · 시선 앞 공간이 나아지도록 조금만 자릅니다 (끈 구도 기준은 빼고)",
         );
+        let mut lower = if two_rows {
+            ui.new_child(UiBuilder::new().max_rect(row2).layout(egui::Layout::left_to_right(egui::Align::Center)))
+        } else {
+            tui
+        };
+        lower.spacing_mut().item_spacing.x = 8.0;
         let mut ratio = s.ratio;
         egui::ComboBox::from_id_salt("crop-ratio")
             .selected_text(CropRatio::ALL.iter().find(|r| r.0 == ratio).map(|r| r.1).unwrap_or(""))
             .width(96.0)
-            .show_ui(&mut tui, |ui| {
+            .show_ui(&mut lower, |ui| {
                 for (r, label) in CropRatio::ALL {
                     ui.selectable_value(&mut ratio, r, label);
                 }
             });
         let ratio_changed = ratio != s.ratio;
-        let reset = widgets::secondary_button(&mut tui, "원래대로", &pal);
+        let reset = widgets::secondary_button(&mut lower, "원래대로", &pal);
         let mut done = false;
         let mut cancel = false;
-        tui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+        lower.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             done = widgets::primary_button(ui, "완료 (Enter)", &pal, true).clicked();
             cancel = widgets::secondary_button(ui, "취소 (Esc)", &pal).clicked();
         });
