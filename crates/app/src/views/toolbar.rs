@@ -76,30 +76,24 @@ impl PhotoApp {
         if cfg!(target_os = "macos") && resp.drag_started() {
             ctx.send_viewport_cmd(egui::ViewportCommand::StartDrag);
         }
-        let p = ui.painter();
+        let p = ui.painter().clone();
         p.rect_filled(rect, 0.0, pal.toolbar_bg);
         widgets::separator_h(ui, rect, &pal);
         let bar = Rect::from_min_max(pos2(rect.left(), rect.top() + titlebar_pad()), rect.max);
 
-        // Title (cut with "…" before the segmented control in the centre).
+        // Right controls first (fewer when the window is narrow), then the segmented control —
+        // in the centre when it fits there, else just left of the controls — and the title in what
+        // is left, cut with "…". Nothing overlaps at any width.
         let wide = bar.width() > 1040.0;
-        let seg_w = 250.0;
-        let cx = if wide { bar.center().x } else { bar.center().x - 40.0 };
-        let seg_rect = Rect::from_center_size(pos2(cx, bar.center().y), vec2(seg_w, 26.0));
-        let left = bar.left() + 18.0;
-        let max_w = (seg_rect.left() - 10.0 - left).max(60.0);
-        for (text, f, color, dy) in
-            [(self.title(), bold(15.0), pal.text, -8.0), (self.subtitle(), font(11.5), pal.text2, 10.0)]
-        {
-            let mut job = egui::text::LayoutJob::simple_singleline(text, f, color);
-            job.wrap = egui::text::TextWrapping::truncate_at_width(max_w);
-            let g = p.layout_job(job);
-            p.galley(pos2(left, bar.center().y + dy - g.size().y / 2.0), g, color);
-        }
-
-        // Right controls (fewer when the window is narrow).
-        let search_w = if bar.width() > 860.0 { 180.0 } else { 120.0 };
-        let right = Rect::from_min_max(pos2(bar.center().x + 130.0, bar.top()), pos2(bar.right() - 12.0, bar.bottom()));
+        let narrow = bar.width() < 700.0;
+        let search_w = if bar.width() > 860.0 {
+            180.0
+        } else if narrow {
+            100.0
+        } else {
+            120.0
+        };
+        let right = Rect::from_min_max(pos2(bar.left() + 120.0, bar.top()), pos2(bar.right() - 12.0, bar.bottom()));
         let mut rui =
             ui.new_child(UiBuilder::new().max_rect(right).layout(egui::Layout::right_to_left(egui::Align::Center)));
         rui.spacing_mut().item_spacing.x = 6.0;
@@ -145,18 +139,42 @@ impl PhotoApp {
                 self.zoom_tiles(1.0 / 1.2);
             }
         }
+        let tools_left = rui.min_rect().left();
 
-        // Centre: segmented control.
+        // Centre: segmented control ("전체" instead of "모든 사진" when narrow).
+        let options = [
+            (GridMode::Years, "연"),
+            (GridMode::Months, "월"),
+            (GridMode::Days, "일"),
+            (GridMode::All, if narrow { "전체" } else { "모든 사진" }),
+        ];
+        let seg_w: f32 = options
+            .iter()
+            .map(|(_, l)| p.layout_no_wrap(l.to_string(), font(12.5), pal.text).size().x + 24.0)
+            .sum::<f32>()
+            + 4.0;
+        let preferred = if wide { bar.center().x } else { bar.center().x - 40.0 };
+        let cx = preferred.min(tools_left - 14.0 - seg_w / 2.0).max(bar.left() + 18.0 + seg_w / 2.0);
+        let seg_rect = Rect::from_center_size(pos2(cx, bar.center().y), vec2(seg_w, 26.0));
         let mut cui =
             ui.new_child(UiBuilder::new().max_rect(seg_rect).layout(egui::Layout::left_to_right(egui::Align::Center)));
         let mut mode = self.mode;
-        if widgets::segmented(
-            &mut cui,
-            &mut mode,
-            &[(GridMode::Years, "연"), (GridMode::Months, "월"), (GridMode::Days, "일"), (GridMode::All, "모든 사진")],
-            &pal,
-        ) {
+        if widgets::segmented(&mut cui, &mut mode, &options, &pal) {
             self.set_mode(mode);
+        }
+
+        // Title in what is left.
+        let left = bar.left() + 18.0;
+        let max_w = seg_rect.left() - 14.0 - left;
+        if max_w >= 36.0 {
+            for (text, f, color, dy) in
+                [(self.title(), bold(15.0), pal.text, -8.0), (self.subtitle(), font(11.5), pal.text2, 10.0)]
+            {
+                let mut job = egui::text::LayoutJob::simple_singleline(text, f, color);
+                job.wrap = egui::text::TextWrapping::truncate_at_width(max_w);
+                let g = p.layout_job(job);
+                p.galley(pos2(left, bar.center().y + dy - g.size().y / 2.0), g, color);
+            }
         }
     }
 }
