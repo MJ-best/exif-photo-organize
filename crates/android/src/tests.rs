@@ -177,6 +177,7 @@ fn reasons_and_views_follow_the_threshold() {
         burst_rank: 0,
         burst_size: 0,
         keep_rank: f32::NAN,
+        framing: None,
     };
     index.assets.push(a.clone());
     let p = photo(&index, &a);

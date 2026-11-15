@@ -87,6 +87,15 @@ CREATE TABLE IF NOT EXISTS analysis (
     burst_rank INTEGER NOT NULL DEFAULT 0,
     burst_size INTEGER NOT NULL DEFAULT 0
 );
+-- Straighten and crop (see crate::framing), never applied to the files themselves.
+CREATE TABLE IF NOT EXISTS framing (
+    asset_id INTEGER PRIMARY KEY REFERENCES assets(id) ON DELETE CASCADE,
+    angle REAL NOT NULL,
+    x REAL NOT NULL,
+    y REAL NOT NULL,
+    w REAL NOT NULL,
+    h REAL NOT NULL
+);
 CREATE TABLE IF NOT EXISTS ml_models (
     key TEXT PRIMARY KEY,
     data TEXT NOT NULL,
@@ -239,6 +248,8 @@ pub struct AssetRecord {
     pub reasons: u32,
     /// What it does well (A-cut reasons), see [`crate::cull::composition::strength`].
     pub strengths: u32,
+    /// Straightened / cropped (shown and exported that way; the files are untouched).
+    pub framing: Option<crate::framing::Framing>,
     /// Burst id (asset id of its first frame), 0 when not part of a burst.
     pub burst: i64,
     pub burst_rank: u16,
@@ -671,6 +682,35 @@ impl Catalog {
         Ok(())
     }
 
+    /// Straighten / crop a photo (None or an identity framing removes it).
+    pub fn set_framing(&self, id: i64, f: Option<crate::framing::Framing>) -> Result<()> {
+        match f.filter(|f| !f.is_identity()) {
+            Some(f) => self.conn.execute(
+                "INSERT INTO framing(asset_id, angle, x, y, w, h) VALUES (?1,?2,?3,?4,?5,?6)
+                 ON CONFLICT(asset_id) DO UPDATE SET angle=excluded.angle, x=excluded.x, y=excluded.y,
+                 w=excluded.w, h=excluded.h",
+                params![id, f.angle as f64, f.x as f64, f.y as f64, f.w as f64, f.h as f64],
+            )?,
+            None => self.conn.execute("DELETE FROM framing WHERE asset_id=?1", [id])?,
+        };
+        Ok(())
+    }
+
+    pub fn framing(&self, id: i64) -> Result<Option<crate::framing::Framing>> {
+        Ok(self
+            .conn
+            .query_row("SELECT angle, x, y, w, h FROM framing WHERE asset_id=?1", [id], |r| {
+                Ok(crate::framing::Framing {
+                    angle: r.get::<_, f64>(0)? as f32,
+                    x: r.get::<_, f64>(1)? as f32,
+                    y: r.get::<_, f64>(2)? as f32,
+                    w: r.get::<_, f64>(3)? as f32,
+                    h: r.get::<_, f64>(4)? as f32,
+                })
+            })
+            .optional()?)
+    }
+
     /// Scene set by the user (None = automatic).
     pub fn scene_user(&self, id: i64) -> Result<Option<u8>> {
         Ok(self.conn.query_row("SELECT scene_user FROM assets WHERE id=?1", [id], |r| {
@@ -711,11 +751,11 @@ impl Catalog {
     pub fn cull_items(&self) -> Result<Vec<crate::cull::learn::Item>> {
         let mut stmt = self.conn.prepare(
             "SELECT a.id, a.captured_ms, COALESCE(a.camera, ''), a.exposure_time, COALESCE(a.focal_35mm, a.focal_length),
-                    a.iso, a.rating, a.flag, a.scene_user, an.data, 0
-             FROM assets a JOIN analysis an ON an.asset_id = a.id
+                    a.iso, a.rating, a.flag, a.scene_user, an.data, 0, fr.angle, fr.x, fr.y, fr.w, fr.h
+             FROM assets a JOIN analysis an ON an.asset_id = a.id LEFT JOIN framing fr ON fr.asset_id = a.id
              UNION ALL
              SELECT -m.id, m.captured_ms, m.camera, m.exposure_time, m.focal, m.iso, m.rating, m.flag, m.scene_user,
-                    m.data, 1
+                    m.data, 1, NULL, NULL, NULL, NULL, NULL
              FROM learn_memory m",
         )?;
         let rows = stmt.query_map([], |r| {
@@ -731,11 +771,21 @@ impl Catalog {
                 r.get::<_, Option<i64>>(8)?,
                 r.get::<_, String>(9)?,
                 r.get::<_, i64>(10)? != 0,
+                match (r.get::<_, Option<f64>>(11)?, r.get::<_, Option<f64>>(12)?) {
+                    (Some(angle), Some(x)) => Some(crate::framing::Framing {
+                        angle: angle as f32,
+                        x: x as f32,
+                        y: r.get::<_, f64>(13)? as f32,
+                        w: r.get::<_, f64>(14)? as f32,
+                        h: r.get::<_, f64>(15)? as f32,
+                    }),
+                    _ => None,
+                },
             ))
         })?;
         let mut items = Vec::new();
         for row in rows {
-            let (id, ms, camera, shutter, focal, iso, rating, flag, scene_user, data, gone) = row?;
+            let (id, ms, camera, shutter, focal, iso, rating, flag, scene_user, data, gone, framing) = row?;
             let Ok(a) = serde_json::from_str::<crate::cull::Analysis>(&data) else { continue };
             let scene = scene_user.map(|s| crate::cull::Scene::from_u8(s as u8)).unwrap_or(a.scene);
             items.push(crate::cull::learn::Item {
@@ -760,7 +810,8 @@ impl Catalog {
                 dhash: a.dhash,
                 embed: a.embed,
                 gone,
-                comp: a.comp,
+                // Judged as the photographer framed it.
+                comp: framing.map(|f| f.composition(&a.comp)).unwrap_or(a.comp),
             });
         }
         Ok(items)
@@ -1105,6 +1156,16 @@ impl Catalog {
             burst_rank: r.get::<_, Option<i64>>(25)?.unwrap_or(0) as u16,
             burst_size: r.get::<_, Option<i64>>(26)?.unwrap_or(0) as u16,
             strengths: r.get::<_, Option<i64>>(27)?.unwrap_or(0) as u32,
+            framing: match (r.get::<_, Option<f64>>(28)?, r.get::<_, Option<f64>>(29)?) {
+                (Some(angle), Some(x)) => Some(crate::framing::Framing {
+                    angle: angle as f32,
+                    x: x as f32,
+                    y: r.get::<_, f64>(30)? as f32,
+                    w: r.get::<_, f64>(31)? as f32,
+                    h: r.get::<_, f64>(32)? as f32,
+                }),
+                _ => None,
+            },
             keep_rank: f32::NAN,
         };
         Ok((
@@ -1117,8 +1178,8 @@ impl Catalog {
     const ROW_SQL: &'static str = "SELECT a.id, a.captured_ms, a.camera, a.lens, a.focal_length, a.focal_35mm, a.aperture,
         a.exposure_time, a.iso, a.exposure_bias, a.width, a.height, a.orientation, a.rating, a.formats, a.flash, a.gps_lat,
         a.date_source, a.import_id, a.name, a.flag, COALESCE(a.scene_user, an.scene, 0), an.b_prob, an.reasons, an.burst,
-        an.burst_rank, an.burst_size, an.strengths
-        FROM assets a LEFT JOIN analysis an ON an.asset_id = a.id";
+        an.burst_rank, an.burst_size, an.strengths, fr.angle, fr.x, fr.y, fr.w, fr.h
+        FROM assets a LEFT JOIN analysis an ON an.asset_id = a.id LEFT JOIN framing fr ON fr.asset_id = a.id";
 
     /// Load the whole library into memory.
     pub fn load_index(&self) -> Result<LibraryIndex> {

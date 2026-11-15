@@ -1372,6 +1372,40 @@ mod tests {
             assert!(img.width().max(img.height()) <= 320, "{n}");
         }
         assert_eq!(sum.bytes, std::fs::metadata(&sum.archives[0]).unwrap().len());
+
+        // Straightened and cropped in LOUPE: JPEG exports are framed, originals are not.
+        let jpeg_id = ids
+            .iter()
+            .copied()
+            .find(|&id| cat.files_for(id).unwrap().iter().all(|f| f.kind == crate::media::FileKind::Jpeg))
+            .unwrap();
+        let src = cat.files_for(jpeg_id).unwrap()[0].clone();
+        let (w0, h0) = image::image_dimensions(lib.abs(&src.rel_path)).unwrap();
+        let f = crate::framing::Framing { angle: 0.0, x: 0.25, y: 0.0, w: 0.5, h: 1.0 };
+        cat.set_framing(jpeg_id, Some(f)).unwrap();
+        assert_eq!(cat.framing(jpeg_id).unwrap(), Some(f));
+        let out = tempfile::tempdir().unwrap();
+        let opts = ExportOptions { kind: ExportKind::JpegOnly, date_names: false, zip: None, groups: Vec::new() };
+        crate::export::export(&lib, &cat, &[jpeg_id], out.path(), &opts, &never, &|_, _| {}).unwrap();
+        let (w, h) = image::image_dimensions(out.path().join(crate::export::tests_file_name(&src.rel_path))).unwrap();
+        assert_eq!((w, h), f.pixel_size(w0, h0), "cropped to half the width");
+        let out = tempfile::tempdir().unwrap();
+        crate::export::export(
+            &lib,
+            &cat,
+            &[jpeg_id],
+            out.path(),
+            &ExportOptions::files(ExportKind::Originals),
+            &never,
+            &|_, _| {},
+        )
+        .unwrap();
+        let (w, h) = image::image_dimensions(out.path().join(crate::export::tests_file_name(&src.rel_path))).unwrap();
+        assert_eq!((w, h), (w0, h0), "originals untouched");
+        // Back to the whole photo.
+        cat.set_framing(jpeg_id, None).unwrap();
+        assert_eq!(cat.framing(jpeg_id).unwrap(), None);
+        assert!(cat.load_index().unwrap().get(jpeg_id).unwrap().framing.is_none());
     }
 
     #[test]
