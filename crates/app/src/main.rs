@@ -5,6 +5,7 @@
 mod app;
 mod app_access;
 mod app_accuracy;
+mod app_crop;
 mod app_cull;
 mod app_delete;
 mod app_export;

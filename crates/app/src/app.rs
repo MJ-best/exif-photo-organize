@@ -233,6 +233,8 @@ pub struct PhotoApp {
     pub space_at: Option<f64>,
     /// Space in the viewer goes back to the grid only once no second press came (this time).
     pub space_close_at: Option<f64>,
+    /// The crop / straighten tool (크롭 · 수평), open on the photo in the viewer.
+    pub crop: Option<crate::app_crop::CropSession>,
     /// Composition of the photo in the viewer (for the overlay): asset id and what was measured.
     pub comp_cache: Option<(i64, Option<photoorg_core::cull::composition::Composition>)>,
     pub thumbs: Option<ImageCache<i64>>,
@@ -325,6 +327,7 @@ impl PhotoApp {
             space_at: None,
             space_close_at: None,
             comp_cache: None,
+            crop: None,
             thumbs: None,
             previews: None,
             import: None,
@@ -1151,6 +1154,22 @@ impl PhotoApp {
             return;
         }
         let now = ctx.input(|i| i.time);
+        // The crop tool takes Enter / Esc / R; moving to another photo keeps it open.
+        if self.crop.is_some() && self.viewer.as_ref().map(|v| v.id) != self.crop.as_ref().map(|c| c.id) {
+            self.commit_crop(ctx);
+        }
+        if self.crop.is_some() {
+            let (enter, esc, r) = ctx.input(|i| {
+                (i.key_pressed(Key::Enter), i.key_pressed(Key::Escape), i.key_pressed(Key::R) && !i.modifiers.command)
+            });
+            if enter || r {
+                self.commit_crop(ctx);
+                ctx.input_mut(|i| i.events.retain(|e| !matches!(e, egui::Event::Key { key: Key::Enter | Key::R, .. })));
+            } else if esc {
+                self.cancel_crop();
+                ctx.input_mut(|i| i.events.retain(|e| !matches!(e, egui::Event::Key { key: Key::Escape, .. })));
+            }
+        }
         let keys: Vec<(Key, Option<Key>, egui::Modifiers, bool)> = ctx.input(|i| {
             i.events
                 .iter()
@@ -1241,7 +1260,10 @@ impl PhotoApp {
                     }
                 }
                 // Space: the grid <-> one photo; twice quickly: 100% on the middle of the photo.
-                Key::Space if !repeat => self.space_key(now),
+                Key::Space if !repeat => {
+                    self.commit_crop(ctx);
+                    self.space_key(now)
+                }
                 Key::Space => {}
                 Key::Enter => {
                     if self.viewer.is_some() {
@@ -1250,13 +1272,26 @@ impl PhotoApp {
                         self.open_focused();
                     }
                 }
-                Key::Z if self.viewer.is_some() => self.toggle_zoom(),
+                Key::Z if self.viewer.is_some() && self.crop.is_none() => self.toggle_zoom(),
                 Key::G if !cmd && self.viewer.is_some() => self.cfg.show_composition = !self.cfg.show_composition,
+                Key::R if !cmd && self.crop.is_none() => {
+                    if let Some(id) = self.viewer.as_ref().map(|v| v.id) {
+                        self.start_crop(id);
+                    }
+                }
                 Key::ArrowLeft | Key::ArrowRight | Key::ArrowUp | Key::ArrowDown => {
                     if self.viewer.is_some() {
+                        let cropping = self.crop.is_some();
+                        if cropping {
+                            self.commit_crop(ctx);
+                        }
                         match key {
                             Key::ArrowLeft | Key::ArrowUp => self.viewer_step(-1),
                             _ => self.viewer_step(1),
+                        }
+                        // The tool stays open on the next photo.
+                        if let (true, Some(id)) = (cropping, self.viewer.as_ref().map(|v| v.id)) {
+                            self.start_crop(id);
                         }
                     } else if matches!(self.mode, GridMode::Days | GridMode::All) && !self.filtered.is_empty() {
                         let cols = self.last_grid_cols.max(1) as i64;

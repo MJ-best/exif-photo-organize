@@ -493,6 +493,7 @@ mod tests {
             burst_rank: 0,
             burst_size: 0,
             keep_rank: f32::NAN,
+            framing: None,
         }
     }
 
@@ -646,6 +647,7 @@ mod bench {
                     burst_rank: 0,
                     burst_size: 0,
                     keep_rank: f32::NAN,
+                    framing: None,
                 },
                 camera: cams[(i % 5) as usize].into(),
                 lens: lenses[(i % 7) as usize].into(),

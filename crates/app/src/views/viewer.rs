@@ -1,4 +1,4 @@
-use super::grid::contain_rect;
+use super::grid::{contain_rect, framed_size, paint_framed, FULL};
 use super::titlebar_pad;
 use crate::app::{PhotoApp, PreviewKey};
 use crate::theme::{bold, font};
@@ -68,6 +68,8 @@ impl PhotoApp {
         if widgets::icon_button(&mut rui, Icon::Info, self.cfg.show_info, &pal, "정보 (⌘I)").clicked() {
             self.cfg.show_info = !self.cfg.show_info;
         }
+        let crop_clicked = !a.is_video()
+            && widgets::icon_button(&mut rui, Icon::Crop, self.crop.is_some(), &pal, "크롭 · 수평 (R)").clicked();
         if !a.is_video()
             && widgets::icon_button(
                 &mut rui,
@@ -130,15 +132,37 @@ impl PhotoApp {
                 }
             }
         }
+        if crop_clicked {
+            if self.crop.is_some() {
+                self.commit_crop(&ctx);
+            } else {
+                self.start_crop(id);
+            }
+        }
+        // The crop tool takes over the image area.
+        if self.crop.as_ref().is_some_and(|c| c.id == id) {
+            let tex = fit_tex.clone().or(thumb.clone());
+            self.crop_view(ui, area, tex.as_ref());
+            if let Some(r) = rate_to {
+                self.rate(&ctx, vec![id], r);
+            }
+            if let Some(f) = flag_to {
+                self.set_flag(&ctx, vec![id], f);
+            }
+            return;
+        }
         let resp = ui.interact(area, Id::unique(("viewer-img", id)), Sense::click_and_drag());
         let p = ui.painter_at(area);
-        let aspect_tex = fit_tex.as_ref().or(thumb.as_ref()).map(|t| t.size());
+        let framing = a.framing.filter(|f| !f.is_identity());
+        let fr = framing.as_ref();
+        let aspect_tex = fit_tex.as_ref().or(thumb.as_ref()).map(|t| framed_size(t.size(), fr));
         // Where the photo is drawn (for the composition overlay).
         let mut shown: Option<Rect> = None;
         match (zoom, &full_tex) {
             (Some(center), Some(tex)) => {
-                // 100%: one texture pixel per physical pixel.
-                let size = vec2(tex.size()[0] as f32, tex.size()[1] as f32) / ppp;
+                // 100%: one texture pixel per physical pixel (of the framed photo).
+                let fs = framed_size(tex.size(), fr);
+                let size = vec2(fs[0] as f32, fs[1] as f32) / ppp;
                 let mut c = center;
                 if resp.dragged() {
                     let d = resp.drag_delta();
@@ -154,7 +178,7 @@ impl PhotoApp {
                 if size.y < area.height() {
                     rect = rect.translate(vec2(0.0, area.center().y - rect.center().y));
                 }
-                p.image(tex.id(), rect, Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), Color32::WHITE);
+                paint_framed(&p, tex, rect, fr, FULL, 0.0);
                 shown = Some(rect);
                 if let Some(v) = &mut self.viewer {
                     v.zoom = Some(c);
@@ -178,7 +202,7 @@ impl PhotoApp {
                 let tex = fit_tex.as_ref().or(thumb.as_ref());
                 if let (Some(tex), Some(sz)) = (tex, aspect_tex) {
                     let r = contain_rect(sz, img_area);
-                    p.image(tex.id(), r, Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), Color32::WHITE);
+                    paint_framed(&p, tex, r, fr, FULL, 0.0);
                     shown = Some(r);
                     if zoom.is_some() {
                         p.text(
@@ -229,7 +253,11 @@ impl PhotoApp {
         if let (true, Some(r), false) = (self.cfg.show_composition, shown, a.is_video()) {
             let p = ui.painter_at(area);
             match self.comp_cache.as_ref().filter(|c| c.0 == id).and_then(|c| c.1.as_ref()) {
-                Some(c) => paint_composition(&p, r, c, self.cfg.learn.off),
+                // Judged as framed.
+                Some(c) => {
+                    let c = framing.map(|f| f.composition(c)).unwrap_or_else(|| c.clone());
+                    paint_composition(&p, r, &c, self.cfg.learn.off)
+                }
                 None => {
                     let msg = if self.analysis_job.is_some() {
                         "구도: 분석 중…"
@@ -369,7 +397,9 @@ impl PhotoApp {
                     let pp = ui.painter_at(strip);
                     pp.rect_filled(r, 4.0, pal.placeholder);
                     if let Some(t) = thumbs.get(a2.id) {
-                        super::grid::paint_tex_rounded(&pp, &t, r, super::grid::cover_uv(t.size(), r.size()), 4.0);
+                        let fr = a2.framing.as_ref();
+                        let uv = super::grid::cover_uv(super::grid::framed_size(t.size(), fr), r.size());
+                        super::grid::paint_framed(&pp, &t, r, fr, uv, 4.0);
                     }
                     if a2.flag < 0 {
                         pp.rect_filled(r, 4.0, Color32::from_black_alpha(150));

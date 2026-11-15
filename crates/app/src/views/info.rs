@@ -420,9 +420,40 @@ impl PhotoApp {
                 }
             });
         });
+        if let Some(f) = a.framing {
+            let mut reset = false;
+            ui.horizontal(|ui| {
+                let what = match (f.angle.abs() >= 0.05, f.w * f.h < 0.999) {
+                    (true, true) => format!("{:.1}° 돌리고 {:.0}% 크기로 자름", f.angle, f.w * f.h * 100.0),
+                    (true, false) => format!("{:.1}° 돌림", f.angle),
+                    _ => format!("{:.0}% 크기로 자름", f.w * f.h * 100.0),
+                };
+                ui.label(egui::RichText::new(format!("크롭 · 수평: {what}")).font(font(11.5)).color(pal.accent));
+                reset = ui
+                    .add(
+                        egui::Button::new(egui::RichText::new("원래대로").font(font(11.0)).color(pal.text2))
+                            .frame(false),
+                    )
+                    .on_hover_text("크롭 · 수평을 없앱니다 (파일은 처음부터 그대로입니다)")
+                    .clicked();
+            });
+            if reset {
+                if let Some(st) = &mut self.lib {
+                    if st.catalog.set_framing(a.id, None).is_ok() {
+                        if let Some(r) = st.index.get_mut(a.id) {
+                            r.framing = None;
+                        }
+                        self.info = None;
+                        self.labels_dirty_at = Some(ctx.input(|i| i.time));
+                    }
+                }
+            }
+        }
         if an.version >= 4 {
             let off = self.cfg.learn.off;
-            for n in photoorg_core::cull::composition::notes(&an.comp) {
+            // As framed (크롭 · 수평), if it is.
+            let comp = a.framing.map(|f| f.composition(&an.comp)).unwrap_or_else(|| an.comp.clone());
+            for n in photoorg_core::cull::composition::notes(&comp) {
                 let ignored = n.rule != 0 && off & n.rule != 0;
                 let dot = match (ignored, n.ok) {
                     (true, _) | (_, None) => pal.text3,

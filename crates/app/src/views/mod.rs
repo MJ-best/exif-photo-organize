@@ -1,7 +1,7 @@
 //! Screens and panels.
 
 mod filters;
-mod grid;
+pub(crate) mod grid;
 mod import;
 mod info;
 mod sidebar;
