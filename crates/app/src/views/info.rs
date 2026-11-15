@@ -367,8 +367,11 @@ impl PhotoApp {
         ];
         let faces = an.main_faces().count();
         if faces > 0 {
+            // As the engine judges it: detail alone (a busy background) does not make the face soft
+            // when the person's edges are as crisp as the background's.
+            let crisp = matches!((an.comp.subject_sharp, an.comp.bg_sharp), (Some(s), Some(b)) if s >= b - 0.1);
             let face_focus = match (an.face_sharp(), an.sharp_peak) {
-                (Some(fs), peak) if peak - fs > 1.2 => "  ·  얼굴이 배경보다 흐림",
+                (Some(fs), peak) if peak - fs > 1.2 && !crisp => "  ·  얼굴이 배경보다 흐림",
                 _ => "",
             };
             rows.push(("얼굴", format!("{faces}명{face_focus}")));
