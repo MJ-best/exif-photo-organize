@@ -789,8 +789,12 @@ impl Composition {
             c.face_x = map(self.face_x, self.ky).0;
             // The face's box, roughly (eyes 40 % down a box about 0.8 as wide as tall).
             let fw = self.face_h * 0.8 / self.aspect;
-            let (fx0, fx1, fy0, fy1) =
-                (self.face_x - fw / 2.0, self.face_x + fw / 2.0, self.ky - 0.4 * self.face_h, self.ky + 0.6 * self.face_h);
+            let (fx0, fx1, fy0, fy1) = (
+                self.face_x - fw / 2.0,
+                self.face_x + fw / 2.0,
+                self.ky - 0.4 * self.face_h,
+                self.ky + 0.6 * self.face_h,
+            );
             let pts = [map(fx0, fy0), map(fx1, fy0), map(fx0, fy1), map(fx1, fy1)];
             let (x0, x1) = pts.iter().fold((f32::MAX, f32::MIN), |a, p| (a.0.min(p.0), a.1.max(p.0)));
             let (y0, y1) = pts.iter().fold((f32::MAX, f32::MIN), |a, p| (a.0.min(p.1), a.1.max(p.1)));

@@ -7,6 +7,7 @@ use eframe::egui::{
     self, epaint, pos2, vec2, Align2, Color32, Id, Mesh, Pos2, Rect, Sense, Stroke, StrokeKind, TextureHandle, Ui,
 };
 use photoorg_core::format;
+use photoorg_core::framing::Framing;
 
 /// UV rectangle that crops a texture to fill `target` (cover) .
 pub fn cover_uv(tex: [usize; 2], target: egui::Vec2) -> Rect {
@@ -44,6 +45,55 @@ pub fn contain_rect(tex: [usize; 2], outer: Rect) -> Rect {
 pub fn paint_tex_rounded(p: &egui::Painter, tex: &TextureHandle, rect: Rect, uv: Rect, radius: f32) {
     p.add(epaint::RectShape::filled(rect, radius, Color32::WHITE).with_texture(tex.id(), uv));
 }
+
+/// Pixel size of a photo's texture once straightened / cropped (크롭 · 수평).
+pub fn framed_size(tex: [usize; 2], framing: Option<&Framing>) -> [usize; 2] {
+    match framing {
+        Some(f) => [((tex[0] as f32 * f.w).round() as usize).max(1), ((tex[1] as f32 * f.h).round() as usize).max(1)],
+        None => tex,
+    }
+}
+
+/// Paint the part `sub` (normalised) of a photo as framed (straightened / cropped) into `rect`.
+/// A turned photo is drawn as a textured quad (square corners).
+pub fn paint_framed(
+    p: &egui::Painter,
+    tex: &TextureHandle,
+    rect: Rect,
+    framing: Option<&Framing>,
+    sub: Rect,
+    radius: f32,
+) {
+    let Some(f) = framing.filter(|f| !f.is_identity()) else {
+        paint_tex_rounded(p, tex, rect, sub, radius);
+        return;
+    };
+    if f.angle.abs() < 0.01 {
+        let uv = Rect::from_min_max(
+            pos2(f.x + sub.min.x * f.w, f.y + sub.min.y * f.h),
+            pos2(f.x + sub.max.x * f.w, f.y + sub.max.y * f.h),
+        );
+        paint_tex_rounded(p, tex, rect, uv, radius);
+        return;
+    }
+    let aspect = tex.size()[0] as f32 / tex.size()[1].max(1) as f32;
+    let mut m = Mesh::with_texture(tex.id());
+    for (pos, (u, v)) in [
+        (rect.left_top(), (sub.min.x, sub.min.y)),
+        (rect.right_top(), (sub.max.x, sub.min.y)),
+        (rect.left_bottom(), (sub.min.x, sub.max.y)),
+        (rect.right_bottom(), (sub.max.x, sub.max.y)),
+    ] {
+        let (x, y) = f.to_photo(aspect, u, v);
+        m.vertices.push(epaint::Vertex { pos, uv: pos2(x, y), color: Color32::WHITE });
+    }
+    m.add_triangle(0, 1, 2);
+    m.add_triangle(1, 3, 2);
+    p.add(m);
+}
+
+/// The whole photo (normalised).
+pub const FULL: Rect = Rect { min: pos2(0.0, 0.0), max: pos2(1.0, 1.0) };
 
 /// Vertical gradient (top colour → bottom colour).
 pub fn gradient(p: &egui::Painter, rect: Rect, top: Color32, bottom: Color32) {
@@ -209,14 +259,17 @@ impl PhotoApp {
                     let resp = ui.interact(rect, Id::unique(("tile", a.id)), Sense::click());
                     p.rect_filled(rect, radius, pal.placeholder);
                     if let Some(tex) = thumbs.get(a.id) {
+                        let fr = a.framing.as_ref();
+                        let size = framed_size(tex.size(), fr);
                         if self.cfg.square_tiles {
-                            paint_tex_rounded(&p, &tex, rect, cover_uv(tex.size(), rect.size()), radius);
+                            paint_framed(&p, &tex, rect, fr, cover_uv(size, rect.size()), radius);
                         } else {
-                            paint_tex_rounded(
+                            paint_framed(
                                 &p,
                                 &tex,
-                                contain_rect(tex.size(), rect.shrink(2.0)),
-                                Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)),
+                                contain_rect(size, rect.shrink(2.0)),
+                                fr,
+                                FULL,
                                 (radius - 2.0).max(0.0),
                             );
                         }
@@ -596,7 +649,8 @@ impl PhotoApp {
                 let a = &st.index.assets[self.filtered[c.key]];
                 p.rect_filled(rect, 12.0, pal.placeholder);
                 if let Some(tex) = thumbs.get(a.id) {
-                    paint_tex_rounded(&p, &tex, rect, cover_uv(tex.size(), rect.size()), 12.0);
+                    let fr = a.framing.as_ref();
+                    paint_framed(&p, &tex, rect, fr, cover_uv(framed_size(tex.size(), fr), rect.size()), 12.0);
                 } else if a.is_video() {
                     widgets::paint_icon(
                         &p,

@@ -210,9 +210,13 @@ impl Framing {
 
 /// How a photo could be framed better, from its composition: turned level (when a clear line is
 /// off), and — with `compose` — cropped so the framing rules hold better (eyes on the thirds,
-/// room above the head and in front of the face), cropping as little as possible. Rules in `off`
+/// room above the head and in front of the face), cropping as little as possible and never more
+/// than [`MAX_COMPOSE_CROP`] of each side's length (a half-length portrait stays one). Rules in `off`
 /// ([`crate::cull::learn::reason`] bits) are not considered. `ratio` keeps a shape (None = the
 /// photo's own).
+/// The smallest crop "자동 구도" makes, as a share of the straightened photo's width and height.
+pub const MAX_COMPOSE_CROP: f32 = 0.8;
+
 pub fn suggest(c: &Composition, ratio: Option<f32>, compose: bool, off: u32) -> Framing {
     use crate::cull::learn::reason;
     let aspect = c.aspect;
@@ -232,7 +236,7 @@ pub fn suggest(c: &Composition, ratio: Option<f32>, compose: bool, off: u32) -> 
     let mut best = (cost(&base), base);
     let start = best.0;
     for k in 0..=8 {
-        let s = 1.0 - k as f32 * 0.05;
+        let s = 1.0 - k as f32 * (1.0 - MAX_COMPOSE_CROP) / 8.0;
         let (w, h) = (base.w * s, base.h * s);
         for iy in 0..=8 {
             for ix in 0..=8 {
@@ -242,8 +246,8 @@ pub fn suggest(c: &Composition, ratio: Option<f32>, compose: bool, off: u32) -> 
                 if !f.inside(aspect) {
                     continue;
                 }
-                // Cropping costs a little: as little as needed.
-                let v = cost(&f) + 0.8 * (1.0 - s);
+                // Cropping costs: as little as needed.
+                let v = cost(&f) + 2.5 * (1.0 - s);
                 if v < best.0 - 1e-4 {
                     best = (v, f);
                 }
@@ -393,6 +397,7 @@ mod tests {
         let f = suggest(&c, None, true, 0);
         let after = composition::judge(&f.composition(&c));
         assert!(f.w < 1.0, "cropped: {f:?}");
+        assert!(f.w >= MAX_COMPOSE_CROP - 1e-3 && f.h >= MAX_COMPOSE_CROP - 1e-3, "not too much: {f:?}");
         let score = |j: &composition::Judgement| j.thirds + j.headroom + j.lead_room;
         assert!(score(&after) < score(&before) - 0.3, "before {before:?} after {after:?}");
         // With the thirds rule off, thirds do not drive the crop.

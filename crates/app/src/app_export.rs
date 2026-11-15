@@ -249,6 +249,20 @@ impl PhotoApp {
                 ExportMode::Smaller => "공유 · 메신저 · 웹용으로 크기와 용량을 줄인 JPEG를 새로 만듭니다".to_string(),
             };
             ui.label(egui::RichText::new(hint).font(font(11.5)).color(pal.text2));
+            // Straightened / cropped photos among them (크롭 · 수평).
+            let framed = self.lib.as_ref().map_or(0, |st| {
+                self.export_dialog
+                    .as_ref()
+                    .map_or(0, |d| d.ids.iter().filter(|id| st.index.get(**id).is_some_and(|a| a.framing.is_some())).count())
+            });
+            if framed > 0 {
+                let t = if mode == ExportMode::Originals {
+                    format!("크롭 · 수평을 맞춘 {framed}장은 원본 그대로 나갑니다 (JPEG만 · 작게 에서 적용)")
+                } else {
+                    format!("크롭 · 수평을 맞춘 {framed}장은 그 모양으로 만듭니다")
+                };
+                ui.label(egui::RichText::new(t).font(font(11.5)).color(pal.accent));
+            }
 
             if mode == ExportMode::Smaller {
                 ui.add_space(6.0);
