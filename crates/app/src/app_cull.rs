@@ -298,6 +298,7 @@ impl PhotoApp {
             if let Some(a) = st.index.get_mut(s.id) {
                 a.b_prob = s.b_prob;
                 a.reasons = s.reasons;
+                a.strengths = s.strengths;
                 a.burst = s.burst;
                 a.burst_rank = s.burst_rank;
                 a.burst_size = s.burst_size;
@@ -311,6 +312,7 @@ impl PhotoApp {
         self.maybe_measure_accuracy(judged.0, judged.1);
         self.facets = None;
         self.info = None;
+        self.comp_cache = None;
         if self.viewer.is_some() {
             self.refilter_needed = true;
         } else {

@@ -3,7 +3,9 @@ use super::titlebar_pad;
 use crate::app::{PhotoApp, PreviewKey};
 use crate::theme::{bold, font};
 use crate::widgets::{self, Icon};
-use eframe::egui::{self, pos2, vec2, Align2, Color32, Id, Rect, Sense, Stroke, StrokeKind, Ui, UiBuilder};
+use eframe::egui::{self, pos2, vec2, Align2, Color32, Id, Pos2, Rect, Sense, Stroke, StrokeKind, Ui, UiBuilder};
+use photoorg_core::cull::composition::{self, Composition};
+use photoorg_core::cull::learn::reason;
 use photoorg_core::format;
 
 const FILMSTRIP_H: f32 = 70.0;
@@ -13,14 +15,17 @@ impl PhotoApp {
         let pal = self.pal;
         let ctx = ui.ctx().clone();
         let Some(v) = &self.viewer else { return };
-        let id = v.id;
+        let (id, vzoom) = (v.id, v.zoom);
+        if self.cfg.show_composition {
+            self.composition(id);
+        }
         let Some(st) = &self.lib else { return };
         let Some(a) = st.index.get(id).cloned() else {
             self.viewer = None;
             return;
         };
         // Videos are shown fitted; the zoom stays for the next photo.
-        let zoom = if a.is_video() { None } else { v.zoom };
+        let zoom = if a.is_video() { None } else { vzoom };
         let pos = self.filtered_pos.get(&id).copied();
         let full = ui.available_rect_before_wrap();
         ui.painter().rect_filled(full, 0.0, pal.viewer_bg);
@@ -62,6 +67,18 @@ impl PhotoApp {
         rui.spacing_mut().item_spacing.x = 8.0;
         if widgets::icon_button(&mut rui, Icon::Info, self.cfg.show_info, &pal, "정보 (⌘I)").clicked() {
             self.cfg.show_info = !self.cfg.show_info;
+        }
+        if !a.is_video()
+            && widgets::icon_button(
+                &mut rui,
+                Icon::Thirds,
+                self.cfg.show_composition,
+                &pal,
+                "구도 보기 (G) — 3분할 · 피사체 · 헤드룸 · 시선 · 머리 뒤 선 · 수평",
+            )
+            .clicked()
+        {
+            self.cfg.show_composition = !self.cfg.show_composition;
         }
         let zr = widgets::icon_button(&mut rui, Icon::Search, zoom.is_some(), &pal, "100% 확대 (Z · 스페이스 두 번)");
         if zr.clicked() {
@@ -116,6 +133,8 @@ impl PhotoApp {
         let resp = ui.interact(area, Id::unique(("viewer-img", id)), Sense::click_and_drag());
         let p = ui.painter_at(area);
         let aspect_tex = fit_tex.as_ref().or(thumb.as_ref()).map(|t| t.size());
+        // Where the photo is drawn (for the composition overlay).
+        let mut shown: Option<Rect> = None;
         match (zoom, &full_tex) {
             (Some(center), Some(tex)) => {
                 // 100%: one texture pixel per physical pixel.
@@ -136,6 +155,7 @@ impl PhotoApp {
                     rect = rect.translate(vec2(0.0, area.center().y - rect.center().y));
                 }
                 p.image(tex.id(), rect, Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), Color32::WHITE);
+                shown = Some(rect);
                 if let Some(v) = &mut self.viewer {
                     v.zoom = Some(c);
                 }
@@ -159,6 +179,7 @@ impl PhotoApp {
                 if let (Some(tex), Some(sz)) = (tex, aspect_tex) {
                     let r = contain_rect(sz, img_area);
                     p.image(tex.id(), r, Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), Color32::WHITE);
+                    shown = Some(r);
                     if zoom.is_some() {
                         p.text(
                             area.center(),
@@ -205,6 +226,28 @@ impl PhotoApp {
             self.close_viewer();
             return;
         }
+        if let (true, Some(r), false) = (self.cfg.show_composition, shown, a.is_video()) {
+            let p = ui.painter_at(area);
+            match self.comp_cache.as_ref().filter(|c| c.0 == id).and_then(|c| c.1.as_ref()) {
+                Some(c) => paint_composition(&p, r, c, self.cfg.learn.off),
+                None => {
+                    let msg = if self.analysis_job.is_some() {
+                        "구도: 분석 중…"
+                    } else {
+                        "구도: 아직 분석되지 않은 사진"
+                    };
+                    widgets::badge(
+                        &p,
+                        area.left_bottom() + vec2(14.0, -12.0),
+                        Align2::LEFT_BOTTOM,
+                        msg,
+                        11.0,
+                        Color32::from_black_alpha(150),
+                        Color32::WHITE,
+                    );
+                }
+            }
+        }
         // Pick / reject / B-cut candidate status.
         let status = if a.flag < 0 {
             Some((Icon::Reject, "거절 (B컷)".to_string(), pal.danger))
@@ -220,6 +263,14 @@ impl PhotoApp {
                 t.push_str(&why.join(", "));
             }
             Some((Icon::Suspect, t, pal.warning))
+        } else if self.cfg.cull_badges && photoorg_core::filter::CullFilter::Keepers(self.cfg.keep_pct).matches(&a) {
+            let good = composition::strength::labels(a.strengths);
+            let mut t = "A컷 후보".to_string();
+            if !good.is_empty() {
+                t.push_str(" · ");
+                t.push_str(&good.join(", "));
+            }
+            Some((Icon::Keeper, t, pal.success))
         } else {
             None
         };
@@ -358,5 +409,101 @@ impl PhotoApp {
             }
             ctx.data_mut(|d| d.insert_temp(acc_id, acc));
         }
+    }
+}
+
+/// The composition check drawn over the photo shown in `r`: thirds, the subject and the point the
+/// composition hangs on, headroom, where the face looks, background lines merging with the head
+/// and the strongest straight line. Rules turned off (`off`, [`reason`] bits) are not drawn.
+fn paint_composition(p: &egui::Painter, r: Rect, c: &Composition, off: u32) {
+    use composition::subject;
+    let j = composition::judge(c);
+    let at = |x: f32, y: f32| pos2(r.left() + x * r.width(), r.top() + y * r.height());
+    let bad = Color32::from_rgb(255, 128, 72);
+    let good = Color32::from_rgb(110, 225, 140);
+    let soft = Color32::from_white_alpha(150);
+    let verdict = |v: f32| if v >= 0.5 { bad } else { good };
+    let line = |a: Pos2, b: Pos2, col: Color32, w: f32| {
+        p.line_segment([a, b], Stroke::new(w + 2.0, Color32::from_black_alpha(80)));
+        p.line_segment([a, b], Stroke::new(w, col));
+    };
+    let tag = |pos: Pos2, align: Align2, text: &str, col: Color32| {
+        widgets::badge(p, pos, align, text, 10.5, Color32::from_black_alpha(165), col);
+    };
+    let on = |rule: u32| off & rule == 0;
+
+    if on(reason::THIRDS) {
+        for v in [1.0 / 3.0, 2.0 / 3.0] {
+            line(at(v, 0.0), at(v, 1.0), Color32::from_white_alpha(90), 1.0);
+            line(at(0.0, v), at(1.0, v), Color32::from_white_alpha(90), 1.0);
+        }
+    }
+    if c.subject != subject::NONE {
+        let b = Rect::from_min_max(at(c.bx, c.by), at(c.bx + c.bw, c.by + c.bh));
+        p.rect_stroke(b, 3.0, Stroke::new(1.5, soft), StrokeKind::Middle);
+        let k = at(c.kx, c.ky);
+        let col = if on(reason::THIRDS) { verdict(j.thirds) } else { soft };
+        p.circle_stroke(k, 8.0, Stroke::new(3.5, Color32::from_black_alpha(80)));
+        p.circle_stroke(k, 8.0, Stroke::new(2.0, col));
+        line(k - vec2(13.0, 0.0), k + vec2(13.0, 0.0), col, 1.5);
+        line(k - vec2(0.0, 13.0), k + vec2(0.0, 13.0), col, 1.5);
+    }
+    if c.is_portrait() {
+        if let (true, Some(ht)) = (on(reason::HEADROOM), c.head_top) {
+            let col = verdict(j.headroom);
+            let x = c.face_x;
+            line(at(x - 0.07, ht), at(x + 0.07, ht), col, 2.0);
+            if ht > 0.01 {
+                line(at(x, 0.0), at(x, ht), col, 1.5);
+            }
+            let text = if c.face_h >= 0.3 {
+                format!("클로즈업 · 눈높이 {:.0}%", c.ky * 100.0)
+            } else {
+                format!("헤드룸 {:.0}%", ht * 100.0)
+            };
+            tag(at(x + 0.075, ht), Align2::LEFT_CENTER, &text, col);
+        }
+        if let (true, Some(front)) = (on(reason::LEAD_ROOM), c.front_room()) {
+            let col = verdict(j.lead_room);
+            let k = at(c.kx, c.ky);
+            let dir = c.facing.signum();
+            let end = k + vec2(dir * r.width() * 0.12, 0.0);
+            line(k + vec2(dir * 10.0, 0.0), end, col, 2.5);
+            line(end, end + vec2(-dir * 9.0, -6.0), col, 2.5);
+            line(end, end + vec2(-dir * 9.0, 6.0), col, 2.5);
+            tag(
+                end + vec2(dir * 6.0, 0.0),
+                if dir > 0.0 { Align2::LEFT_CENTER } else { Align2::RIGHT_CENTER },
+                &format!("시선 앞 {:.0}%", front * 100.0),
+                col,
+            );
+        }
+        if on(reason::MERGER) && j.merger >= 0.5 {
+            if c.pole >= 0.5 && c.pole >= c.neck_line {
+                let top = c.head_top.unwrap_or(c.ky);
+                line(at(c.pole_x, (top - 0.35).max(0.0)), at(c.pole_x, top), bad, 3.0);
+                tag(at(c.pole_x, (top - 0.35).max(0.0)), Align2::CENTER_BOTTOM, "머리 위로 솟은 선", bad);
+            } else {
+                line(at(0.0, c.neck_y), at(1.0, c.neck_y), bad, 2.5);
+                tag(at(0.02, c.neck_y), Align2::LEFT_BOTTOM, "머리 · 목을 가로지르는 선", bad);
+            }
+        }
+    }
+    if on(reason::TILT) && c.tilt_conf >= 0.3 && c.tilt.abs() < 9.5 && (j.tilt > 0.0 || c.tilt.abs() < 0.4) {
+        let col = verdict(j.tilt);
+        let t = c.tilt.to_radians().tan();
+        let (a, b) = if c.tilt_vertical {
+            (at(c.tilt_at + 0.5 * t / c.aspect, 0.0), at(c.tilt_at - 0.5 * t / c.aspect, 1.0))
+        } else {
+            (at(0.0, c.tilt_at - 0.5 * t * c.aspect), at(1.0, c.tilt_at + 0.5 * t * c.aspect))
+        };
+        line(a, b, col, 1.5);
+        let kind = if c.tilt_vertical { "수직" } else { "수평" };
+        let text = if c.tilt.abs() < 0.4 {
+            format!("{kind} 맞음")
+        } else {
+            format!("{kind} {:.1}° 기울어짐", c.tilt.abs())
+        };
+        tag(if c.tilt_vertical { b - vec2(0.0, 30.0) } else { b - vec2(8.0, 0.0) }, Align2::RIGHT_BOTTOM, &text, col);
     }
 }

@@ -6,15 +6,17 @@
 //! (see `LICENSE` in this crate).
 //!
 //! Pipeline per photo: decode the embedded preview at [`ANALYSIS_EDGE`] px → classical
-//! measurements ([`metrics`]) → face detection + eye state ([`vision`], [`eyes`]) → scene
-//! ([`scene`]). Library-wide: percentiles, burst grouping, model training and scoring
-//! ([`learn`]).
+//! measurements ([`metrics`]) → face detection + eye state ([`vision`], [`eyes`]) → person and
+//! background ([`segment`]) → framing ([`composition`]) → scene ([`scene`]). Library-wide:
+//! percentiles, burst grouping, model training and scoring ([`learn`]).
 
+pub mod composition;
 pub mod eval;
 pub mod eyes;
 pub mod learn;
 pub mod metrics;
 pub mod scene;
+pub mod segment;
 pub mod taste;
 pub mod vision;
 
@@ -25,8 +27,8 @@ pub use learn::{LearnSettings, Report, Score};
 pub use scene::Scene;
 
 /// Bump when the analysis changes so old results are recomputed.
-/// 3: taste embedding ([`taste`]).
-pub const ANALYSIS_VERSION: u32 = 3;
+/// 3: taste embedding ([`taste`]). 4: composition ([`composition`]).
+pub const ANALYSIS_VERSION: u32 = 4;
 /// Long edge of the image the analysis runs on.
 pub const ANALYSIS_EDGE: u32 = 1600;
 
@@ -65,6 +67,10 @@ pub struct Analysis {
     /// for analyses made before version 3 or without the networks).
     #[serde(default)]
     pub embed: Vec<f32>,
+    /// Framing: subject, thirds, headroom, lead room, background lines, tilt, focus on the subject
+    /// ([`composition::measure`]; default for analyses made before version 4).
+    #[serde(default)]
+    pub comp: composition::Composition,
 }
 
 impl Analysis {
@@ -110,6 +116,7 @@ pub fn analyze_image(img: &RgbImage) -> Analysis {
         nets: true,
         ..Default::default()
     };
+    let mut detected = Vec::new();
     match vision::detect_faces(img, 0.7) {
         Ok(faces) => {
             for f in faces {
@@ -141,6 +148,7 @@ pub fn analyze_image(img: &RgbImage) -> Analysis {
                     sharp: (1.0 + st.lap_var).ln(),
                     eyes,
                 });
+                detected.push(f);
             }
         }
         Err(e) => {
@@ -164,6 +172,16 @@ pub fn analyze_image(img: &RgbImage) -> Analysis {
         idx.sort_by(|x, y| y.1.partial_cmp(&x.1).unwrap_or(std::cmp::Ordering::Equal));
         a.classes = idx.iter().take(3).map(|(i, v)| (*i as u16, *v)).collect();
     }
+    // The person (or people) apart from the background, and the framing.
+    let person = match segment::person(img) {
+        Ok(m) => Some(m),
+        Err(e) => {
+            log::warn!("segmentation: {e:#}");
+            a.nets = false;
+            None
+        }
+    };
+    a.comp = composition::measure(&gray, &detected, person.as_ref());
     let big_faces = a.faces.iter().filter(|f| f.w * f.h >= 0.002).count();
     let (scene, conf) = scene::decide(a.face_area(), big_faces, probs.as_deref());
     a.scene = scene;

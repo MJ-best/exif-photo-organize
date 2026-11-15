@@ -71,6 +71,8 @@ pub struct Config {
     pub keep_pct: u8,
     /// Show B-cut badges on thumbnails.
     pub cull_badges: bool,
+    /// Viewer: draw the composition check over the photo (thirds, subject, headroom, …).
+    pub show_composition: bool,
     /// Which ratings count as A / B labels for learning.
     pub learn: photoorg_core::cull::LearnSettings,
     /// Export dialog: last format, "작게" long edge (0 = keep the size) and JPEG quality,
@@ -109,6 +111,7 @@ impl Default for Config {
             cull_threshold: 60,
             keep_pct: 15,
             cull_badges: true,
+            show_composition: false,
             learn: Default::default(),
             export_mode: Default::default(),
             export_edge: 2048,

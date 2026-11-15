@@ -287,6 +287,7 @@ mod tests {
                     dhash: (i as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15),
                     embed,
                     gone: false,
+                    comp: Default::default(),
                 }
             })
             .collect();
@@ -349,6 +350,7 @@ mod tests {
                     dhash: (rnd() * u64::MAX as f64) as u64,
                     embed: Vec::new(),
                     gone: false,
+                    comp: Default::default(),
                 }
             })
             .collect();

@@ -154,5 +154,5 @@ and keeps that permission with security-scoped bookmarks. When an SD card is ins
 the user to choose it once.
 
 All analysis runs on the Mac with neural networks bundled in the app (YuNet face detection, MIT;
-MobileNetV2, Apache-2.0). The app makes no network connections and collects no data.
+MobileNetV2 and PP-HumanSeg person segmentation, Apache-2.0). The app makes no network connections and collects no data.
 ```

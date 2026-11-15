@@ -172,6 +172,7 @@ fn reasons_and_views_follow_the_threshold() {
         scene: 0,
         b_prob: 0.7,
         reasons: reason::BLUR | reason::EYES,
+        strengths: 0,
         burst: 0,
         burst_rank: 0,
         burst_size: 0,

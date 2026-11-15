@@ -413,6 +413,7 @@ impl PhotoApp {
                     ("Space 두 번", "사진 한가운데 100% 확대 / 전체 보기"),
                     ("← → ↑ ↓", "이동 (Shift: 범위 선택)"),
                     ("Z", "100% 확대 (사진 보기) — 다음 사진에서도 유지"),
+                    ("G", "구도 보기 — 3분할 · 헤드룸 · 시선 · 머리 뒤 선 · 수평"),
                     ("⌘/Ctrl + 1·2·3·4", "연 · 월 · 일 · 모든 사진"),
                     ("⌘/Ctrl + I", "정보 패널"),
                     ("⌘/Ctrl + F", "검색"),
@@ -446,8 +447,9 @@ impl PhotoApp {
         ui.label(egui::RichText::new("셀렉 도우미 (B컷 찾기)").font(bold(13.0)).color(pal.text2));
         ui.label(
             egui::RichText::new(
-                "초점·흔들림·눈 감음·노출·연사를 분석해 B컷 후보를 표시하고, 내가 고른 픽(P)·거절(X)·별점에서 \
-                 장면(인물/풍경/정물…)별 기준을 학습합니다. 사진은 절대 지우지 않습니다.",
+                "초점·흔들림·눈 감음·노출·연사와 구도(3분할·헤드룸·시선 앞 공간·머리 뒤 선·수평)를 분석해 B컷 \
+                 후보를 표시하고, 내가 고른 픽(P)·거절(X)·별점에서 장면(인물/풍경/정물…)별 기준과 내가 즐겨 쓰는 \
+                 구도를 학습합니다. 사진은 절대 지우지 않습니다.",
             )
             .font(font(11.5))
             .color(pal.text3),
@@ -482,14 +484,72 @@ impl PhotoApp {
                 self.cfg.learn.a_min_rating = v;
             }
         });
-        if self.cfg.learn != before {
-            self.labels_dirty_at = Some(ctx.input(|i| i.time) - 10.0);
-        }
         ui.label(
             egui::RichText::new("픽(P)은 항상 A컷, 거절(X)은 항상 B컷으로 학습합니다.")
                 .font(font(11.0))
                 .color(pal.text3),
         );
+        // Which rules count: a rule turned off is not measured as far as the models know, is never
+        // a reason, and is not learned either.
+        ui.add_space(6.0);
+        ui.label(egui::RichText::new("B컷으로 볼 기준").font(font(12.5)));
+        ui.label(
+            egui::RichText::new(
+                "끈 기준은 B컷 판단 · 학습 · 근거 표시에서 모두 빠집니다. 예: 가운데 구도를 즐겨 쓴다면 3분할을 끄세요.",
+            )
+            .font(font(11.0))
+            .color(pal.text3),
+        );
+        use photoorg_core::cull::learn::reason as r;
+        let groups: [(&str, &[(u32, &str)]); 3] = [
+            (
+                "초점 · 노출",
+                &[
+                    (r::BLUR, "초점 흐림"),
+                    (r::SHAKE, "흔들림"),
+                    (r::FACE_BLUR, "얼굴 초점 빗나감"),
+                    (r::FOCUS_BG, "초점이 배경에"),
+                    (r::EYES, "눈 감음"),
+                    (r::OVER, "노출 과다"),
+                    (r::UNDER, "노출 부족"),
+                    (r::NOISE, "고감도 노이즈"),
+                    (r::BURST, "연사 중 덜 선명"),
+                ],
+            ),
+            (
+                "구도 · 프레이밍",
+                &[
+                    (r::THIRDS, "3분할"),
+                    (r::HEADROOM, "헤드룸 (머리 위 여백)"),
+                    (r::LEAD_ROOM, "시선 앞 공간"),
+                    (r::MERGER, "머리 뒤 기둥 · 가로선"),
+                    (r::TILT, "수평 · 수직 기울어짐"),
+                    (r::CUT, "얼굴이 프레임에 잘림"),
+                ],
+            ),
+            ("내 취향", &[(r::MY_COMPOSITION, "내가 자주 쓰는 구도와 다름"), (r::TASTE, "내가 거절한 사진과 비슷")]),
+        ];
+        for (title, rules) in groups {
+            ui.label(egui::RichText::new(title).font(font(11.5)).color(pal.text2));
+            egui::Grid::new(("b-rules", title)).num_columns(2).spacing(vec2(18.0, 2.0)).show(ui, |ui| {
+                for (k, (bit, label)) in rules.iter().enumerate() {
+                    let mut on = self.cfg.learn.off & bit == 0;
+                    if widgets::switch(ui, &mut on, label, &pal).changed() {
+                        if on {
+                            self.cfg.learn.off &= !bit;
+                        } else {
+                            self.cfg.learn.off |= bit;
+                        }
+                    }
+                    if k % 2 == 1 {
+                        ui.end_row();
+                    }
+                }
+            });
+        }
+        if self.cfg.learn != before {
+            self.labels_dirty_at = Some(ctx.input(|i| i.time) - 10.0);
+        }
         // Learning status per scene.
         ui.add_space(6.0);
         if let Some(rep) = &self.cull_report {
