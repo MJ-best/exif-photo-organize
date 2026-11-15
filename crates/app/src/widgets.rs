@@ -46,6 +46,8 @@ pub enum Icon {
     Album,
     /// Theme: a tag.
     Tag,
+    /// Composition guide: a frame divided in thirds.
+    Thirds,
 }
 
 /// Paint an icon centred in `rect` (designed on a 16×16 grid).
@@ -141,6 +143,13 @@ pub fn paint_icon(p: &egui::Painter, rect: Rect, icon: Icon, color: Color32) {
             line(&[(12.0, 4.0), (4.0, 12.0)]);
         }
         Icon::Check => line(&[(3.0, 8.5), (6.5, 12.0), (13.0, 4.5)]),
+        Icon::Thirds => {
+            p.rect_stroke(Rect::from_min_max(at(2.0, 3.0), at(14.0, 13.0)), 1.5 * s, st, egui::StrokeKind::Middle);
+            line(&[(6.0, 3.0), (6.0, 13.0)]);
+            line(&[(10.0, 3.0), (10.0, 13.0)]);
+            line(&[(2.0, 6.33), (14.0, 6.33)]);
+            line(&[(2.0, 9.67), (14.0, 9.67)]);
+        }
         Icon::Plus => {
             line(&[(8.0, 3.0), (8.0, 13.0)]);
             line(&[(3.0, 8.0), (13.0, 8.0)]);

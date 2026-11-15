@@ -233,6 +233,8 @@ pub struct PhotoApp {
     pub space_at: Option<f64>,
     /// Space in the viewer goes back to the grid only once no second press came (this time).
     pub space_close_at: Option<f64>,
+    /// Composition of the photo in the viewer (for the overlay): asset id and what was measured.
+    pub comp_cache: Option<(i64, Option<photoorg_core::cull::composition::Composition>)>,
     pub thumbs: Option<ImageCache<i64>>,
     pub previews: Option<ImageCache<PreviewKey>>,
     pub import: Option<ImportSession>,
@@ -322,6 +324,7 @@ impl PhotoApp {
             viewer: None,
             space_at: None,
             space_close_at: None,
+            comp_cache: None,
             thumbs: None,
             previews: None,
             import: None,
@@ -1248,6 +1251,7 @@ impl PhotoApp {
                     }
                 }
                 Key::Z if self.viewer.is_some() => self.toggle_zoom(),
+                Key::G if !cmd && self.viewer.is_some() => self.cfg.show_composition = !self.cfg.show_composition,
                 Key::ArrowLeft | Key::ArrowRight | Key::ArrowUp | Key::ArrowDown => {
                     if self.viewer.is_some() {
                         match key {
@@ -1296,6 +1300,20 @@ impl PhotoApp {
         if let Some(id) = id {
             self.open_viewer(id);
         }
+    }
+
+    /// The measured composition of a photo (cached for the one in the viewer). None when the photo
+    /// has not been analysed with composition yet.
+    pub fn composition(&mut self, id: i64) -> Option<&photoorg_core::cull::composition::Composition> {
+        if self.comp_cache.as_ref().map(|c| c.0) != Some(id) {
+            let comp = self
+                .lib
+                .as_ref()
+                .and_then(|st| st.catalog.analysis(id).ok().flatten())
+                .and_then(|a| (a.version >= 4).then_some(a.comp));
+            self.comp_cache = Some((id, comp));
+        }
+        self.comp_cache.as_ref().and_then(|c| c.1.as_ref())
     }
 
     /// Fit <-> 100% on the middle of the photo.

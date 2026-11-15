@@ -4,7 +4,7 @@
 |---|---|
 | 앱 (`crates/app`), 핵심 라이브러리 (`crates/core`), 명령줄 도구 (`crates/cli`), 문서 | [MIT](LICENSE) |
 | **셀렉 엔진** (`crates/cull`) — 0.3.0 이후 | [Business Source License 1.1](crates/cull/LICENSE) |
-| 셀렉 엔진에 들어 있는 모델 (`crates/cull/models`) | 각 모델의 라이선스 (YuNet: MIT, MobileNetV2: Apache-2.0) |
+| 셀렉 엔진에 들어 있는 모델 (`crates/cull/models`) | 각 모델의 라이선스 (YuNet: MIT, MobileNetV2 · PP-HumanSeg: Apache-2.0) |
 
 ## 셀렉 엔진 (BUSL 1.1) 요약
 

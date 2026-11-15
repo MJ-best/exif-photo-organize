@@ -645,6 +645,7 @@ fn apply_scores(index: &mut LibraryIndex, scores: &[Score]) {
         if let Some(a) = index.get_mut(s.id) {
             a.b_prob = s.b_prob;
             a.reasons = s.reasons;
+            a.strengths = s.strengths;
             a.burst = s.burst;
             a.burst_rank = s.burst_rank;
             a.burst_size = s.burst_size;

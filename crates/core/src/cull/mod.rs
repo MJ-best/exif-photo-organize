@@ -30,6 +30,7 @@ pub fn analyze_assets(
     let catalog = Mutex::new(lib.catalog()?);
     let count = AtomicUsize::new(0);
     let _ = vision::warm_up();
+    let _ = segment::warm_up();
     ids.par_iter().for_each(|&id| {
         if cancel.load(Ordering::Relaxed) {
             return;

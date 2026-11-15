@@ -324,6 +324,17 @@ impl PhotoApp {
                     }
                 });
             }
+            // What it does well: the A-cut reasons (for photos that are not likely B-cuts).
+            let good = photoorg_core::cull::composition::strength::labels(a.strengths);
+            if !good.is_empty() && a.b_prob < 0.4 {
+                ui.add_space(4.0);
+                ui.horizontal_wrapped(|ui| {
+                    ui.spacing_mut().item_spacing = vec2(4.0, 4.0);
+                    for g in good {
+                        chip(ui, g, pal.success.gamma_multiply(0.25), pal.text);
+                    }
+                });
+            }
         } else {
             ui.label(egui::RichText::new("점수 계산 중…").font(font(11.5)).color(pal.text3));
         }
@@ -391,6 +402,48 @@ impl PhotoApp {
                 ui.end_row();
             }
         });
+        // Composition: each rule, measured, with its verdict (the B-cut reasons come from these).
+        ui.add_space(8.0);
+        ui.horizontal(|ui| {
+            ui.label(egui::RichText::new("구도").font(bold(11.5)).color(pal.text2));
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                let label =
+                    if self.cfg.show_composition { "사진 위 표시 끄기 (G)" } else { "사진 위에 표시 (G)" };
+                if ui
+                    .add(egui::Button::new(egui::RichText::new(label).font(font(11.0)).color(pal.accent)).frame(false))
+                    .clicked()
+                {
+                    self.cfg.show_composition = !self.cfg.show_composition;
+                }
+            });
+        });
+        if an.version >= 4 {
+            let off = self.cfg.learn.off;
+            for n in photoorg_core::cull::composition::notes(&an.comp) {
+                let ignored = n.rule != 0 && off & n.rule != 0;
+                let dot = match (ignored, n.ok) {
+                    (true, _) | (_, None) => pal.text3,
+                    (_, Some(true)) => pal.success,
+                    (_, Some(false)) => pal.warning,
+                };
+                ui.horizontal(|ui| {
+                    let (r, _) = ui.allocate_exact_size(vec2(10.0, 14.0), Sense::hover());
+                    ui.painter().circle_filled(r.center(), 3.5, dot);
+                    let mut text = egui::RichText::new(if ignored { format!("{} (꺼 둠)", n.text) } else { n.text })
+                        .font(font(11.5));
+                    if ignored {
+                        text = text.color(pal.text3);
+                    }
+                    ui.add(egui::Label::new(text).wrap());
+                });
+            }
+        } else {
+            ui.label(
+                egui::RichText::new("이 사진은 구도 분석 전입니다 — 백그라운드 분석이 끝나면 표시됩니다")
+                    .font(font(11.0))
+                    .color(pal.text3),
+            );
+        }
         // Scene (the model learns per scene; the user can correct it).
         ui.add_space(4.0);
         ui.horizontal(|ui| {

@@ -11,11 +11,21 @@
 use super::scene::Scene;
 use serde::{Deserialize, Serialize};
 
-pub const N: usize = 16;
+pub const N: usize = 24;
 /// Index of the taste features ([`taste_features`]): similarity to the photographer's B-cuts,
 /// then to their A-cuts.
 pub const TASTE_B: usize = 14;
 pub const TASTE_A: usize = 15;
+/// Composition rules ([`crate::composition::judge`]), 0..1 each.
+pub const THIRDS: usize = 16;
+pub const HEADROOM: usize = 17;
+pub const LEAD_ROOM: usize = 18;
+pub const MERGER: usize = 19;
+pub const TILT: usize = 20;
+pub const CUT: usize = 21;
+pub const FOCUS_BG: usize = 22;
+/// How far the composition is from the photographer's own A-cuts ([`composition_features`]).
+pub const MY_COMPOSITION: usize = 23;
 
 /// Feature names (for the settings / debug view).
 pub const FEATURE_NAMES: [&str; N] = [
@@ -35,21 +45,38 @@ pub const FEATURE_NAMES: [&str; N] = [
     "전체 선명도(같은 장면 대비)",
     "내 B컷과 닮음",
     "내 A컷과 닮음",
+    "3분할에서 벗어남",
+    "헤드룸",
+    "시선 앞 공간 부족",
+    "머리 뒤 기둥 · 선",
+    "수평 · 수직 기울어짐",
+    "얼굴이 프레임에 잘림",
+    "배경에 초점",
+    "내 구도와 다름",
 ];
 
-/// Reason bits shown to the user.
+/// Reason bits shown to the user. They are also the B-cut rules the photographer can turn off
+/// ([`LearnSettings::off`]).
 pub mod reason {
-    pub const BLUR: u16 = 1;
-    pub const SHAKE: u16 = 2;
-    pub const FACE_BLUR: u16 = 4;
-    pub const EYES: u16 = 8;
-    pub const OVER: u16 = 16;
-    pub const UNDER: u16 = 32;
-    pub const BURST: u16 = 64;
-    pub const NOISE: u16 = 128;
-    pub const TASTE: u16 = 256;
+    pub const BLUR: u32 = 1;
+    pub const SHAKE: u32 = 2;
+    pub const FACE_BLUR: u32 = 4;
+    pub const EYES: u32 = 8;
+    pub const OVER: u32 = 16;
+    pub const UNDER: u32 = 32;
+    pub const BURST: u32 = 64;
+    pub const NOISE: u32 = 128;
+    pub const TASTE: u32 = 256;
+    pub const THIRDS: u32 = 1 << 9;
+    pub const HEADROOM: u32 = 1 << 10;
+    pub const LEAD_ROOM: u32 = 1 << 11;
+    pub const MERGER: u32 = 1 << 12;
+    pub const TILT: u32 = 1 << 13;
+    pub const CUT: u32 = 1 << 14;
+    pub const FOCUS_BG: u32 = 1 << 15;
+    pub const MY_COMPOSITION: u32 = 1 << 16;
 
-    pub const ALL: [(u16, &str); 9] = [
+    pub const ALL: [(u32, &str); 17] = [
         (BLUR, "초점 흐림"),
         (SHAKE, "흔들림"),
         (FACE_BLUR, "얼굴 초점 빗나감"),
@@ -59,14 +86,25 @@ pub mod reason {
         (BURST, "연사 중 덜 선명"),
         (NOISE, "고감도 노이즈"),
         (TASTE, "내가 거절한 사진과 비슷"),
+        (THIRDS, "3분할에서 벗어남"),
+        (HEADROOM, "헤드룸이 어색함"),
+        (LEAD_ROOM, "시선 앞 공간 부족"),
+        (MERGER, "머리 뒤 기둥 · 선"),
+        (TILT, "수평 · 수직 기울어짐"),
+        (CUT, "얼굴이 프레임에 잘림"),
+        (FOCUS_BG, "초점이 배경에"),
+        (MY_COMPOSITION, "내 구도와 다름"),
     ];
 
-    pub fn labels(mask: u16) -> Vec<&'static str> {
+    /// The composition rules (구도), as opposed to focus, exposure and the rest.
+    pub const COMPOSITION: u32 = THIRDS | HEADROOM | LEAD_ROOM | MERGER | TILT | CUT | MY_COMPOSITION;
+
+    pub fn labels(mask: u32) -> Vec<&'static str> {
         ALL.iter().filter(|(b, _)| mask & b != 0).map(|(_, l)| *l).collect()
     }
 }
 
-const FEATURE_REASON: [u16; N] = [
+const FEATURE_REASON: [u32; N] = [
     reason::BLUR,
     reason::BLUR,
     reason::SHAKE,
@@ -82,7 +120,16 @@ const FEATURE_REASON: [u16; N] = [
     0,
     reason::BLUR,
     reason::TASTE,
-    0,
+    // Similarity to the A-cuts is part of the taste rule.
+    reason::TASTE,
+    reason::THIRDS,
+    reason::HEADROOM,
+    reason::LEAD_ROOM,
+    reason::MERGER,
+    reason::TILT,
+    reason::CUT,
+    reason::FOCUS_BG,
+    reason::MY_COMPOSITION,
 ];
 
 pub type Features = [f64; N];
@@ -95,9 +142,18 @@ pub struct Model {
 
 impl Model {
     /// Hand-tuned defaults: a typical good photo scores ~10 %, a clearly blurred one ~90 %.
+    /// One broken framing rule alone does not make a B-cut (a centred portrait can be the
+    /// photographer's style); with a soft focus or another broken rule it does.
     pub fn prior() -> Model {
-        // Taste starts at zero: only the photographer's own decisions give it weight.
-        Model { w: vec![2.5, 3.5, 2.0, 3.5, 3.5, 2.5, 3.0, 3.0, 2.5, 0.5, 0.8, 0.3, 0.0, 0.8, 0.0, 0.0], b: -4.2 }
+        // Taste and "my composition" start at zero: only the photographer's own decisions give
+        // them weight.
+        Model {
+            w: vec![
+                2.5, 3.5, 2.0, 3.5, 3.5, 2.5, 3.0, 3.0, 2.5, 0.5, 0.8, 0.3, 0.0, 0.8, 0.0, 0.0, // quality
+                1.5, 1.8, 1.6, 1.6, 1.6, 2.4, 2.4, 0.0, // composition
+            ],
+            b: -4.2,
+        }
     }
 
     pub fn logit(&self, x: &Features) -> f64 {
@@ -110,12 +166,12 @@ impl Model {
 
     /// Reason bits for features that push the score up noticeably (none for photos that are
     /// unlikely B-cuts anyway — "the least sharp of many good photos" is not a reason).
-    pub fn reasons(&self, x: &Features) -> u16 {
+    pub fn reasons(&self, x: &Features) -> u32 {
         if self.prob(x) < 0.3 {
             return 0;
         }
         let mut m = 0;
-        for i in 0..N {
+        for i in 0..N.min(self.w.len()) {
             if self.w[i] * x[i] >= 1.4 {
                 m |= FEATURE_REASON[i];
             }
@@ -266,6 +322,8 @@ pub struct Item {
     /// The photo itself was deleted; only the photographer's decision and its measurements are
     /// kept, so the learned standard does not forget it. Never part of a burst.
     pub gone: bool,
+    /// Framing ([`crate::composition::measure`]; default = not measured).
+    pub comp: crate::composition::Composition,
 }
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq)]
@@ -274,11 +332,16 @@ pub struct LearnSettings {
     pub one_star_is_b: bool,
     /// Ratings >= this count as A-cut labels (0 disables).
     pub a_min_rating: u8,
+    /// B-cut rules the photographer turned off ([`reason`] bits): the measurements are ignored,
+    /// neither the defaults nor the learned standard use them, and they are never given as a
+    /// reason (nor as an A-cut strength).
+    #[serde(default)]
+    pub off: u32,
 }
 
 impl Default for LearnSettings {
     fn default() -> Self {
-        LearnSettings { one_star_is_b: true, a_min_rating: 3 }
+        LearnSettings { one_star_is_b: true, a_min_rating: 3, off: 0 }
     }
 }
 
@@ -304,7 +367,9 @@ impl LearnSettings {
 pub struct Score {
     pub id: i64,
     pub b_prob: f32,
-    pub reasons: u16,
+    pub reasons: u32,
+    /// What the photo does well ([`crate::composition::strength`] bits), for A-cut candidates.
+    pub strengths: u32,
     /// Asset id of the first frame of the burst (0 = not part of a burst).
     pub burst: i64,
     /// 0 = best frame of its burst.
@@ -454,6 +519,14 @@ pub fn features(items: &[Item]) -> (Vec<Features>, Vec<Score>) {
                 Some(fs) if it.face_area >= 0.004 => ((it.sharp_peak as f64 - fs as f64 - 0.7) / 1.5).clamp(0.0, 1.0),
                 _ => 0.0,
             };
+            // Detail is not focus: a busy background (a flag, foliage) has more of it than a face
+            // even when the face is sharp. When the person's edges are at least as crisp as the
+            // background's, the focus is on the person.
+            if let (Some(s), Some(b)) = (it.comp.subject_sharp, it.comp.bg_sharp) {
+                if s >= b - 0.1 {
+                    x[5] *= 0.3;
+                }
+            }
             x[6] = it.eyes.map(|e| (1.0 - e as f64).clamp(0.0, 1.0)).unwrap_or(0.0);
             x[7] = eyes_rel[i];
             x[8] = burst_rel[i];
@@ -466,10 +539,103 @@ pub fn features(items: &[Item]) -> (Vec<Features>, Vec<Score>) {
             x[11] = if it.iso > 0 { ((it.iso as f64 / 800.0).log2() / 4.0).clamp(0.0, 1.0) } else { 0.0 };
             x[12] = if it.face_area >= 0.004 { 1.0 } else { 0.0 };
             x[13] = 1.0 - global_pct[i];
+            let j = crate::composition::judge(&it.comp);
+            x[THIRDS] = j.thirds as f64;
+            x[HEADROOM] = j.headroom as f64;
+            x[LEAD_ROOM] = j.lead_room as f64;
+            x[MERGER] = j.merger as f64;
+            x[TILT] = j.tilt as f64;
+            x[CUT] = j.cut as f64;
+            x[FOCUS_BG] = j.focus_bg as f64;
             x
         })
         .collect();
     (feats, scores)
+}
+
+/// Same moment: one burst, or one camera within a minute. Such photos look alike because they
+/// show the same scene; choosing among them is what the burst features are for.
+fn same_moment(items: &[Item], scores: &[Score], cam: &[usize], i: usize, j: usize) -> bool {
+    const MOMENT_MS: i64 = 60_000;
+    (scores[i].burst != 0 && scores[i].burst == scores[j].burst)
+        || (cam[i] == cam[j] && (items[i].captured_ms - items[j].captured_ms).abs() <= MOMENT_MS)
+}
+
+/// Camera names as numbers (compared in inner loops).
+fn camera_ids(items: &[Item]) -> Vec<usize> {
+    let mut cams: Vec<&str> = items.iter().map(|it| it.camera.as_str()).collect();
+    cams.sort_unstable();
+    cams.dedup();
+    items.iter().map(|it| cams.binary_search(&it.camera.as_str()).unwrap_or(0)).collect()
+}
+
+/// Standard scores over the photos that have a value (0 = typical), clamped to ±3; 0 for the rest.
+fn standardize(v: Vec<Option<f64>>) -> Vec<f64> {
+    let known: Vec<f64> = v.iter().flatten().copied().collect();
+    if known.is_empty() {
+        return vec![0.0; v.len()];
+    }
+    let m = known.iter().sum::<f64>() / known.len() as f64;
+    let sd = (known.iter().map(|x| (x - m).powi(2)).sum::<f64>() / known.len() as f64).sqrt().max(0.02);
+    v.into_iter().map(|x| x.map_or(0.0, |x| ((x - m) / sd).clamp(-3.0, 3.0))).collect()
+}
+
+/// My compositions (내 구도): photographers come back to a handful of framings — a tight
+/// portrait with the eyes on the upper third, a half-length figure on the left third, a full
+/// figure small in a wide frame. Every A-cut is one example; a photo framed like none of them is
+/// "not how I frame". For each photo: the mean distance of its composition ([`vector`]) to the
+/// five closest A-cuts of the same scene (of any scene while a scene has fewer than
+/// [`MIN_COMPOSITIONS`]), other moments only, as a standard score (positive = farther than usual).
+/// Several framings are several clusters of A-cuts; being close to any of them is enough.
+///
+/// [`vector`]: crate::composition::vector
+///
+/// Returns each photo's mean distance (None without enough A-cuts or without a subject).
+fn composition_features(
+    items: &[Item],
+    labels: &[Option<bool>],
+    scores: &[Score],
+    feats: &mut [Features],
+) -> Vec<Option<f64>> {
+    const K: usize = 5;
+    const MIN_COMPOSITIONS: usize = 8;
+    let n = items.len();
+    let vecs: Vec<Option<[f32; 6]>> = items.iter().map(|it| crate::composition::vector(&it.comp)).collect();
+    let a_cuts: Vec<usize> = (0..n).filter(|&i| labels[i] == Some(false) && vecs[i].is_some()).collect();
+    if a_cuts.len() < MIN_COMPOSITIONS {
+        return vec![None; n];
+    }
+    let mut by_scene: std::collections::HashMap<Scene, Vec<usize>> = Default::default();
+    for &i in &a_cuts {
+        by_scene.entry(items[i].scene).or_default().push(i);
+    }
+    let cam = camera_ids(items);
+    use rayon::prelude::*;
+    let dist: Vec<Option<f64>> = (0..n)
+        .into_par_iter()
+        .map(|i| {
+            let v = vecs[i]?;
+            let pool = by_scene.get(&items[i].scene).filter(|p| p.len() >= MIN_COMPOSITIONS).unwrap_or(&a_cuts);
+            let mut d: Vec<f32> = pool
+                .iter()
+                .filter(|&&j| j != i && !same_moment(items, scores, &cam, i, j))
+                .map(|&j| {
+                    let u = vecs[j].unwrap();
+                    v.iter().zip(&u).map(|(a, b)| (a - b) * (a - b)).sum::<f32>().sqrt()
+                })
+                .collect();
+            if d.is_empty() {
+                return None;
+            }
+            let k = K.min(d.len());
+            d.select_nth_unstable_by(k - 1, |a, b| a.total_cmp(b));
+            Some(d[..k].iter().map(|x| *x as f64).sum::<f64>() / k as f64)
+        })
+        .collect();
+    for (x, z) in feats.iter_mut().zip(standardize(dist.clone())) {
+        x[MY_COMPOSITION] = z;
+    }
+    dist
 }
 
 /// Taste ([`crate::taste`]): for every photo, the mean similarity of the five most similar
@@ -482,7 +648,6 @@ pub fn features(items: &[Item]) -> (Vec<Features>, Vec<Score>) {
 /// a kind, get 0 (no push either way).
 fn taste_features(items: &[Item], labels: &[Option<bool>], scores: &[Score], feats: &mut [Features]) {
     const K: usize = 5;
-    const MOMENT_MS: i64 = 60_000;
     let dim = crate::taste::DIM;
     let n = items.len();
     let embeds: Vec<&[f32]> = items.iter().map(|it| it.embed.as_slice()).collect();
@@ -501,15 +666,8 @@ fn taste_features(items: &[Item], labels: &[Option<bool>], scores: &[Score], fea
     if b_set.idx.is_empty() && a_set.idx.is_empty() {
         return;
     }
-    // Camera names as numbers (compared in the inner loop).
-    let mut cams: Vec<&str> = items.iter().map(|it| it.camera.as_str()).collect();
-    cams.sort_unstable();
-    cams.dedup();
-    let cam: Vec<usize> = items.iter().map(|it| cams.binary_search(&it.camera.as_str()).unwrap_or(0)).collect();
-    let same_moment = |i: usize, j: usize| {
-        (scores[i].burst != 0 && scores[i].burst == scores[j].burst)
-            || (cam[i] == cam[j] && (items[i].captured_ms - items[j].captured_ms).abs() <= MOMENT_MS)
-    };
+    let cam = camera_ids(items);
+    let same_moment = |i: usize, j: usize| same_moment(items, scores, &cam, i, j);
     let nearest = |i: usize, s: &Set| -> Option<f64> {
         let u = unit[i].as_ref()?;
         let mut top = [f32::MIN; K];
@@ -536,17 +694,8 @@ fn taste_features(items: &[Item], labels: &[Option<bool>], scores: &[Score], fea
     use rayon::prelude::*;
     let values: Vec<(Option<f64>, Option<f64>)> =
         (0..n).into_par_iter().map(|i| (nearest(i, &b_set), nearest(i, &a_set))).collect();
-    let standard = |v: Vec<Option<f64>>| -> Vec<f64> {
-        let known: Vec<f64> = v.iter().flatten().copied().collect();
-        if known.is_empty() {
-            return vec![0.0; v.len()];
-        }
-        let m = known.iter().sum::<f64>() / known.len() as f64;
-        let sd = (known.iter().map(|x| (x - m).powi(2)).sum::<f64>() / known.len() as f64).sqrt().max(0.02);
-        v.into_iter().map(|x| x.map_or(0.0, |x| ((x - m) / sd).clamp(-3.0, 3.0))).collect()
-    };
     let (b, a): (Vec<_>, Vec<_>) = values.into_iter().unzip();
-    for (x, (b, a)) in feats.iter_mut().zip(standard(b).into_iter().zip(standard(a))) {
+    for (x, (b, a)) in feats.iter_mut().zip(standardize(b).into_iter().zip(standardize(a))) {
         x[TASTE_B] = b;
         x[TASTE_A] = a;
     }
@@ -582,6 +731,44 @@ pub fn anchor(model: &Model, prior: &Model, open: &[&Features], judged: &[(&Feat
     Model { w: model.w.clone(), b: model.b + (lo + hi) / 2.0 }
 }
 
+/// What a photo does well (A-cut reasons), leaving out the rules turned off.
+fn strengths(it: &Item, x: &Features, s: &Score, comp_dist: Option<f64>, off: u32) -> u32 {
+    use crate::composition::strength;
+    let mut good = crate::composition::judge(&it.comp).good;
+    let rule = [
+        (strength::THIRDS, reason::THIRDS),
+        (strength::HEADROOM, reason::HEADROOM),
+        (strength::LEAD_ROOM, reason::LEAD_ROOM),
+        (strength::LEVEL, reason::TILT),
+        (strength::ISOLATED, reason::FOCUS_BG),
+    ];
+    for (g, r) in rule {
+        if off & r != 0 {
+            good &= !g;
+        }
+    }
+    // The eyes in focus and open: the face as sharp as the sharpest part of the frame.
+    if off & (reason::FACE_BLUR | reason::EYES) == 0
+        && it.face_area >= 0.004
+        && it.face_sharp.is_some_and(|fs| fs >= it.sharp_peak - 0.5 && fs >= 3.5)
+        && it.eyes.is_some_and(|e| e >= 0.6)
+    {
+        good |= strength::EYES_SHARP;
+    }
+    if off & reason::BURST == 0 && s.burst_size >= 2 && s.burst_rank == 0 {
+        good |= strength::BURST_BEST;
+    }
+    if x[TASTE_A] >= 1.0 {
+        good |= strength::LIKE_MY_A;
+    }
+    // Framed (nearly) like several of my A-cuts: the key point within ~5 % of the frame, the
+    // subject about as big.
+    if off & reason::MY_COMPOSITION == 0 && comp_dist.is_some_and(|d| d <= 0.08) {
+        good |= strength::MY_COMPOSITION;
+    }
+    good
+}
+
 /// Trained models: `None` = the library-wide model, `Some(scene)` = a per-scene model.
 pub type Models = Vec<(Option<Scene>, Model)>;
 
@@ -590,6 +777,15 @@ pub fn score(items: &[Item], settings: &LearnSettings) -> (Vec<Score>, Report, M
     let (mut feats, mut scores) = features(items);
     let labels: Vec<Option<bool>> = items.iter().map(|it| settings.label(it.rating, it.flag)).collect();
     taste_features(items, &labels, &scores, &mut feats);
+    let comp_dist = composition_features(items, &labels, &scores, &mut feats);
+    // Rules the photographer turned off are not measured at all, as far as the models know.
+    for x in feats.iter_mut() {
+        for (i, r) in FEATURE_REASON.iter().enumerate() {
+            if settings.off & r != 0 {
+                x[i] = 0.0;
+            }
+        }
+    }
     let prior = Model::prior();
     let (gx, gy): (Vec<Features>, Vec<bool>) =
         feats.iter().zip(&labels).filter_map(|(x, y)| y.map(|y| (*x, y))).unzip();
@@ -660,6 +856,7 @@ pub fn score(items: &[Item], settings: &LearnSettings) -> (Vec<Score>, Report, M
         let m = scene_model.get(&it.scene).unwrap_or(&global);
         scores[i].b_prob = m.prob(&feats[i]) as f32;
         scores[i].reasons = m.reasons(&feats[i]);
+        scores[i].strengths = strengths(it, &feats[i], &scores[i], comp_dist[i], settings.off);
     }
     report.candidates_at_60 =
         scores.iter().zip(items).filter(|(s, it)| s.b_prob >= 0.6 && it.flag == 0 && it.rating == 0).count();
@@ -693,6 +890,7 @@ mod tests {
             dhash: (id as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15),
             embed: Vec::new(),
             gone: false,
+            comp: Default::default(),
         }
     }
 
@@ -845,6 +1043,106 @@ mod tests {
         assert!(n_after * 10 >= left * 6 && n_after <= left * 3 / 2, "before {n_before}, left {left}, after {n_after}");
         // Every probability is finite (the scene model used to diverge).
         assert!(after.iter().all(|s| s.b_prob.is_finite()));
+    }
+
+    /// A portrait framed at `(kx, ky)` with the head top at `head_top`, looking `facing`.
+    fn portrait(id: i64, t: i64, kx: f32, ky: f32, head_top: f32, facing: f32) -> Item {
+        use crate::composition::{subject, Composition};
+        let mut it = item(id, t, 6.2);
+        it.scene = Scene::Portrait;
+        it.face_area = 0.03;
+        it.face_sharp = Some(6.0);
+        it.eyes = Some(0.9);
+        it.comp = Composition {
+            subject: subject::PERSON,
+            people: 1,
+            group: 1,
+            bx: kx - 0.15,
+            by: head_top,
+            bw: 0.3,
+            bh: 1.0 - head_top,
+            area: 0.25,
+            kx,
+            ky,
+            face_h: 0.18,
+            face_x: kx,
+            facing,
+            head_top: Some(head_top),
+            ..Default::default()
+        };
+        it
+    }
+
+    #[test]
+    fn composition_rules_give_reasons_and_can_be_turned_off() {
+        // Well framed portraits, and one with the head cut by the top edge, looking out of the
+        // frame on the right, centred.
+        let mut items: Vec<Item> = (0..40)
+            .map(|i| {
+                let mut it = portrait(i + 1, i * 60_000, 1.0 / 3.0, 0.34, 0.1, 0.8);
+                it.sharp_peak = 6.0 + (i % 5) as f32 * 0.2;
+                it
+            })
+            .collect();
+        let mut odd = portrait(100, 9_000_000, 0.82, 0.12, 0.0, 0.8);
+        odd.sharp_peak = 6.4;
+        items.push(odd);
+        let p = |sc: &[Score], id: i64| *sc.iter().find(|s| s.id == id).unwrap();
+        let typical = |sc: &[Score]| sc.iter().filter(|s| s.id < 100).map(|s| s.b_prob).sum::<f32>() / 40.0;
+        let (sc, _, _) = score(&items, &LearnSettings::default());
+        let bad = p(&sc, 100);
+        let good = p(&sc, 3);
+        assert!(bad.b_prob > 0.6 && typical(&sc) < 0.2, "bad {bad:?} typical {}", typical(&sc));
+        assert!(bad.reasons & reason::HEADROOM != 0 && bad.reasons & reason::LEAD_ROOM != 0, "{bad:?}");
+        use crate::composition::strength;
+        assert!(good.strengths & strength::THIRDS != 0 && good.strengths & strength::LEAD_ROOM != 0, "{good:?}");
+        // This photographer does not care about headroom or lead room.
+        let off = LearnSettings { off: reason::HEADROOM | reason::LEAD_ROOM, ..Default::default() };
+        let (sc, _, _) = score(&items, &off);
+        let bad = p(&sc, 100);
+        assert!(bad.reasons & (reason::HEADROOM | reason::LEAD_ROOM) == 0, "{bad:?}");
+        assert!(bad.b_prob < 0.3, "{bad:?}");
+        assert!(p(&sc, 1).strengths & strength::LEAD_ROOM == 0);
+    }
+
+    #[test]
+    fn learns_my_compositions() {
+        // Two framings this photographer keeps: a tight portrait on the left third and a full
+        // figure in the middle. Frames placed elsewhere they reject — the rules alone would not.
+        let mut items = Vec::new();
+        let mut t = 0;
+        let mut add = |items: &mut Vec<Item>, kx: f32, ky: f32, ht: f32, area: f32, flag: i8| {
+            t += 120_000;
+            let mut it = portrait(items.len() as i64 + 1, t, kx, ky, ht, 0.0);
+            it.comp.area = area;
+            it.comp.face_h = if area > 0.2 { 0.25 } else { 0.07 };
+            it.flag = flag;
+            items.push(it);
+        };
+        for k in 0..30 {
+            let j = (k % 5) as f32 * 0.01;
+            add(&mut items, 0.33 + j, 0.33 + j, 0.08, 0.35, 1);
+            add(&mut items, 0.5 + j, 0.25 + j, 0.12, 0.08, 1);
+            // Rejected: the figure small and pushed into a corner (no rule is broken badly).
+            add(&mut items, 0.8 + j, 0.62 + j, 0.45, 0.04, -1);
+        }
+        let first_new = items.len() as i64 + 1;
+        add(&mut items, 0.34, 0.34, 0.08, 0.35, 0); // like the first framing
+        add(&mut items, 0.51, 0.26, 0.12, 0.08, 0); // like the second
+        add(&mut items, 0.81, 0.63, 0.45, 0.04, 0); // like the rejected ones
+        let (sc, report, _) = score(&items, &LearnSettings::default());
+        assert_eq!(report.scenes[0].model, "전체 학습");
+        let p = |id: i64| *sc.iter().find(|s| s.id == id).unwrap();
+        let (a, b, odd) = (p(first_new), p(first_new + 1), p(first_new + 2));
+        assert!(odd.b_prob > a.b_prob + 0.3 && odd.b_prob > b.b_prob + 0.3, "{a:?} {b:?} {odd:?}");
+        assert!(odd.reasons & reason::MY_COMPOSITION != 0, "{odd:?}");
+        use crate::composition::strength;
+        assert!(a.strengths & strength::MY_COMPOSITION != 0 && b.strengths & strength::MY_COMPOSITION != 0);
+        // Turned off, the framing is not learned at all.
+        let off = LearnSettings { off: reason::MY_COMPOSITION, ..Default::default() };
+        let (sc, _, _) = score(&items, &off);
+        let odd = *sc.iter().find(|s| s.id == first_new + 2).unwrap();
+        assert!(odd.reasons & reason::MY_COMPOSITION == 0);
     }
 
     /// `cargo test --release -p photoorg-core bench_score -- --ignored --nocapture`

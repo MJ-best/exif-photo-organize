@@ -9,7 +9,7 @@ use rusqlite::{params, Connection, OptionalExtension};
 use std::collections::{BTreeMap, HashMap};
 use std::path::Path;
 
-const SCHEMA_VERSION: i64 = 4;
+const SCHEMA_VERSION: i64 = 5;
 
 const SCHEMA: &str = r#"
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);
@@ -82,6 +82,7 @@ CREATE TABLE IF NOT EXISTS analysis (
     data TEXT NOT NULL,
     b_prob REAL,
     reasons INTEGER NOT NULL DEFAULT 0,
+    strengths INTEGER NOT NULL DEFAULT 0,
     burst INTEGER NOT NULL DEFAULT 0,
     burst_rank INTEGER NOT NULL DEFAULT 0,
     burst_size INTEGER NOT NULL DEFAULT 0
@@ -235,7 +236,9 @@ pub struct AssetRecord {
     /// Probability of being a B-cut (NaN = not analysed yet).
     pub b_prob: f32,
     /// Reason bits, see [`crate::cull::learn::reason`].
-    pub reasons: u16,
+    pub reasons: u32,
+    /// What it does well (A-cut reasons), see [`crate::cull::composition::strength`].
+    pub strengths: u32,
     /// Burst id (asset id of its first frame), 0 when not part of a burst.
     pub burst: i64,
     pub burst_rank: u16,
@@ -480,6 +483,14 @@ impl Catalog {
             .collect::<rusqlite::Result<_>>()?;
         if !file_cols.iter().any(|c| c == "home_rel") {
             conn.execute_batch("ALTER TABLE files ADD COLUMN home_rel TEXT;")?;
+        }
+        // v5: what an A-cut candidate does well.
+        let an_cols: Vec<String> = conn
+            .prepare("PRAGMA table_info(analysis)")?
+            .query_map([], |r| r.get::<_, String>(1))?
+            .collect::<rusqlite::Result<_>>()?;
+        if !an_cols.iter().any(|c| c == "strengths") {
+            conn.execute_batch("ALTER TABLE analysis ADD COLUMN strengths INTEGER NOT NULL DEFAULT 0;")?;
         }
         conn.execute("UPDATE meta SET value=?1 WHERE key='schema_version'", [SCHEMA_VERSION.to_string()])?;
         let version: Option<String> =
@@ -749,6 +760,7 @@ impl Catalog {
                 dhash: a.dhash,
                 embed: a.embed,
                 gone,
+                comp: a.comp,
             });
         }
         Ok(items)
@@ -758,10 +770,19 @@ impl Catalog {
         let tx = self.conn.transaction()?;
         {
             let mut stmt = tx.prepare_cached(
-                "UPDATE analysis SET b_prob=?2, reasons=?3, burst=?4, burst_rank=?5, burst_size=?6 WHERE asset_id=?1",
+                "UPDATE analysis SET b_prob=?2, reasons=?3, burst=?4, burst_rank=?5, burst_size=?6, strengths=?7
+                 WHERE asset_id=?1",
             )?;
             for s in scores {
-                stmt.execute(params![s.id, s.b_prob as f64, s.reasons, s.burst, s.burst_rank, s.burst_size])?;
+                stmt.execute(params![
+                    s.id,
+                    s.b_prob as f64,
+                    s.reasons,
+                    s.burst,
+                    s.burst_rank,
+                    s.burst_size,
+                    s.strengths
+                ])?;
             }
         }
         tx.commit()?;
@@ -1079,10 +1100,11 @@ impl Catalog {
             flag: r.get::<_, i64>(20)? as i8,
             scene: r.get::<_, i64>(21)? as u8,
             b_prob: opt_f32(r.get(22)?),
-            reasons: r.get::<_, Option<i64>>(23)?.unwrap_or(0) as u16,
+            reasons: r.get::<_, Option<i64>>(23)?.unwrap_or(0) as u32,
             burst: r.get::<_, Option<i64>>(24)?.unwrap_or(0),
             burst_rank: r.get::<_, Option<i64>>(25)?.unwrap_or(0) as u16,
             burst_size: r.get::<_, Option<i64>>(26)?.unwrap_or(0) as u16,
+            strengths: r.get::<_, Option<i64>>(27)?.unwrap_or(0) as u32,
             keep_rank: f32::NAN,
         };
         Ok((
@@ -1095,7 +1117,7 @@ impl Catalog {
     const ROW_SQL: &'static str = "SELECT a.id, a.captured_ms, a.camera, a.lens, a.focal_length, a.focal_35mm, a.aperture,
         a.exposure_time, a.iso, a.exposure_bias, a.width, a.height, a.orientation, a.rating, a.formats, a.flash, a.gps_lat,
         a.date_source, a.import_id, a.name, a.flag, COALESCE(a.scene_user, an.scene, 0), an.b_prob, an.reasons, an.burst,
-        an.burst_rank, an.burst_size
+        an.burst_rank, an.burst_size, an.strengths
         FROM assets a LEFT JOIN analysis an ON an.asset_id = a.id";
 
     /// Load the whole library into memory.
