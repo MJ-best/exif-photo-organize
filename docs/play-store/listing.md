@@ -38,21 +38,23 @@ LOUPE 는 사진가를 위한 셀렉 앱입니다. 카드의 사진을 날짜별
 · 복사하면서 체크섬으로 확인하고, 이미 가져온 사진은 건너뜀
 · 카드는 읽기만 하고 아무것도 지우지 않음
 
-■ 셀렉
+■ 셀렉과 수평 · 구도 맞추기
 · 사진을 크게 보고 위로 밀면 픽, 아래로 밀면 거절
 · 별점 1–5, 여러 장을 골라 한 번에
-· 키보드를 붙인 태블릿에서는 데스크톱과 같은 단축키 (1–5, P, X, U)
+· 키보드를 붙인 태블릿에서는 데스크톱과 같은 단축키 (1–5, P, X, U, Z, 스페이스 두 번으로 100% 확대 · 확대한 채로 다음 사진 비교, R 자동 수평)
+· 자동 수평 · 자동 구도: 기울어진 수평을 맞추고 구도가 나아지도록 다듬음 (원본 파일은 건드리지 않음)
 · RAW 를 현상하지 않고 내장 미리보기로 바로 — 큰 카드도 가볍게
 
 ■ 셀렉 도우미
-· B컷 후보: 초점 흐림 · 흔들림 · 얼굴 초점 빗나감 · 눈 감음 의심 · 노출 과다/부족 · 연사 중 덜 선명
-· A컷 후보: 가장 잘 나온 사진, 연사마다 베스트 한 장
+· B컷 후보: 초점 흐림 · 흔들림 · 얼굴 초점 빗나감 · 초점이 배경에 · 눈 감음 의심 · 노출 과다/부족 · 연사 중 덜 선명 · 구도(3분할 · 헤드룸 · 시선 앞 공간 · 머리 뒤 기둥/가로선 · 기울어짐 · 얼굴 잘림)
+· A컷 후보: 가장 잘 나온 사진과 그 근거(초점 또렷 · 아웃포커스 · 구도 · 수평 안정), 연사마다 베스트 한 장
+· B컷 기준 켜고 끄기: 가운데 구도를 즐겨 쓴다면 3분할 기준을 끄는 등 내 스타일에 맞게 조정
 · 저절로 지우지 않습니다. 먼저 보여 줄 뿐
 · 다 고른 뒤 거절한 사진은 한 번에 휴지통으로 — 학습 기록은 남겨 둡니다
 
 ■ 고를수록 배우는 기준
 · 픽 · 거절 · 별점이 그대로 학습 데이터 — 따로 가르칠 필요가 없어요
-· 인물 · 풍경 등 장면마다 다른 기준, 늘 거절하는 종류의 컷까지
+· 인물 · 풍경 등 장면마다 다른 기준, 내가 즐겨 쓰는 구도와 늘 거절하는 종류의 컷까지
 
 ■ 사진은 기기 밖으로 나가지 않아요
 · 분석도 학습도 모두 이 기기에서. 인터넷 권한이 없습니다
@@ -67,8 +69,9 @@ LOUPE 데스크톱 앱(맥 · 윈도우 · 리눅스)과 같은 엔진을 씁니
 ```
 안드로이드 첫 버전입니다.
 · SD 카드 · USB 카드 리더에서 가져오기 (날짜별 정리, 체크섬 확인)
-· 셀렉 도우미: B컷 · A컷 후보, 고를수록 배우는 기준
-· 위로 밀면 픽, 아래로 밀면 거절
+· 셀렉 도우미: 초점 · 노출 · 눈 감음 · 구도 분석, B컷 · A컷 후보와 근거, 기준 켜고 끄기
+· 비파괴 자동 수평 · 자동 구도 맞추기
+· 위로 밀면 픽, 아래로 밀면 거절 · 확대한 채로 다음 사진 비교
 ```
 
 ## English (en-US)
@@ -90,21 +93,23 @@ LOUPE is a culling app for photographers. It imports photos from the card into d
 · Checksums verified while copying; photos already imported are skipped
 · The card is only read, never changed
 
-■ Culling
+■ Culling & non-destructive framing
 · Swipe up to pick, swipe down to reject
 · 1–5 stars, on many photos at once
-· On a tablet with a keyboard: the desktop shortcuts (1–5, P, X, U)
+· On a tablet with a keyboard: the desktop shortcuts (1–5, P, X, U, Z / double-Space to zoom and compare across photos, R to auto-level)
+· One-tap auto-straighten and auto-composition crop (stored in the catalog; original files are never modified)
 · Embedded previews instead of developing RAW files — big cards stay fast
 
 ■ Culling assistant
-· B-cut candidates: missed focus, camera shake, face out of focus, closed eyes, over/under exposure, weaker burst frames
-· A-cut candidates: your best photos, one per burst
+· B-cut candidates: missed focus, camera shake, face out of focus, focus on background, closed eyes, over/under exposure, weaker burst frames, and composition checks (rule of thirds, headroom, lead room, background mergers, horizon tilt)
+· A-cut candidates: your best photos with clear reasons, one per burst
+· Customisable rules: turn off any B-cut rule (such as rule of thirds) to match your style
 · Nothing is deleted on its own — it only shows you first
 · When you are done, move rejected photos to the trash in one go; what you decided stays for learning
 
 ■ Learns from your picks
 · Picks, rejects and stars are the training data — nothing to label
-· A standard per scene (people, landscapes, …), down to the kind of shots you always reject
+· A standard per scene (people, landscapes, …), your preferred compositions, and the shots you always reject
 
 ■ Your photos stay on the device
 · Analysis and learning run on the device; the app has no internet permission

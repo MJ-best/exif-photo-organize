@@ -123,7 +123,13 @@ class ScreensTest {
         val ids = all.map { it.id }
         val i = ids.indexOf(p.id)
         show(Preloaded(ids.subList((i - 1).coerceAtLeast(0), (i + 2).coerceAtMost(ids.size)), big = p.id)) {
-            ViewerScreen(ViewerState(ids, i), { id -> all.firstOrNull { it.id == id } }, 60, NoViewerActions, SnackbarHostState())
+            ViewerScreen(
+                ViewerState(ids, i),
+                { id -> lib.photo(id) ?: all.firstOrNull { it.id == id } },
+                60,
+                NoViewerActions,
+                SnackbarHostState(),
+            )
         }
         compose.onRoot().captureRoboImage("build/outputs/roborazzi/$file")
     }

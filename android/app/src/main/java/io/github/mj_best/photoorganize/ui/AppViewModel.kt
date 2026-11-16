@@ -24,6 +24,7 @@ import io.github.mj_best.photoorganize.core.PhotoException
 import io.github.mj_best.photoorganize.core.PhotoLibrary
 import io.github.mj_best.photoorganize.core.PhotoLibraryInterface
 import io.github.mj_best.photoorganize.core.ProgressListener
+import io.github.mj_best.photoorganize.core.RuleItem
 import io.github.mj_best.photoorganize.core.ScanInfo
 import io.github.mj_best.photoorganize.core.View
 import io.github.mj_best.photoorganize.data.CardReader
@@ -50,6 +51,7 @@ data class LibraryUi(
     /** The culling assistant looking at new photos: done / total. */
     val analysis: Pair<Int, Int>? = null,
     val threshold: Int = 60,
+    val rules: List<RuleItem> = emptyList(),
 )
 
 sealed interface ImportUi {
@@ -112,11 +114,15 @@ class AppViewModel(
     val libraryPath: String get() = dir.path
 
     init {
+        val off = prefs.getLong("disabled_rules", 0L)
         viewModelScope.launch {
             val opened = withContext(io) {
                 runCatching {
                     dir.mkdirs()
-                    openLibrary(dir).also { it.setThreshold(ui.threshold) }
+                    openLibrary(dir).also {
+                        it.setThreshold(ui.threshold)
+                        it.setDisabledRules(off)
+                    }
                 }
             }
             opened.onSuccess {
@@ -141,8 +147,9 @@ class AppViewModel(
         val view = ui.view
         viewModelScope.launch {
             val (photos, counts, learn) = withContext(io) { Triple(l.photos(view), l.counts(), l.learnStatus()) }
+            val rules = withContext(io) { l.rules() }
             if (ui.view == view) {
-                ui = ui.copy(ready = true, photos = photos, counts = counts, learn = learn)
+                ui = ui.copy(ready = true, photos = photos, counts = counts, learn = learn, rules = rules)
             }
         }
     }
@@ -253,6 +260,48 @@ class AppViewModel(
         ui = ui.copy(threshold = p)
         lib?.setThreshold(p)
         refresh()
+    }
+
+    fun toggleRule(bit: Long) {
+        val l = lib ?: return
+        viewModelScope.launch {
+            val rules = withContext(io) {
+                val next = l.disabledRules() xor bit
+                prefs.edit { putLong("disabled_rules", next) }
+                l.setDisabledRules(next)
+                runCatching { l.learn() }
+                l.rules()
+            }
+            ui = ui.copy(rules = rules)
+            version++
+            refresh()
+        }
+    }
+
+    fun autoFrame(id: Long, compose: Boolean) {
+        val l = lib ?: return
+        viewModelScope.launch {
+            val res = withContext(io) { runCatching { l.autoFrame(id, compose) } }
+            res.onSuccess { msg ->
+                images.forget(listOf(id))
+                message = msg
+                version++
+                if (viewer == null) refresh()
+            }.onFailure { message = errorText(it) }
+        }
+    }
+
+    fun resetFraming(id: Long) {
+        val l = lib ?: return
+        viewModelScope.launch {
+            val res = withContext(io) { runCatching { l.resetFraming(id) } }
+            res.onSuccess {
+                images.forget(listOf(id))
+                message = "크롭 · 수평을 원래대로 돌렸습니다."
+                version++
+                if (viewer == null) refresh()
+            }.onFailure { message = errorText(it) }
+        }
     }
 
     // --- Import -------------------------------------------------------------------------------

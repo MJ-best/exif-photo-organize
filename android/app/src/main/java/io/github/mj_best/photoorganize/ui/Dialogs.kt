@@ -2,12 +2,16 @@ package io.github.mj_best.photoorganize.ui
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
@@ -25,6 +29,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.github.mj_best.photoorganize.core.LearnStatus
+import io.github.mj_best.photoorganize.core.RuleItem
 
 @Composable
 fun DeleteDialog(ask: DeleteAsk, onConfirm: () -> Unit, onDismiss: () -> Unit) {
@@ -52,14 +57,17 @@ fun DeleteDialog(ask: DeleteAsk, onConfirm: () -> Unit, onDismiss: () -> Unit) {
     )
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun SettingsDialog(
     threshold: Int,
     learn: LearnStatus?,
+    rules: List<RuleItem> = emptyList(),
     trashBytes: Long,
     libraryPath: String,
     version: String,
     onThreshold: (Int) -> Unit,
+    onToggleRule: (Long) -> Unit = {},
     onEmptyTrash: () -> Unit,
     onDismiss: () -> Unit,
 ) {
@@ -94,6 +102,32 @@ fun SettingsDialog(
                     colors = SliderDefaults.colors(thumbColor = p.accent, activeTrackColor = p.accent),
                 )
                 Text("낮추면 더 많이 걸러내고, 높이면 확실한 것만 보여요.", color = p.text3, fontSize = 13.sp)
+                if (rules.isNotEmpty()) {
+                    HorizontalDivider(color = p.separator)
+                    Text("B컷으로 볼 기준", color = p.text, fontWeight = FontWeight.SemiBold)
+                    Text(
+                        "끈 기준은 B컷 판단 · 학습 · 근거 표시에서 모두 빠집니다. 예: 가운데 구도를 즐겨 쓴다면 3분할을 끄세요.",
+                        color = p.text3, fontSize = 12.sp,
+                    )
+                    rules.groupBy { it.group }.forEach { (group, items) ->
+                        Text(group, color = p.text2, fontSize = 12.sp, fontWeight = FontWeight.Medium)
+                        FlowRow(
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            verticalArrangement = Arrangement.spacedBy(4.dp),
+                        ) {
+                            items.forEach { item ->
+                                FilterChip(
+                                    selected = item.enabled,
+                                    onClick = { onToggleRule(item.bit) },
+                                    label = { Text(item.label, fontSize = 12.sp) },
+                                    colors = FilterChipDefaults.filterChipColors(
+                                        selectedContainerColor = p.selected,
+                                    ),
+                                )
+                            }
+                        }
+                    }
+                }
                 HorizontalDivider(color = p.separator)
                 Text("휴지통", color = p.text, fontWeight = FontWeight.SemiBold)
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -123,7 +157,7 @@ fun SettingsDialog(
                 HorizontalDivider(color = p.separator)
                 Text("LOUPE $version — 사진가의 서랍, 사진을 고르는 시간", color = p.text2, fontSize = 13.sp)
                 Text(
-                    "사진은 기기 밖으로 나가지 않습니다 (인터넷 권한 없음). 얼굴 인식 YuNet(MIT), 장면 인식 MobileNetV2(Apache-2.0) 모델을 씁니다.",
+                    "사진은 기기 밖으로 나가지 않습니다 (인터넷 권한 없음). 얼굴 인식 YuNet(MIT), 장면 인식 MobileNetV2(Apache-2.0), 인물 분할 PP-HumanSeg(Apache-2.0) 모델을 씁니다.",
                     color = p.text3, fontSize = 12.sp,
                 )
             }

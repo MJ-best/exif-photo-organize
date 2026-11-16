@@ -131,6 +131,24 @@ fn import_rate_analyse_and_delete_from_a_listed_card() {
     assert_eq!((status.analysed, status.total), (3, 3));
     assert!(status.summary.starts_with("기본 기준"), "{}", status.summary);
 
+    // Composition notes & B-cut rule toggles.
+    let detail = lib.photo(photos[0].id).unwrap();
+    assert!(!detail.comp_notes.is_empty(), "single photo view includes composition notes");
+    let rules = lib.rules();
+    assert_eq!(rules.len(), 17);
+    assert!(rules.iter().all(|r| r.enabled));
+    lib.set_disabled_rules(reason::THIRDS as i64);
+    assert_eq!(lib.disabled_rules(), reason::THIRDS as i64);
+    assert!(lib.rules().iter().any(|r| r.bit == reason::THIRDS as i64 && !r.enabled));
+    lib.learn().unwrap();
+    lib.set_disabled_rules(0);
+
+    // Non-destructive auto-frame and reset.
+    let msg = lib.auto_frame(photos[0].id, true).unwrap();
+    assert!(!msg.is_empty());
+    lib.reset_framing(photos[0].id).unwrap();
+    assert!(lib.photo(photos[0].id).unwrap().framing.is_none());
+
     // Delete the rejected photo: gone from the library (to its trash folder), its decision kept.
     let plan = lib.delete_plan(vec![photos[1].id]);
     assert_eq!((plan.photos, plan.files), (1, 2), "the JPEG and its sidecar");
@@ -172,18 +190,26 @@ fn reasons_and_views_follow_the_threshold() {
         scene: 0,
         b_prob: 0.7,
         reasons: reason::BLUR | reason::EYES,
-        strengths: 0,
+        strengths: strength::EYES_SHARP | strength::LEVEL,
         burst: 0,
         burst_rank: 0,
         burst_size: 0,
         keep_rank: f32::NAN,
-        framing: None,
+        framing: Some(Framing { angle: 1.5, x: 0.05, y: 0.05, w: 0.9, h: 0.9 }),
     };
     index.assets.push(a.clone());
     let p = photo(&index, &a);
     assert_eq!(p.b_pct, Some(70));
     assert_eq!(p.reasons, ["초점 흐림", "눈 감음 의심"]);
+    assert!(p.strengths.is_empty(), "strengths only shown when not a likely B-cut");
+    assert_eq!(p.framing.as_deref(), Some("1.5° 돌리고 81% 크기로 자름"));
+
+    a.b_prob = 0.15;
+    let p_good = photo(&index, &a);
+    assert_eq!(p_good.strengths, ["눈에 초점", "수평이 맞음"]);
+
     let mut s = Settings::default();
+    a.b_prob = 0.7;
     assert!(s.matches(View::Candidates, &a));
     s.threshold = 80;
     assert!(!s.matches(View::Candidates, &a));

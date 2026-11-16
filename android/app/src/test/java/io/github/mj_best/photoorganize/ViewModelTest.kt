@@ -55,14 +55,29 @@ class ViewModelTest {
         until("rejected") { vm.ui.counts.rejected == candidates.size }
         until("candidates left the view") { vm.ui.photos.isEmpty() }
 
-        // Stars from the photo view; the view stays put while it is open.
+        // Stars and non-destructive framing from the photo view; the view stays put while it is open.
         vm.show(View.ALL)
         until("all") { vm.ui.view == View.ALL && vm.ui.photos.size == 16 }
+        assertEquals(17, vm.ui.rules.size)
+        val ruleBit = vm.ui.rules.first().bit
+        vm.toggleRule(ruleBit)
+        until("rule toggled off") { vm.ui.rules.first().let { !it.enabled } }
+        vm.toggleRule(ruleBit)
+        until("rule toggled back on") { vm.ui.rules.first().enabled }
+
         val first = vm.ui.photos.first().id
         vm.openViewer(first)
         assertNotNull(vm.viewer)
+        val prevVersion = vm.version
         vm.rate(listOf(first), 4)
-        until("rated") { vm.version > 0 }
+        until("rated") { vm.version > prevVersion }
+        val beforeFrame = vm.version
+        vm.autoFrame(first, true)
+        until("auto framed") { vm.version > beforeFrame && vm.message != null }
+        vm.message = null
+        val beforeReset = vm.version
+        vm.resetFraming(first)
+        until("framing reset") { vm.version > beforeReset }
         vm.closeViewer()
         until("rating shown") { vm.ui.counts.rated == 1 }
 

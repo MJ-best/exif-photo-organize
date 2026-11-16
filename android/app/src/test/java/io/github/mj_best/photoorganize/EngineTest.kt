@@ -71,6 +71,18 @@ class EngineTest {
         assertTrue("blurred photos look like B-cuts", soft.minOf { it.bPct!! } > sharp.minOf { it.bPct!! })
         assertTrue(soft.all { "초점 흐림" in it.reasons })
 
+        // Single-photo view includes composition notes; B-cut rules and framing work.
+        val detail = lib.photo(photos[0].id)!!
+        assertTrue(detail.compNotes.isNotEmpty())
+        assertEquals(17, lib.rules().size)
+        val firstRule = lib.rules().first()
+        lib.setDisabledRules(firstRule.bit)
+        assertEquals(firstRule.bit, lib.disabledRules())
+        lib.setDisabledRules(0L)
+        assertTrue(lib.autoFrame(photos[0].id, true).isNotEmpty())
+        lib.resetFraming(photos[0].id)
+        assertNull(lib.photo(photos[0].id)!!.framing)
+
         val plan = lib.deletePlan(listOf(photos[1].id))
         assertEquals(1, plan.photos)
         val del = lib.delete(listOf(photos[1].id))

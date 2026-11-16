@@ -33,11 +33,13 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.Block
+import androidx.compose.material.icons.outlined.CropRotate
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Flag
 import androidx.compose.material3.Icon
@@ -50,6 +52,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -72,6 +75,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.github.mj_best.photoorganize.core.Photo
@@ -87,6 +91,8 @@ interface ViewerActions {
     fun rate(id: Long, rating: Int)
     fun flag(id: Long, flag: Int)
     fun delete(id: Long)
+    fun autoFrame(id: Long, compose: Boolean) {}
+    fun resetFraming(id: Long) {}
 }
 
 @Composable
@@ -100,7 +106,11 @@ fun ViewerScreen(
     val p = LocalPalette.current
     val pager = rememberPagerState(initialPage = state.index) { state.ids.size }
     val scope = rememberCoroutineScope()
-    var zoomed by remember { mutableStateOf(false) }
+    // Zoom state is kept across photos so bursts can be compared while zoomed in.
+    var scale by remember { mutableFloatStateOf(1f) }
+    var offset by remember { mutableStateOf(Offset.Zero) }
+    var lastSpaceMs by remember { mutableLongStateOf(0L) }
+    val zoomed = scale > 1f
     val focus = remember { FocusRequester() }
     LaunchedEffect(pager) { snapshotFlow { pager.currentPage }.collect { act.moved(it) } }
     LaunchedEffect(Unit) { focus.requestFocus() }
@@ -110,6 +120,16 @@ fun ViewerScreen(
     fun go(delta: Int) {
         val to = (pager.currentPage + delta).coerceIn(0, state.ids.size - 1)
         scope.launch { pager.animateScrollToPage(to) }
+    }
+
+    fun toggleCenterZoom() {
+        if (scale > 1f) {
+            scale = 1f
+            offset = Offset.Zero
+        } else {
+            scale = 2.5f
+            offset = Offset.Zero
+        }
     }
 
     // A keyboard on a tablet: the desktop shortcuts.
@@ -125,8 +145,20 @@ fun ViewerScreen(
             Key.P -> act.flag(id, if ((current?.flag ?: 0) > 0) 0 else 1)
             Key.X -> act.flag(id, if ((current?.flag ?: 0) < 0) 0 else -1)
             Key.U -> act.flag(id, 0)
+            Key.Z -> toggleCenterZoom()
+            Key.R -> act.autoFrame(id, false)
             Key.DirectionLeft -> go(-1)
-            Key.DirectionRight, Key.Spacebar -> go(1)
+            Key.DirectionRight -> go(1)
+            Key.Spacebar -> {
+                val now = System.currentTimeMillis()
+                if (now - lastSpaceMs <= 300L) {
+                    lastSpaceMs = 0L
+                    toggleCenterZoom()
+                } else {
+                    lastSpaceMs = now
+                    go(1)
+                }
+            }
             Key.Delete, Key.Backspace -> act.delete(id)
             Key.Escape -> act.close()
             else -> return@onPreviewKeyEvent false
@@ -150,20 +182,34 @@ fun ViewerScreen(
                     ZoomableImage(
                         id = pid,
                         edge = edge,
-                        onZoom = { if (page == pager.currentPage) zoomed = it },
+                        scale = scale,
+                        offset = offset,
+                        onTransform = { s, o ->
+                            scale = s
+                            offset = o
+                        },
                         onSwipeUp = { act.flag(pid, 1) },
                         onSwipeDown = { act.flag(pid, -1) },
                     )
                 }
                 TopRow(current, act, Modifier.align(Alignment.TopStart))
-                FlagToast(current, Modifier.align(Alignment.Center))
                 if (!wide) {
-                    Column(Modifier.align(Alignment.BottomCenter)) {
+                    Column(
+                        Modifier.align(Alignment.BottomCenter),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                    ) {
+                        FlagToast(current, Modifier.padding(bottom = 8.dp))
                         SnackbarHost(snackbar)
                         InfoPanel(current, threshold, act, Modifier.fillMaxWidth().navigationBarsPadding())
                     }
                 } else {
-                    SnackbarHost(snackbar, Modifier.align(Alignment.BottomCenter))
+                    Column(
+                        Modifier.align(Alignment.BottomCenter).padding(bottom = 12.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                    ) {
+                        FlagToast(current, Modifier.padding(bottom = 6.dp))
+                        SnackbarHost(snackbar)
+                    }
                 }
             }
             if (wide) {
@@ -189,8 +235,23 @@ private fun TopRow(photo: Photo?, act: ViewerActions, modifier: Modifier) {
     ) {
         IconButton(onClick = act::close) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, "닫기", tint = Color.White) }
         Column(Modifier.weight(1f)) {
-            Text(photo?.name ?: "", color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 16.sp)
-            if (photo != null) Text(Fmt.dateTimeKo(photo.capturedMs), color = Color(0xDDFFFFFF), fontSize = 12.sp)
+            Text(
+                photo?.name ?: "",
+                color = Color.White,
+                fontWeight = FontWeight.SemiBold,
+                fontSize = 16.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            if (photo != null) {
+                Text(
+                    Fmt.dateTimeKo(photo.capturedMs),
+                    color = Color(0xDDFFFFFF),
+                    fontSize = 12.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
         }
         if (photo != null) {
             IconButton(onClick = { act.delete(photo.id) }) { Icon(Icons.Outlined.Delete, "휴지통으로", tint = Color.White) }
@@ -198,7 +259,7 @@ private fun TopRow(photo: Photo?, act: ViewerActions, modifier: Modifier) {
     }
 }
 
-/** Shows for a moment what was just decided. */
+/** Shows for a moment at the bottom strip what was just decided (never over the center of the photo). */
 @Composable
 private fun FlagToast(photo: Photo?, modifier: Modifier) {
     val p = LocalPalette.current
@@ -221,9 +282,9 @@ private fun FlagToast(photo: Photo?, modifier: Modifier) {
             else -> "픽/거절 해제" to p.text2
         }
         Text(
-            text, color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.SemiBold,
-            modifier = Modifier.clip(RoundedCornerShape(12.dp)).background(color.copy(alpha = 0.9f))
-                .padding(horizontal = 18.dp, vertical = 10.dp),
+            text, color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.SemiBold,
+            modifier = Modifier.clip(RoundedCornerShape(16.dp)).background(color.copy(alpha = 0.92f))
+                .padding(horizontal = 16.dp, vertical = 7.dp),
         )
     }
 }
@@ -232,28 +293,27 @@ private fun FlagToast(photo: Photo?, modifier: Modifier) {
 private fun ZoomableImage(
     id: Long,
     edge: Int,
-    onZoom: (Boolean) -> Unit,
+    scale: Float,
+    offset: Offset,
+    onTransform: (Float, Offset) -> Unit,
     onSwipeUp: () -> Unit,
     onSwipeDown: () -> Unit,
 ) {
     val thumb = rememberThumbnail(id)
     val big = rememberPreview(id, edge)
-    var scale by remember { mutableFloatStateOf(1f) }
-    var offset by remember { mutableStateOf(Offset.Zero) }
     val swipe = with(LocalDensity.current) { 90.dp.toPx() }
+    var curScale = scale
+    var curOffset = offset
     Box(
         Modifier
             .fillMaxSize()
             .pointerInput(id) {
                 detectTapGestures(onDoubleTap = { at ->
-                    if (scale > 1f) {
-                        scale = 1f
-                        offset = Offset.Zero
+                    if (curScale > 1f) {
+                        onTransform(1f, Offset.Zero)
                     } else {
-                        scale = 2.5f
-                        offset = (Offset(size.width / 2f, size.height / 2f) - at) * 1.5f
+                        onTransform(2.5f, (Offset(size.width / 2f, size.height / 2f) - at) * 1.5f)
                     }
-                    onZoom(scale > 1f)
                 })
             }
             .pointerInput(id) {
@@ -264,18 +324,20 @@ private fun ZoomableImage(
                     do {
                         val event = awaitPointerEvent()
                         val pressed = event.changes.count { it.pressed }
-                        if (pressed > 1 || scale > 1f) {
+                        if (pressed > 1 || curScale > 1f) {
                             multi = multi || pressed > 1
-                            scale = (scale * event.calculateZoom()).coerceIn(1f, 6f)
-                            offset = if (scale == 1f) Offset.Zero else offset + event.calculatePan()
+                            val nextScale = (curScale * event.calculateZoom()).coerceIn(1f, 6f)
+                            val nextOffset = if (nextScale == 1f) Offset.Zero else curOffset + event.calculatePan()
+                            curScale = nextScale
+                            curOffset = nextOffset
+                            onTransform(nextScale, nextOffset)
                             event.changes.forEach { it.consume() }
-                            onZoom(scale > 1f)
                         } else {
                             total += event.calculatePan()
                         }
                     } while (event.changes.any { it.pressed })
                     // A vertical swipe on the whole photo: up picks, down rejects.
-                    if (!multi && scale == 1f && abs(total.y) > swipe && abs(total.y) > 2 * abs(total.x)) {
+                    if (!multi && curScale == 1f && abs(total.y) > swipe && abs(total.y) > 2 * abs(total.x)) {
                         if (total.y < 0) onSwipeUp() else onSwipeDown()
                     }
                 }
@@ -354,10 +416,55 @@ fun InfoPanel(photo: Photo?, threshold: Int, act: ViewerActions, modifier: Modif
                     if (photo.burstSize > 0) add("연사 ${photo.burstSize}장 중 ${photo.burstRank}번째")
                     if (photo.scene.isNotEmpty()) add(photo.scene)
                 }
-                if (photo.reasons.isNotEmpty() || notes.isNotEmpty()) {
+                if (photo.reasons.isNotEmpty() || photo.strengths.isNotEmpty() || notes.isNotEmpty()) {
                     FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         photo.reasons.forEach { Chip(it, p.warning) }
+                        photo.strengths.forEach { Chip(it, p.success) }
                         notes.forEach { Chip(it, p.text2) }
+                    }
+                }
+                if (photo.compNotes.isNotEmpty()) {
+                    Column(verticalArrangement = Arrangement.spacedBy(3.dp), modifier = Modifier.padding(top = 2.dp)) {
+                        photo.compNotes.forEach { n ->
+                            val dot = when {
+                                n.ignored || n.ok == null -> p.text3
+                                n.ok == true -> p.success
+                                else -> p.warning
+                            }
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Box(Modifier.size(7.dp).clip(CircleShape).background(dot))
+                                Spacer(Modifier.width(7.dp))
+                                Text(
+                                    if (n.ignored) "${n.text} (꺼 둠)" else n.text,
+                                    color = if (n.ignored) p.text3 else p.text2,
+                                    fontSize = 12.sp,
+                                )
+                            }
+                        }
+                    }
+                }
+                if (!photo.video) {
+                    val framed = photo.framing
+                    if (framed != null) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Outlined.CropRotate, null, tint = p.accent, modifier = Modifier.size(15.dp))
+                            Spacer(Modifier.width(5.dp))
+                            Text("크롭 · 수평: $framed", color = p.accent, fontSize = 12.sp, modifier = Modifier.weight(1f))
+                            Text(
+                                "원래대로",
+                                color = p.text2,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .clickable { act.resetFraming(photo.id) }
+                                    .padding(horizontal = 6.dp, vertical = 2.dp),
+                            )
+                        }
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        ActionChip("자동 수평") { act.autoFrame(photo.id, false) }
+                        ActionChip("자동 구도") { act.autoFrame(photo.id, true) }
                     }
                 }
             }
@@ -379,6 +486,22 @@ fun InfoPanel(photo: Photo?, threshold: Int, act: ViewerActions, modifier: Modif
         }
         Text("위로 밀면 픽, 아래로 밀면 거절 · 두 번 눌러 확대", color = p.text3, fontSize = 11.sp)
     }
+}
+
+@Composable
+private fun ActionChip(label: String, onClick: () -> Unit) {
+    val p = LocalPalette.current
+    Text(
+        label,
+        color = p.text,
+        fontSize = 12.sp,
+        fontWeight = FontWeight.Medium,
+        modifier = Modifier
+            .clip(RoundedCornerShape(8.dp))
+            .background(p.control)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 10.dp, vertical = 5.dp),
+    )
 }
 
 @Composable
