@@ -57,7 +57,7 @@
 
 앱 → `+` → 새로운 앱 → 플랫폼 **macOS**, 이름, 기본 언어 **한국어**, 번들 ID `io.github.mj-best.loupe`, SKU `LOUPE-MAC`, 사용자 액세스 *전체 액세스*. 앱 이름은 **App Store 전체에서 하나뿐이어야** 해서 `LOUPE` 만으로는 이미 쓰이고 있을 수 있습니다 — 그러면 `LOUPE - 사진가의 서랍, 사진을 고르는 시간` 처럼 붙여 쓰세요 (30자 이내). 그다음 [`listing.md`](listing.md) 의 내용을 옮겨 적습니다 — 부제 · 설명 · 키워드 · 카테고리 · 연령 등급 · 개인정보(데이터 수집 안 함) · 심사 메모 · 가격. 스크린샷은 [`screenshots/`](screenshots/) (2880 × 1800).
 
-개인정보처리방침 URL 이 필요합니다. 판매 사이트를 배포했다면 `https://<도메인>/privacy` (앱스토어판 문단이 들어 있음).
+개인정보처리방침 URL 이 필요합니다. 판매 사이트를 배포하기 전에는 [privacy.md](privacy.md) 의 GitHub 주소(`https://github.com/MJ-best/exif-photo-organize/blob/main/docs/app-store/privacy.md`)를, 배포한 뒤에는 `https://<도메인>/privacy` (앱스토어판 문단이 들어 있음)를 넣습니다.
 
 ## 5. 샌드박스 미리 확인 (애플 계정 없이도)
 

@@ -72,7 +72,7 @@ LOUPE(0.5.0 까지의 이름: Photo Organize)를 만들면서 받은 **요청과
   - 버전 번호를 올라간 빌드와 맞춥니다 (지금은 0.7.2).
   - 빌드 6 을 고릅니다. **새 아이콘으로 내려면** 새 버전을 릴리스한 뒤 app-store 워크플로를 다시 실행해 올린 빌드를 고릅니다 (아이콘은 빌드 안의 것이 쓰임).
   - [listing.md](app-store/listing.md) 의 글과 스크린샷을 넣습니다. 스크린샷은 11-16 에 새 그림으로 바뀌었으니, 이미 올린 것이 있으면 `docs/app-store/screenshots/` 의 것으로 바꿉니다.
-  - **개인정보처리방침 URL** 을 넣어야 제출할 수 있는데, 판매 사이트가 배포 전이라 주소가 없습니다. 이게 지금의 막힘입니다.
+  - **개인정보처리방침 URL** 을 넣습니다. 11-16 에 [docs/app-store/privacy.md](app-store/privacy.md) 가 main 에 생겨서, 그 GitHub 주소(`https://github.com/MJ-best/exif-photo-organize/blob/main/docs/app-store/privacy.md`)를 넣으면 됩니다. 판매 사이트를 배포하면 사이트의 `/privacy` 로 바꿉니다.
   - 유료 앱 계약 · 은행 · 세금이 *활성* 인지도 확인합니다.
 - [ ] **app-store 워크플로는 사용자가 직접 실행합니다** (Actions → app-store → Run workflow → 초록 버튼). 이 저장소의 자동화 권한으로는 실행 요청이 403 으로 막힙니다.
 - [ ] **판매 사이트 배포.** Firebase 프로젝트, 토스페이먼츠 키, 공개 연락 이메일이 필요합니다 (`site/site.config.json`). 배포하면 개인정보처리방침 주소도 생깁니다.

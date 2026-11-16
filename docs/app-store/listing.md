@@ -15,7 +15,7 @@ App Store Connect → 앱 → (버전) 화면에 그대로 옮겨 적으면 됩�
 | 가격 | 유료 — 가격 등급에서 고름 (예: 89,000원 근처) |
 | 개인정보 보호 (앱이 수집하는 데이터) | **데이터를 수집하지 않음** — 앱스토어판은 인터넷에 연결하지 않습니다 |
 | 수출 규정 (암호화) | 암호화를 쓰지 않음 (Info.plist `ITSAppUsesNonExemptEncryption = NO` 로 자동) |
-| 개인정보처리방침 URL | `https://<사이트 도메인>/privacy` (판매 사이트 배포 뒤) |
+| 개인정보처리방침 URL | `https://github.com/MJ-best/exif-photo-organize/blob/main/docs/app-store/privacy.md` ([privacy.md](privacy.md)) — 판매 사이트를 배포한 뒤에는 `https://<사이트 도메인>/privacy` |
 | 지원 URL | `https://<사이트 도메인>/` — 사이트 배포 전에는 `https://github.com/MJ-best/exif-photo-organize` |
 
 스크린샷(2880 × 1800): `docs/app-store/screenshots/`, 이 순서로 —
