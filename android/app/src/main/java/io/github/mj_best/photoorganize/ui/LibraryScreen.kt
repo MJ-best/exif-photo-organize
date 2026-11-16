@@ -156,11 +156,19 @@ fun LibraryScreen(ui: LibraryUi, selection: Set<Long>, act: LibraryActions, snac
                         colors = TopAppBarDefaults.topAppBarColors(containerColor = p.toolbar),
                         title = {
                             Column {
-                                Text(ui.view.title(), fontWeight = FontWeight.SemiBold, fontSize = 19.sp)
+                                Text(
+                                    ui.view.title(),
+                                    fontWeight = FontWeight.SemiBold,
+                                    fontSize = 19.sp,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
                                 Text(
                                     "${Fmt.count(ui.photos.size)}장",
                                     color = p.text2,
                                     fontSize = 12.sp,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
                                 )
                             }
                         },
@@ -470,7 +478,14 @@ private fun SelectionBar(selection: Set<Long>, act: LibraryActions) {
     TopAppBar(
         colors = TopAppBarDefaults.topAppBarColors(containerColor = p.selected),
         navigationIcon = { IconButton(onClick = act::clearSelection) { Icon(Icons.Outlined.Close, "선택 해제") } },
-        title = { Text("${Fmt.count(selection.size)}장 선택", fontSize = 18.sp) },
+        title = {
+            Text(
+                "${Fmt.count(selection.size)}장 선택",
+                fontSize = 18.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        },
         actions = {
             IconButton(onClick = act::selectAll) { Icon(Icons.Outlined.DoneAll, "모두 선택") }
             Box {

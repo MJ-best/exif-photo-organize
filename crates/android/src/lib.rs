@@ -9,8 +9,9 @@
 //! Long calls (scan, import, analysis, learning) block; the app makes them off the main thread.
 
 use photoorg_core::catalog::{AssetRecord, Catalog, LibraryIndex};
-use photoorg_core::cull::{self, learn::reason, LearnSettings, Report, Scene, Score};
+use photoorg_core::cull::{self, composition::strength, learn::reason, LearnSettings, Report, Scene, Score};
 use photoorg_core::filter::CullFilter;
+use photoorg_core::framing::{self, Framing};
 use photoorg_core::import::{self, ImportEvent, ImportOptions, ScanResult};
 use photoorg_core::media::formats;
 use photoorg_core::source::{ListedFile, ListedFs, Source};
@@ -58,6 +59,23 @@ pub enum View {
 }
 
 #[derive(Clone, Debug, PartialEq, uniffi::Record)]
+pub struct CompNote {
+    pub text: String,
+    /// Some(true) = good, Some(false) = B-cut reason, None = neutral info.
+    pub ok: Option<bool>,
+    /// True when the user turned off this rule in Settings.
+    pub ignored: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, uniffi::Record)]
+pub struct RuleItem {
+    pub bit: i64,
+    pub group: String,
+    pub label: String,
+    pub enabled: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, uniffi::Record)]
 pub struct Photo {
     pub id: i64,
     pub name: String,
@@ -73,10 +91,16 @@ pub struct Photo {
     /// and photos not analysed yet).
     pub top_pct: Option<i32>,
     pub reasons: Vec<String>,
+    /// What the photo does well (A-cut reasons, when not a likely B-cut).
+    pub strengths: Vec<String>,
     /// Place in its burst (1 = best) and the burst's size; 0 when not part of a burst.
     pub burst_rank: i32,
     pub burst_size: i32,
     pub scene: String,
+    /// Non-destructive crop / straighten summary (e.g. "1.8° 돌리고 92% 크기로 자름"), if framed.
+    pub framing: Option<String>,
+    /// Composition evaluation notes (populated when viewing a single photo via `photo(id)`).
+    pub comp_notes: Vec<CompNote>,
     pub video: bool,
     pub raw: bool,
     pub jpeg: bool,
@@ -248,6 +272,46 @@ fn pct(v: f32) -> Option<i32> {
     v.is_finite().then(|| (v * 100.0).round().clamp(0.0, 100.0) as i32)
 }
 
+fn framing_label(f: Framing) -> Option<String> {
+    if f.is_identity() {
+        return None;
+    }
+    Some(match (f.angle.abs() >= 0.05, f.w * f.h < 0.999) {
+        (true, true) => format!("{:.1}° 돌리고 {:.0}% 크기로 자름", f.angle, f.w * f.h * 100.0),
+        (true, false) => format!("{:.1}° 돌림", f.angle),
+        _ => format!("{:.0}% 크기로 자름", f.w * f.h * 100.0),
+    })
+}
+
+const RULE_GROUPS: &[(&str, &[(u32, &str)])] = &[
+    (
+        "초점 · 노출",
+        &[
+            (reason::BLUR, "초점 흐림"),
+            (reason::SHAKE, "흔들림"),
+            (reason::FACE_BLUR, "얼굴 초점 빗나감"),
+            (reason::FOCUS_BG, "초점이 배경에"),
+            (reason::EYES, "눈 감음"),
+            (reason::OVER, "노출 과다"),
+            (reason::UNDER, "노출 부족"),
+            (reason::NOISE, "고감도 노이즈"),
+            (reason::BURST, "연사 중 덜 선명"),
+        ],
+    ),
+    (
+        "구도 · 프레이밍",
+        &[
+            (reason::THIRDS, "3분할"),
+            (reason::HEADROOM, "헤드룸 (머리 위 여백)"),
+            (reason::LEAD_ROOM, "시선 앞 공간"),
+            (reason::MERGER, "머리 뒤 기둥 · 가로선"),
+            (reason::TILT, "수평 · 수직 기울어짐"),
+            (reason::CUT, "얼굴이 프레임에 잘림"),
+        ],
+    ),
+    ("내 취향", &[(reason::MY_COMPOSITION, "내가 자주 쓰는 구도와 다름"), (reason::TASTE, "내가 거절한 사진과 비슷")]),
+];
+
 fn photo(index: &LibraryIndex, a: &AssetRecord) -> Photo {
     let mut exposure = Vec::new();
     if a.focal > 0.0 {
@@ -262,6 +326,8 @@ fn photo(index: &LibraryIndex, a: &AssetRecord) -> Photo {
     if a.iso > 0 {
         exposure.push(format::iso(a.iso));
     }
+    let strengths =
+        if a.b_prob < 0.4 { strength::labels(a.strengths).into_iter().map(String::from).collect() } else { Vec::new() };
     Photo {
         id: a.id,
         name: a.name.clone(),
@@ -271,9 +337,12 @@ fn photo(index: &LibraryIndex, a: &AssetRecord) -> Photo {
         b_pct: pct(a.b_prob),
         top_pct: pct(a.keep_rank).map(|p| p.max(1)),
         reasons: reason::labels(a.reasons).into_iter().map(String::from).collect(),
+        strengths,
         burst_rank: if a.burst_size > 1 { a.burst_rank as i32 + 1 } else { 0 },
         burst_size: if a.burst_size > 1 { a.burst_size as i32 } else { 0 },
         scene: if a.b_prob.is_finite() { Scene::from_u8(a.scene).label().to_string() } else { String::new() },
+        framing: a.framing.and_then(framing_label),
+        comp_notes: Vec::new(),
         video: a.is_video(),
         raw: a.formats & formats::RAW != 0,
         jpeg: a.formats & formats::JPEG != 0,
@@ -346,8 +415,20 @@ impl PhotoLibrary {
     }
 
     pub fn photo(&self, id: i64) -> Option<Photo> {
+        let off = self.settings().learn.off;
         let st = self.state();
-        st.index.get(id).map(|a| photo(&st.index, a))
+        let a = st.index.get(id)?;
+        let mut p = photo(&st.index, a);
+        if let Some(an) = st.catalog.analysis(id).ok().flatten() {
+            if an.version >= 4 {
+                let comp = a.framing.map(|f| f.composition(&an.comp)).unwrap_or_else(|| an.comp.clone());
+                p.comp_notes = cull::composition::notes(&comp)
+                    .into_iter()
+                    .map(|n| CompNote { text: n.text, ok: n.ok, ignored: n.rule != 0 && off & n.rule != 0 })
+                    .collect();
+            }
+        }
+        Some(p)
     }
 
     pub fn counts(&self) -> Counts {
@@ -376,17 +457,28 @@ impl PhotoLibrary {
         c
     }
 
-    /// The thumbnail (JPEG) made when the photo was imported.
+    /// The thumbnail (JPEG) made when the photo was imported (framed when non-destructive crop is active).
     pub fn thumbnail(&self, id: i64) -> Option<Vec<u8>> {
-        self.lib.thumbs().ok()?.get(id).ok().flatten()
+        let framing = self.state().index.get(id).and_then(|a| a.framing).filter(|f| !f.is_identity());
+        let bytes = self.lib.thumbs().ok()?.get(id).ok().flatten()?;
+        if let Some(f) = framing {
+            if let Ok(img) = photoorg_core::image::load_from_memory(&bytes) {
+                let framed = f.apply(&img.to_rgb8());
+                if let Ok(out) = preview::encode_jpeg(&framed, 85) {
+                    return Some(out);
+                }
+            }
+        }
+        Some(bytes)
     }
 
     /// A JPEG of the photo for viewing, its long edge about `max_edge` (from the preview inside
-    /// RAW files; RAW data itself is never developed).
+    /// RAW files; RAW data itself is never developed). Applies non-destructive framing when set.
     pub fn preview(&self, id: i64, max_edge: i32) -> Res<Vec<u8>> {
-        let (files, orientation) = {
+        let (files, orientation, framing) = {
             let st = self.state();
-            (st.catalog.files_for(id)?, st.catalog.metadata(id).map(|m| m.orientation).unwrap_or(1))
+            let framing = st.index.get(id).and_then(|a| a.framing).filter(|f| !f.is_identity());
+            (st.catalog.files_for(id)?, st.catalog.metadata(id).map(|m| m.orientation).unwrap_or(1), framing)
         };
         let f = files
             .iter()
@@ -400,6 +492,10 @@ impl PhotoLibrary {
             max_edge.clamp(64, 8192) as u32,
             None,
         )?;
+        let img = match framing {
+            Some(fr) => fr.apply(&img),
+            None => img,
+        };
         Ok(preview::encode_jpeg(&img, 88)?)
     }
 
@@ -438,6 +534,91 @@ impl PhotoLibrary {
 
     pub fn threshold(&self) -> i32 {
         self.settings().threshold as i32
+    }
+
+    /// Bitmask of B-cut rules turned off by the user (`reason::*`).
+    pub fn disabled_rules(&self) -> i64 {
+        self.settings().learn.off as i64
+    }
+
+    pub fn set_disabled_rules(&self, off: i64) {
+        self.settings().learn.off = off as u32;
+    }
+
+    /// All configurable B-cut rules and whether each one is currently active.
+    pub fn rules(&self) -> Vec<RuleItem> {
+        let off = self.settings().learn.off;
+        let mut out = Vec::new();
+        for (group, items) in RULE_GROUPS {
+            for (bit, label) in *items {
+                out.push(RuleItem {
+                    bit: *bit as i64,
+                    group: (*group).to_string(),
+                    label: (*label).to_string(),
+                    enabled: off & bit == 0,
+                });
+            }
+        }
+        out
+    }
+
+    /// Automatically straighten the photo (and when `compose` is true, crop slightly for a better
+    /// composition). Stored non-destructively in the catalog; the photo file is untouched.
+    pub fn auto_frame(&self, id: i64, compose: bool) -> Res<String> {
+        let off = self.settings().learn.off;
+        let msg = {
+            let mut st = self.state();
+            let a = st.index.get(id).cloned().ok_or_else(|| fail("사진을 찾을 수 없습니다"))?;
+            if a.is_video() {
+                return Err(fail("동영상은 수평·구도를 맞출 수 없습니다"));
+            }
+            let an = st
+                .catalog
+                .analysis(id)?
+                .ok_or_else(|| fail("아직 분석되지 않은 사진이라 자동으로 맞출 수 없습니다"))?;
+            let swap = (5..=8).contains(&a.orientation);
+            let (w, h) = if swap { (a.height, a.width) } else { (a.width, a.height) };
+            let aspect = if w > 0 && h > 0 {
+                w as f32 / h as f32
+            } else if an.comp.aspect > 0.0 {
+                an.comp.aspect
+            } else {
+                1.5
+            };
+            let mut c = an.comp;
+            c.aspect = aspect;
+            let f = framing::suggest(&c, Some(aspect), compose, off);
+            let level = c.tilt_conf >= 0.3 && c.tilt.abs() >= 0.4 && c.tilt.abs() < 9.5;
+            let level_only = Framing::straightened(f.angle, aspect, Some(aspect));
+            let composed = compose && f.w * f.h < level_only.w * level_only.h - 1e-3;
+            let stored = (!f.is_identity()).then_some(f);
+            st.catalog.set_framing(id, stored)?;
+            if let Some(rec) = st.index.get_mut(id) {
+                rec.framing = stored;
+            }
+            match (level, composed) {
+                (true, true) => format!("{:.1}° 돌려 수평을 맞추고 구도에 맞춰 잘랐습니다", f.angle.abs()),
+                (true, false) => format!("{:.1}° 돌려 수평을 맞췄습니다", f.angle.abs()),
+                (false, true) => "구도에 맞춰 잘랐습니다".to_string(),
+                (false, false) if compose => "기울기 · 구도 모두 괜찮아 그대로 둡니다".to_string(),
+                (false, false) => "뚜렷한 기울기가 없어 그대로 둡니다".to_string(),
+            }
+        };
+        let _ = self.learn();
+        Ok(msg)
+    }
+
+    /// Clear any non-destructive crop / straighten on photo `id`.
+    pub fn reset_framing(&self, id: i64) -> Res<()> {
+        {
+            let mut st = self.state();
+            st.catalog.set_framing(id, None)?;
+            if let Some(rec) = st.index.get_mut(id) {
+                rec.framing = None;
+            }
+        }
+        let _ = self.learn();
+        Ok(())
     }
 
     /// Look at the files of a card or folder: what is new, how much, from which cameras.

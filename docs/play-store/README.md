@@ -52,7 +52,7 @@ keytool -genkeypair -v -keystore upload.jks -alias upload -keyalg RSA -keysize 2
   ./gradlew :app:testDebugUnitTest      # 엔진(JNA) + 화면 스크린샷
   ./gradlew :app:bundleRelease          # app/build/outputs/bundle/release/app-release.aab
   ```
-- 버전은 `Cargo.toml` 의 버전을 그대로 씁니다 (0.6.0 → versionCode 6000). 같은 버전을 다시 올려야 하면 `-PversionCode=6001` (CI 는 저장소 변수 `ANDROID_VERSION_CODE`).
+- 버전은 `Cargo.toml` 의 버전을 그대로 씁니다 (0.7.2 → versionCode 7002). 같은 버전을 다시 올려야 하면 `-PversionCode=7003` (CI 는 저장소 변수 `ANDROID_VERSION_CODE`).
 
 ## 4. Play Console 에 앱 만들기
 
@@ -80,9 +80,10 @@ keytool -genkeypair -v -keystore upload.jks -alias upload -keyalg RSA -keysize 2
 - SD 카드(태블릿 슬롯)와 USB-C 카드 리더 양쪽에서 **카드의 DCIM 폴더 고르기 → 살펴보기 → 가져오기**
   - 안드로이드 11 이상은 카드의 맨 위 폴더를 고를 수 없게 막는 기기가 있어, DCIM 을 고르도록 안내합니다.
 - 큰 카드(수천 장 · RAW)를 가져오는 동안 화면이 꺼지지 않는지, 앱을 잠깐 나갔다 와도 계속되는지
-- 셀렉 도우미 분석 속도와 발열 (사진당 0.3–1초 예상), 끝나면 B컷 · A컷 후보가 채워지는지
-- 사진 보기: 좌우로 넘기기, 두 번 눌러 확대 · 두 손가락 확대, **위로 밀면 픽 · 아래로 밀면 거절**
-- 키보드를 붙인 태블릿: 1–5 별점, P · X · U, ← →, Delete
+- 셀렉 도우미 분석 속도와 발열 (사진당 0.3–1초 예상), 끝나면 B컷 · A컷 후보와 구도 판정 · A컷 근거가 채워지는지
+- 사진 보기: 좌우로 넘기기, 두 번 눌러 확대 · 두 손가락 확대, **위로 밀면 픽 · 아래로 밀면 거절**, **자동 수평 · 자동 구도 · 원래대로**
+- 키보드를 붙인 태블릿: 1–5 별점, P · X · U, Z · 스페이스바 두 번(확대한 채로 ← → 넘기기), R(자동 수평), Delete
+- 설정: B컷 후보 기준 슬라이더, **B컷으로 볼 기준**(3분할 등) 켜고 끄기
 - 다크 모드(코코아), 화면 회전, 폴더블 · 분할 화면
 
 ## 알려진 제한 (1단계)

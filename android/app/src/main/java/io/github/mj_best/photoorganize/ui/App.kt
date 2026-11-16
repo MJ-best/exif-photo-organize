@@ -53,6 +53,8 @@ fun PhotoOrganizeApp(vm: AppViewModel) {
             override fun rate(id: Long, rating: Int) = vm.rate(listOf(id), rating)
             override fun flag(id: Long, flag: Int) = vm.flag(listOf(id), flag)
             override fun delete(id: Long) = vm.askDelete(listOf(id))
+            override fun autoFrame(id: Long, compose: Boolean) = vm.autoFrame(id, compose)
+            override fun resetFraming(id: Long) = vm.resetFraming(id)
         }
     }
     val import = remember(vm) {
@@ -99,10 +101,12 @@ fun PhotoOrganizeApp(vm: AppViewModel) {
             SettingsDialog(
                 threshold = vm.ui.threshold,
                 learn = vm.ui.learn,
+                rules = vm.ui.rules,
                 trashBytes = vm.trashBytes,
                 libraryPath = vm.libraryPath,
                 version = BuildConfig.VERSION_NAME,
                 onThreshold = vm::setThreshold,
+                onToggleRule = vm::toggleRule,
                 onEmptyTrash = vm::emptyTrash,
                 onDismiss = { vm.settingsOpen = false },
             )
