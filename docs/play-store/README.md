@@ -52,7 +52,7 @@ keytool -genkeypair -v -keystore upload.jks -alias upload -keyalg RSA -keysize 2
   ./gradlew :app:testDebugUnitTest      # 엔진(JNA) + 화면 스크린샷
   ./gradlew :app:bundleRelease          # app/build/outputs/bundle/release/app-release.aab
   ```
-- 버전은 `Cargo.toml` 의 버전을 그대로 씁니다 (0.7.2 → versionCode 7002). 같은 버전을 다시 올려야 하면 `-PversionCode=7003` (CI 는 저장소 변수 `ANDROID_VERSION_CODE`).
+- 버전은 `Cargo.toml` 의 버전을 그대로 씁니다 (0.7.3 → versionCode 7030). 같은 버전을 다시 올려야 하면 `-PversionCode=7031` (CI 는 저장소 변수 `ANDROID_VERSION_CODE`).
 
 ## 4. Play Console 에 앱 만들기
 
