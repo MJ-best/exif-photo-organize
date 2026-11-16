@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- 크림: the paper of the app icon. -->
+    <!-- 크림: the paper of the app's screens. -->
     <color name="paper">#FDF6EC</color>
-    <color name="ic_launcher_background">#FDF3E6</color>
+    <!-- Behind the launcher icon's picture (which covers all of it): the middle of its gradient. -->
+    <color name="ic_launcher_background">#FE7578</color>
 </resources>

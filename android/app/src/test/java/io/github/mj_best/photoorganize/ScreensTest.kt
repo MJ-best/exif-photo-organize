@@ -41,16 +41,6 @@ import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 import java.io.File
 import java.nio.file.Files
-import androidx.compose.foundation.background
-import androidx.compose.foundation.border
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.rotate
-import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 
 /**
  * The screens with a real library: one made here from test photos, or the one given with
@@ -175,16 +165,6 @@ class ScreensTest {
     @Config(qualifiers = TABLET7)
     fun viewerTablet7() = viewer("viewer-tablet7.png")
 
-    /** The store's feature graphic (1024 × 500). */
-    @Test
-    @Config(qualifiers = FEATURE)
-    fun featureGraphic() {
-        val ids = lib.photos(View.ALL).filter { (it.bPct ?: 100) < 30 }.take(3).map { it.id }
-        val images = Preloaded(ids)
-        show(images) { FeatureGraphic(ids.map { images.thumbnail(it)!! }) }
-        compose.onRoot().captureRoboImage("build/outputs/roborazzi/feature-graphic.png")
-    }
-
     @Test
     @Config(qualifiers = PHONE)
     fun welcomePhone() {
@@ -219,50 +199,6 @@ class ScreensTest {
 /** Store screenshot sizes: phone 1080 × 1920, 7" tablet 1200 × 1920; 10" is MediumTablet (2560 × 1600). */
 const val PHONE = "w360dp-h640dp-normal-notlong-notround-any-xxhdpi-keyshidden-nonav"
 const val TABLET7 = "w600dp-h960dp-large-notlong-notround-any-xhdpi-keyshidden-nonav"
-const val FEATURE = "w512dp-h250dp-normal-notlong-notround-any-xhdpi-keyshidden-nonav"
-
-@Composable
-private fun FeatureGraphic(photos: List<ImageBitmap>) {
-    val p = io.github.mj_best.photoorganize.ui.LocalPalette.current
-    androidx.compose.foundation.layout.Box(
-        androidx.compose.ui.Modifier.fillMaxSize().background(
-            androidx.compose.ui.graphics.Brush.horizontalGradient(listOf(p.sidebar, p.content)),
-        ),
-    ) {
-        androidx.compose.foundation.layout.Row(
-            androidx.compose.ui.Modifier.fillMaxSize().padding(horizontal = 30.dp),
-            verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
-        ) {
-            androidx.compose.foundation.Image(
-                androidx.compose.ui.res.painterResource(R.mipmap.ic_launcher_foreground), null,
-                androidx.compose.ui.Modifier.size(124.dp),
-            )
-            androidx.compose.foundation.layout.Spacer(androidx.compose.ui.Modifier.size(14.dp))
-            androidx.compose.foundation.layout.Column(androidx.compose.ui.Modifier.weight(1f)) {
-                androidx.compose.material3.Text("LOUPE", color = p.text, fontSize = 30.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold, softWrap = false)
-                androidx.compose.foundation.layout.Spacer(androidx.compose.ui.Modifier.height(8.dp))
-                androidx.compose.material3.Text("사진가의 서랍,\n사진을 고르는 시간", color = p.text, fontSize = 16.sp, lineHeight = 22.sp, softWrap = false)
-                androidx.compose.foundation.layout.Spacer(androidx.compose.ui.Modifier.height(10.dp))
-                androidx.compose.material3.Text("카드에서 바로 · 기기 안에서만", color = p.text2, fontSize = 11.sp, softWrap = false)
-            }
-            androidx.compose.foundation.layout.Box(androidx.compose.ui.Modifier.size(118.dp, 150.dp)) {
-                photos.forEachIndexed { i, img ->
-                    androidx.compose.foundation.Image(
-                        img, null,
-                        androidx.compose.ui.Modifier
-                            .align(androidx.compose.ui.Alignment.Center)
-                            .padding(start = (i * 14).dp, top = (i * 8).dp)
-                            .size(84.dp)
-                            .rotate(-8f + i * 8f)
-                            .border(4.dp, androidx.compose.ui.graphics.Color.White)
-                            .clip(androidx.compose.foundation.shape.RoundedCornerShape(3.dp)),
-                        contentScale = androidx.compose.ui.layout.ContentScale.Crop,
-                    )
-                }
-            }
-        }
-    }
-}
 
 private object NoLibraryActions : LibraryActions {
     override fun show(view: View) {}

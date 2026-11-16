@@ -1,6 +1,9 @@
 # Play Console 에 넣을 내용
 
-그림은 `graphics/` 에 있습니다 (스크린샷은 실제 앱 화면을 엔진 그대로 그린 것 — `android/app/src/test/…/ScreensTest.kt`, 데모 라이브러리로 `./gradlew :app:testDebugUnitTest -Pdemo=<라이브러리 폴더>`).
+그림은 `graphics/` 에 있습니다.
+
+- **스크린샷**은 실제 앱 화면을 엔진 그대로 그린 것입니다 — `android/app/src/test/…/ScreensTest.kt`, 데모 라이브러리로 `./gradlew :app:testDebugUnitTest -Pdemo=<라이브러리 폴더>`.
+- **앱 아이콘**은 `python3 scripts/make-icons.py`, **그래픽 이미지**는 `python3 scripts/make-store-images.py` 가 아이콘 원본(`crates/app/assets/icon-source.webp`)에서 만듭니다.
 
 | 항목 | 파일 |
 |---|---|

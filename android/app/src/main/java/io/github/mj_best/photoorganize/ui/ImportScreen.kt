@@ -98,7 +98,7 @@ fun ImportScreen(state: ImportUi, act: ImportActions) {
 @Composable
 private fun Pick(act: ImportActions) {
     val p = LocalPalette.current
-    Image(painterResource(R.mipmap.ic_launcher_foreground), null, Modifier.size(150.dp))
+    Image(painterResource(R.drawable.mascot), null, Modifier.padding(vertical = 22.dp).size(106.dp))
     Text("카드에서 사진 가져오기", color = p.text, fontSize = 21.sp, fontWeight = FontWeight.SemiBold)
     Text(
         "SD 카드를 꽂거나 USB 카드 리더를 연결한 뒤, 카드의 DCIM 폴더를 고르세요.",

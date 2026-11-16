@@ -39,7 +39,7 @@ pub struct Palette {
 /// A concrete look (what `ThemePref::System` resolves to).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Look {
-    /// Warm paper and cocoa ink — matches the app icon.
+    /// Warm paper and cocoa ink.
     Cream,
     /// Dark counterpart of Cream.
     Cocoa,
@@ -58,7 +58,7 @@ impl Palette {
         }
     }
 
-    /// Colours taken from the app icon: cream paper, cocoa outlines, the orange check badge
+    /// Colours taken from the first app icon: cream paper, cocoa outlines, the orange check badge
     /// and the yellow sparkle.
     pub fn cream() -> Palette {
         Palette {

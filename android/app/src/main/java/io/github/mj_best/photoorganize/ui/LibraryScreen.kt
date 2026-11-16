@@ -519,8 +519,8 @@ private fun Welcome(act: LibraryActions) {
         verticalArrangement = Arrangement.Center,
     ) {
         Image(
-            painterResource(R.mipmap.ic_launcher_foreground), null,
-            Modifier.size(180.dp),
+            painterResource(R.drawable.mascot), null,
+            Modifier.padding(vertical = 28.dp).size(124.dp),
         )
         Text("카드를 연결하고 사진을 가져오세요", color = p.text, fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
         Spacer(Modifier.height(10.dp))
