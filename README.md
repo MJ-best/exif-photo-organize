@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="crates/app/assets/icon-256.png" alt="LOUPE 아이콘 — 사진을 들고 있는 로봇" width="128">
+<img src="crates/app/assets/icon-256.png" alt="LOUPE 아이콘 — 루페로 들여다보는 하얀 캐릭터" width="128">
 
 # LOUPE
 
@@ -571,7 +571,7 @@ cargo build --release -p photoorg-app
 
 | 항목 | 기본값 | 설명 |
 |---|---|---|
-| 테마 | 크림 | **크림**(앱 아이콘의 따뜻한 종이 느낌) · **코코아**(그 어두운 버전) · 시스템(OS 밝기에 따라 크림/코코아) · 클래식 다크 · 클래식 라이트(macOS 「사진」 스타일) |
+| 테마 | 크림 | **크림**(따뜻한 종이 느낌) · **코코아**(그 어두운 버전) · 시스템(OS 밝기에 따라 크림/코코아) · 클래식 다크 · 클래식 라이트(macOS 「사진」 스타일) |
 | 썸네일을 정사각형으로 자르기 | 켬 | 끄면 「사진」 앱의 *원본 비율 그리드*처럼 사진 전체가 보입니다 |
 | 사진 보기에서 필름 스트립 표시 | 켬 | 크게 보기 아래 썸네일 줄 |
 | 별점을 매기면 다음 사진으로 이동 | 끔 | 빠른 셀렉용 |
@@ -786,7 +786,7 @@ crates/
 │   ├── theme.rs       크림 · 코코아 · 클래식 다크/라이트 팔레트
 │   ├── icon.rs        창 아이콘 · 마스코트 (assets/ 의 PNG 내장)
 │   ├── license.rs     라이선스 등록 · 서명 토큰 오프라인 확인 (assets/license.json), app_license.rs 설정 화면
-│   ├── assets/        앱 아이콘: AppIcon.icns(macOS) · icon.ico(Windows, build.rs 로 exe 에 포함) · PNG
+│   ├── assets/        앱 아이콘: AppIcon.icns(macOS) · icon.ico(Windows, build.rs 로 exe 에 포함) · PNG · 캐릭터 (scripts/make-icons.py 로 만듦)
 │   └── fonts.rs · widgets.rs
 └── cli/    photoorg        — 명령줄 도구
 
@@ -803,7 +803,7 @@ docs/play-store/ Google Play 에 올리기 — 절차 · 등록 문구 · 데이
 - **쓰기는 별도 스레드.** 별점 · XMP 기록은 전용 스레드에서 처리해 외장 하드가 느려도 UI 가 멈추지 않습니다.
 - **폰트는 OS 의 것.** SF Pro / Segoe UI 와 시스템 한글 글꼴(Apple SD Gothic Neo · 맑은 고딕 · Noto Sans CJK)을 OS 글꼴 데이터베이스에서 찾아 씁니다.
 - **macOS 에서는** 타이틀바를 숨기고 콘텐츠를 창 전체로 넓혀, 「사진」 앱처럼 신호등 버튼이 사이드바 위에 떠 있습니다.
-- **테마는 아이콘에서.** 크림 · 코코아 테마의 색(종이 크림, 코코아색 선, 체크 배지의 주황, 반짝이의 노랑)은 앱 아이콘 그림에서 뽑았고, 썸네일 모서리도 아이콘의 사진 카드처럼 둥글게 그립니다.
+- **테마와 아이콘.** 크림 · 코코아 테마의 색(종이 크림, 코코아색 글자, 주황 강조색, 노란 별)은 첫 아이콘 그림에서 뽑은 것이고, 지금 아이콘(주황에서 분홍으로 번지는 바탕에 루페를 든 하얀 캐릭터)의 주황이 그 강조색과 이어집니다. 아이콘 · 안드로이드 아이콘 · 스토어 그림은 원본 한 장에서 스크립트로 만듭니다 (`scripts/make-icons.py`, `scripts/make-store-images.py`).
 
 ### 테스트
 

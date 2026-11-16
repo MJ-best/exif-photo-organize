@@ -9,7 +9,7 @@ import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
 
-/** The 크림 / 코코아 looks of the desktop app (sampled from the app icon). */
+/** The 크림 / 코코아 looks of the desktop app. */
 @Immutable
 data class Palette(
     val dark: Boolean,
