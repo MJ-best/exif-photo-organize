@@ -22,17 +22,17 @@ LOUPE(0.5.0 까지의 이름: Photo Organize)를 만들면서 받은 **요청과
 
 ---
 
-## 1. 지금 상태 (2026-11-16)
+## 1. 지금 상태 (2026-11-17)
 
 | 항목 | 상태 |
 |---|---|
 | 최신 버전 | **0.7.3** — main, GitHub 릴리스 (맥 유니버설 dmg · zip, Windows zip, Linux tar.gz) |
 | 데스크톱 배포 | GitHub 릴리스. 맥은 Apple 공증 전이라 **터미널 한 줄 설치 · 업데이트** 를 안내함 (릴리스 노트마다 들어 있음) |
-| Mac App Store | 업로드된 빌드: 0.6.0 (3) · 0.6.1 (4) · 0.7.1 (5) · **0.7.2 (6)**. 모두 서명 · 검증 · 업로드 성공. **아직 심사 제출 전.** 0.7.3(새 아이콘)은 아직 올리지 않음. 남은 일은 4절 |
+| Mac App Store | 업로드된 빌드: 0.6.0 (3) · 0.6.1 (4) · 0.7.1 (5) · 0.7.2 (6) · 0.7.3 (7, 새 아이콘 — `winit` 의 `_CGSSetWindowBackgroundBlurRadius` 비공개 API 참조로 2.5.1 자동 거절). #27 에서 해당 심볼을 제거했으므로 **app-store 워크플로를 다시 실행해 새 빌드(8)를 올려 재제출** 해야 함 (4절) |
 | Google Play | 개인 개발자 계정이 구글 검토 중이라 앱을 만들 수 없음. 업로드 키 시크릿 · 테스터 12명 (14일 연속) 필요 |
 | 판매 사이트 (`site/`) | 코드 · 에뮬레이터 테스트 완료, **배포 전**. 앱의 *설정 → 라이선스* 칸은 사이트가 열릴 때까지 숨김 |
 | 셀렉 엔진 (`crates/cull`) | 분석 버전 4, 학습 특징 24개. BUSL 1.1, 0.7.x 의 MIT 전환일 2030-11-15 |
-| 아이콘 · 캐릭터 | 0.7.3 에서 새 그림으로 바꿈 (데스크톱 · 안드로이드 · 사이트 · 스토어 그림). App Store 에는 0.7.3 빌드를 올려야 보임 |
+| 아이콘 · 캐릭터 | 0.7.3 에서 새 그림으로 바꿈 (데스크톱 · 안드로이드 · 사이트 · 스토어 그림). App Store 에는 새 빌드를 골라야 보임 |
 
 ---
 
@@ -68,11 +68,11 @@ LOUPE(0.5.0 까지의 이름: Photo Organize)를 만들면서 받은 **요청과
 
 ### 사용자가 해야 하는 것 (계정 · 결제 · 개인 정보가 걸려 있음)
 
-- [ ] **Mac App Store 심사 제출.** App Store Connect 에서 할 일:
-  - **새 아이콘으로 내려면 app-store 워크플로를 다시 실행** 해 0.7.3 빌드를 올립니다 (아이콘은 빌드 안의 것이 쓰임). 지금 올라가 있는 0.7.2 (빌드 6)는 옛 아이콘입니다.
-  - 버전 번호를 올린 빌드와 맞추고(0.7.3), 그 빌드를 고릅니다.
+- [ ] **Mac App Store 재제출 (2.5.1 비공개 API 수정 반영).**
+  - Actions → **app-store** → *Run workflow* 를 실행해 `_CGSSetWindowBackgroundBlurRadius` 가 제거된 새 빌드(8)를 올립니다.
+  - App Store Connect 의 0.7.3 버전에서 기존 빌드 7 대신 **새로 올라간 빌드(8)** 로 바꾸고 다시 심사에 제출합니다.
   - [listing.md](app-store/listing.md) 의 글과 스크린샷을 넣습니다. 스크린샷은 0.7.3 에서 새 그림으로 바뀌었으니, 이미 올린 것이 있으면 `docs/app-store/screenshots/` 의 것으로 바꿉니다.
-  - **개인정보처리방침 URL** 을 넣습니다. 11-16 에 [docs/app-store/privacy.md](app-store/privacy.md) 가 main 에 생겨서, 그 GitHub 주소(`https://github.com/MJ-best/exif-photo-organize/blob/main/docs/app-store/privacy.md`)를 넣으면 됩니다. 판매 사이트를 배포하면 사이트의 `/privacy` 로 바꿉니다.
+  - **개인정보처리방침 URL** 은 [docs/app-store/privacy.md](app-store/privacy.md) 의 GitHub 주소(`https://github.com/MJ-best/exif-photo-organize/blob/main/docs/app-store/privacy.md`)를 넣으면 됩니다. 판매 사이트를 배포하면 사이트의 `/privacy` 로 바꿉니다.
   - 유료 앱 계약 · 은행 · 세금이 *활성* 인지도 확인합니다.
 - [ ] **app-store 워크플로는 사용자가 직접 실행합니다** (Actions → app-store → Run workflow → 초록 버튼). 이 저장소의 자동화 권한으로는 실행 요청이 403 으로 막힙니다.
 - [ ] **판매 사이트 배포.** Firebase 프로젝트, 토스페이먼츠 키, 공개 연락 이메일이 필요합니다 (`site/site.config.json`). 배포하면 개인정보처리방침 주소도 생깁니다.
@@ -126,6 +126,7 @@ LOUPE(0.5.0 까지의 이름: Photo Organize)를 만들면서 받은 **요청과
 | 0.7.2 | 11-15 | #23 #24 | 좁은 창에서 글자 겹침 없애기 · 개발 로그와 작업 규칙 |
 | — | 11-16 | #25 | 안드로이드 앱에 0.6.1~0.7.2 최신 기능 반영 · Play 스토어 문서 보강 |
 | 0.7.3 | 11-16 | #26 | 새 아이콘 · 캐릭터 · 스토어 그림 |
+| — | 11-17 | #27 | Mac App Store 2.5.1 비공개 API(`_CGSSetWindowBackgroundBlurRadius`) 제거 |
 
 ---
 
@@ -428,7 +429,28 @@ LOUPE(0.5.0 까지의 이름: Photo Organize)를 만들면서 받은 **요청과
 - **함께 고친 것**
   - #25 의 문서에 적힌 안드로이드 버전 코드가 틀려 있었습니다 (0.7.2 → `7002`). 실제 계산식(`android/app/build.gradle.kts`)으로는 0.7.2 가 `7020`, 0.7.3 이 `7030` 입니다. `docs/play-store/README.md` 를 고쳤습니다.
   - 작업 중에 main 에 개인정보처리방침 페이지(`docs/app-store/privacy.md`)가 올라와서, App Store 안내와 4절의 막힘을 그 주소로 고쳤습니다.
+- **릴리스 뒤**: 사용자가 app-store 워크플로를 실행해 0.7.3 이 빌드 7 로 올라갔습니다 (서명 · 검증 · 업로드 오류 없음).
 - **남은 점**
-  - App Store 에 0.7.3 빌드 올리기 (4절).
+  - App Store Connect 에서 빌드 7 을 골라 심사 제출 (4절).
   - 스토어 스크린샷의 화면 자체는 예전 것입니다 (4절).
+
+### Mac App Store 2.5.1 비공개 API 거절 수정 (11-17, #27)
+
+- **요청**
+  - 사진 노출 · 셔터 속도 4대 경험칙(역수 법칙 `1/초점거리`, Sunny 16, Looney 11, 500 법칙) 포스팅을 보여 주며: "이건 사진설정의 기본을 담은 내용의 포스팅이야. 이 내용이 앱에 포함되어있어? 이론과 rule 기반으로 제안이 되고있는지 점검"
+  - 이어서 Mac App Store 심사 결과 공유: "앱 안에 Apple이 허용하지 않는 비공개 API 호출이 들어 있어서 자동 검사에서 막혔어요. 제출: 11월 16일 오후 10:07, 빌드 0.7.3 (7) / 결과: 11월 17일 오후 6:00에 Apple 자동 메시지로 거절 / 위반 조항: 2.5.1 Performance: Software Requirements (macOS) / 문제가 된 API: `_CGSSetWindowBackgroundBlurRadius`"
+- **원인**
+  - `eframe` 이 쓰는 창 라이브러리 `winit 0.30.13`(`src/platform_impl/macos/ffi.rs`, `window_delegate.rs`)에 창 배경 블러용 비공개 CoreGraphics 함수 `CGSMainConnectionID` 와 `CGSSetWindowBackgroundBlurRadius` 가 선언되어 있고, `WindowDelegate::new` 가 실행 시점에 `if attrs.blur { delegate.set_blur(attrs.blur); }` 로 분기합니다.
+  - LOUPE 는 창 블러를 전혀 쓰지 않지만(`attrs.blur == false`), `WindowDelegate::new` 가 구조체 값을 실행 시점에 받아 분기하므로 링커가 죽은 코드로 지우지 못하고 Mach-O 바이너리의 동적 심볼 임포트 테이블에 `_CGSSetWindowBackgroundBlurRadius` 와 `_CGSMainConnectionID` 를 남겼습니다.
+- **반영**
+  - `crates/app/src/main.rs` 에 macOS(`aarch64`, `x86_64`)용 `global_asm!` 으로 `_CGSMainConnectionID` 와 `_CGSSetWindowBackgroundBlurRadius` 를 `.private_extern` 빈 함수(no-op, 0 반환)로 정의했습니다. 링커가 `CoreGraphics.framework` 대신 실행 파일 내부의 `.private_extern` 심볼로 연결하므로 동적 임포트 테이블에 들어가지 않고, 이어서 `strip -x` 가 지역(non-global) 심볼 이름까지 바이너리에서 완전히 지웁니다.
+  - `scripts/macos-bundle.sh` 에서 `LOUPE.app/Contents/MacOS/photo-organize` 에 `strip -x` 를 실행한 뒤 `grep -aqE "CGSSetWindowBackgroundBlurRadius|CGSMainConnectionID"` 검사를 넣어, 두 문자열이 바이너리 어디에라도 남아 있으면 빌드가 즉시 실패하게 했습니다.
+- **결정과 이유**
+  - `winit` 전체(약 3 MB)를 저장소에 복제(vendor)하는 대신, 바이너리 크레이트에 `.private_extern` 스텁과 `strip -x` + 바이너리 문자열 검증을 넣었습니다. 서드파티 코드를 통째로 떠안지 않으면서도 심볼 테이블과 문자열 테이블 양쪽에서 해당 이름을 완전히 없앨 수 있고, 매 빌드마다 스크립트가 자동으로 검사합니다.
+- **확인**
+  - `llvm-mc` · `llvm-nm` 으로 `arm64-apple-macosx11.0.0` 및 `x86_64-apple-macosx11.0.0` 오브젝트에서 두 심볼이 `private external` 로 생성되는 것과 `strip` 뒤 바이너리에서 문자열이 완전히 사라지는 것을 확인했습니다.
+  - PR 의 `macos` 빌드(`build.yml`)와 `app-store` 미리 확인(`app-store.yml --dry-run`)에서 실제 macOS 러너가 유니버설 바이너리를 만들고 `scripts/macos-bundle.sh` 의 `grep -aqE` 검사를 통과하는지 확인합니다.
+- **남은 점**
+  - 머지 뒤 사용자가 Actions → **app-store** → *Run workflow* 를 실행해 새 빌드(8)를 올리고, App Store Connect 의 0.7.3 버전에서 빌드 8 로 바꿔 다시 심사에 제출해야 합니다.
+
 

@@ -8,6 +8,11 @@ VERSION="$(grep -m1 '^version' Cargo.toml | sed -E 's/.*"(.*)".*/\1/')"
 APP="$OUT/LOUPE.app"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN" "$APP/Contents/MacOS/photo-organize"
+strip -x "$APP/Contents/MacOS/photo-organize"
+if grep -aqE "CGSSetWindowBackgroundBlurRadius|CGSMainConnectionID" "$APP/Contents/MacOS/photo-organize"; then
+  echo "error: private CGS API symbol found in $APP/Contents/MacOS/photo-organize" >&2
+  exit 1
+fi
 cp "$(dirname "$0")/../crates/app/assets/AppIcon.icns" "$APP/Contents/Resources/AppIcon.icns"
 cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
