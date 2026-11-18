@@ -19,17 +19,18 @@ App Store Connect → 앱 → (버전) 화면에 그대로 옮겨 적으면 됩�
 | 지원 URL | `https://<사이트 도메인>/` — 사이트 배포 전에는 `https://github.com/MJ-best/exif-photo-organize` |
 
 스크린샷(2880 × 1800): `docs/app-store/screenshots/`, 이 순서로 —
-1. `real-1-acut.jpg` — *잘 나온 A컷부터 보여 줍니다* (실제 사진 · 내 기준으로 학습된 상태)
-2. `real-2-viewer.jpg` — *왜 B컷인지, 이유까지* (크게 보기의 B컷 99% 와 이유)
-3. `1-library.jpg` — *카드에서 서랍까지, 한 번에*
-4. `2-bcut.jpg` — *B컷은 먼저 걸러 둡니다*
-5. `4-works.jpg` — *작품 · 테마로 모아 편집으로*
-6. (더 넣는다면) `3-acut.jpg` · `5-viewer.jpg`
+1. `real-1-acut.jpg` — *내 눈을 닮아 가는 A컷 추천* (픽·별점을 학습해 취향에 맞는 좋은 컷부터 추천)
+2. `real-3-focus.jpg` — *왜 B컷인지, 근거를 한눈에* (초점·흔들림·수직선·연사 순위 근거)
+3. `real-4-portrait.jpg` — *인물 · 구도 · 시선까지 살핍니다* (얼굴 초점·헤드룸·시선 앞 공간·수직선)
+4. `real-5-rated.jpg` — *별점 매기고 사진집으로 바로* (별점 있는 사진을 작품·테마별로 모으기)
+5. `real-8-gather.jpg` — *한 폴더에 모아 라이트룸으로* (사진집 파일을 한 폴더로 옮기고 별점·테마 XMP 함께 전달)
+6. `real-6-crop.jpg` — *자동 수평 · 구도 크롭까지* (수평·수직 구도 모델 기반 자동 크롭)
+7. (더 넣는다면) `real-7-scene.jpg` (*장면마다 다른 기준으로, 구도까지*) · `real-2-viewer.jpg` (*노출 과다 · 노이즈도 바로 걸러 냅니다*)
 
 스크린샷은 앱 창을 아이콘의 그라데이션 바탕에 얹고, 제목 한 줄과 창 너머로 내다보는 캐릭터를 넣은 것입니다. `python3 scripts/make-store-images.py` 가 `screenshots/raw/` 의 창 그림으로 만듭니다 (제목은 스크립트의 `SHOTS`).
 
-- 3–6 은 견본 그림으로 찍은 화면입니다. 실제 사진으로 다시 찍으면 훨씬 좋습니다: 맥 화면을 찍어 주면 창만 잘라 `raw/` 에 넣고 다시 만듭니다.
-- `raw/` 에 넣는 그림에서는 라이브러리 경로 같은 개인 정보(사이드바 맨 아래)와 Dock 말풍선을 잘라 냅니다.
+- 8장 모두 실제 사진 · 0.7.3 화면으로 교체했습니다 (학습 A컷 · 구도/시선 분석 · 별점→사진집→폴더 모으기 · 자동 크롭 포함).
+- `raw/` 에 넣는 그림에서는 상단 메뉴바와 라이브러리 경로 같은 개인 정보(사이드바 맨 아래·모달 경로)를 잘라 내거나 예시 경로로 가립니다.
 - **앱 아이콘**은 스크린샷과 달리 App Store Connect 에 따로 올리지 않습니다. 올린 빌드 안의 아이콘이 그대로 쓰이므로, 아이콘을 바꾸면 새 빌드를 올려야 합니다.
 
 사진에 나오는 사람은 공개 스토어에 실려도 괜찮은지 미리 확인하세요.
@@ -48,7 +49,7 @@ App Store Connect → 앱 → (버전) 화면에 그대로 옮겨 적으면 됩�
 사진가의 서랍, 사진을 고르는 시간.
 SD 카드를 꽂고, 고르고, 작품 폴더로. 사진가를 위한 정리 · 셀렉 앱입니다.
 
-LOUPE 는 촬영한 사진을 날짜별로 정리하고, 수천 장 가운데 흔들리고 핀 나간 B컷은 먼저 걸러 두고, 잘 나온 A컷은 앞에 모아 둡니다. 평소처럼 고르기만 하면 당신의 기준과 취향을 배워요. 편집 기능은 일부러 넣지 않았습니다 — 고르는 일에만 집중한, 가볍고 빠른 앱입니다.
+LOUPE 는 촬영한 사진을 날짜별로 정리하고, 수천 장 가운데 흔들리고 핀 나간 B컷은 먼저 걸러 두고, 잘 나온 A컷은 앞에 모아 둡니다. 평소처럼 고르기만 하면 당신의 기준과 취향을 배워요. 색 보정 같은 무거운 편집 기능은 일부러 넣지 않았습니다 — 고르고 수평·구도를 맞추는 일에만 집중한, 가볍고 빠른 앱입니다.
 
 ■ 가져오기 · 정리
 · SD 카드나 폴더의 사진을 복사하면서 날짜별 폴더로 정리
@@ -68,16 +69,20 @@ LOUPE 는 촬영한 사진을 날짜별로 정리하고, 수천 장 가운데 �
 
 ■ 고를수록 배우는 기준
 · 픽 · 거절 · 별점이 그대로 학습 데이터 — 따로 가르칠 필요가 없어요
-· 인물 · 풍경 등 장면마다 다른 기준
+· 인물 · 풍경 · 동물 등 장면마다 다른 기준
 · 무엇을 찍었는지까지: 늘 지우는 종류의 컷을 알아봅니다
 · ‘내 셀렉 정확도’ 로 학습에 쓰지 않은 사진으로 잰 정확도를 확인
 
+■ 구도 · 자동 수평 크롭
+· 수평선 · 수직선 기울기, 3분할 배치, 헤드룸, 시선 앞 공간까지 함께 살펴 알려 줍니다
+· 모델이 계산한 기울기와 구도에 맞춰 ‘자동 수평 · 자동 구도’ 로 한 번에 크롭 (원본 파일은 건드리지 않습니다)
+
 ■ 작품 · 라이트룸
-· 사진집 · 전시처럼 작품과 테마로 나누고, 작품 폴더로 모으기 한 번
-· 별점 · 거절 · 테마는 XMP 로 기록 — Lightroom · Bridge 에서 그대로
+· 별점을 매긴 사진을 사진집(작품)과 테마로 보내고, 작품 폴더로 모으기 한 번
+· 별점 · 거절 · 테마는 XMP 로 기록 — 폴더째 열어 Lightroom · Bridge 에서 그대로 편집으로
 
 ■ 기기 안에서만
-· 얼굴 · 장면 인식까지 모든 분석이 이 Mac 안에서. 인터넷 연결도, 계정도 필요 없습니다
+· 얼굴 · 장면 · 구도 인식까지 모든 분석이 이 Mac 안에서. 인터넷 연결도, 계정도 필요 없습니다
 · 웨딩 · 인물처럼 고객 사진을 다루는 작업에도 안심
 
 지원 형식: Canon CR3 · CR2, Nikon NEF, Sony ARW, Fujifilm RAF, Panasonic RW2, OM/Olympus ORF, Pentax PEF, DNG 등 대부분의 RAW 와 JPEG · HEIF
@@ -104,7 +109,7 @@ Culling that learns your eye. Blurry and missed-focus shots are set aside first,
 ```
 Plug in the card, pick, and gather your work. LOUPE is an importer and culling tool for photographers.
 
-It sorts what you shot into date folders, sets aside the blurry, shaken and missed-focus frames among thousands, and brings your best shots to the front. Just pick as you always do — it learns your standards and your taste. There is deliberately no editing: a light, fast app for choosing.
+It sorts what you shot into date folders, sets aside the blurry, shaken and missed-focus frames among thousands, and brings your best shots to the front. Just pick as you always do — it learns your standards and your taste. Deliberately focused on choosing, levelling and framing without heavy colour editing — light and fast.
 
 IMPORT AND SORT
 • Copy from SD cards or folders into date folders, skipping what you already have, verified by checksum
@@ -126,12 +131,16 @@ LEARNS AS YOU PICK
 • Even what you shoot: it recognises the kind of frame you always throw away
 • "My accuracy" shows how well it predicts photos it did not learn from
 
+COMPOSITION AND AUTO CROP
+• Checks horizon and vertical tilt, rule-of-thirds placement, headroom and gaze space
+• One-click Auto Level and Auto Composition crop based on the model (original files remain untouched)
+
 PROJECTS AND LIGHTROOM
-• Sort picks into projects and themes, then gather them into project folders in one step
-• Ratings, rejects and themes are written to XMP — they show up in Lightroom and Bridge
+• Send rated photos into projects and themes, then gather them into project folders in one step
+• Ratings, rejects and themes are written to XMP — open the folder straight in Lightroom or Bridge
 
 ON YOUR MAC ONLY
-• All analysis, including face and scene recognition, runs on this Mac. No internet connection, no account
+• All analysis, including face, scene and composition recognition, runs on this Mac. No internet connection, no account
 • Safe for client work such as weddings and portraits
 
 Formats: most RAW files (Canon CR3/CR2, Nikon NEF, Sony ARW, Fujifilm RAF, Panasonic RW2, OM/Olympus ORF, Pentax PEF, DNG, …), JPEG and HEIF.
