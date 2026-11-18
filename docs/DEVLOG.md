@@ -475,3 +475,11 @@ LOUPE(0.5.0 까지의 이름: Photo Organize)를 만들면서 받은 **요청과
 - **남은 점**
   - 채팅 업로드 이미지가 폭 `1024px` 로 축소된 상태라 `2880×1800` 캔버스에 확대되었습니다. 더 선명한 원본이 필요하면 Mac 원본 해상도 캡처를 `.zip` 으로 받아 `raw/` 만 바꿔 다시 생성할 수 있습니다.
   - 스토어 등록 전 인물 사진 초상권 확인이 필요합니다.
+
+### README 대표 스크린샷(`docs/images/`)도 실제 사진 화면으로 교체 (11-18)
+
+- **요청**: GitHub 저장소 첫 화면(`README.md`)에 여전히 예전 견본 그림이 보인다는 지적에 따라, `docs/images/` 의 해당 이미지들도 이번에 받은 실제 사진 · 0.7.3 화면으로 교체해 달라고 요청.
+- **반영**
+  - `docs/images/library.jpg`, `viewer.jpg`, `cull.jpg`, `projects.jpg`, `works.jpg` 를 실제 사진 원본 크롭본(`raw/real-*.jpg`)으로 교체하고, `크롭 · 수평 맞추기` 절에 `docs/images/crop.jpg` 를 새로 넣었습니다.
+  - `README.md` 의 이미지 `alt` 설명을 새 화면에 맞게 고쳤습니다.
+- **남은 점**: `import.jpg`, `importing.jpg`, `filter.jpg`, `cocoa.jpg`, `aspect.jpg`, `rating.jpg` 등 이번 캡처에 없는 화면은 기존 이미지로 남았습니다.
