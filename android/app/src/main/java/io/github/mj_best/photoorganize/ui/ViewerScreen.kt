@@ -3,6 +3,7 @@ package io.github.mj_best.photoorganize.ui
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -44,7 +45,6 @@ import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Flag
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
@@ -63,9 +63,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
@@ -83,6 +87,8 @@ import io.github.mj_best.photoorganize.data.rememberPreview
 import io.github.mj_best.photoorganize.data.rememberThumbnail
 import kotlinx.coroutines.launch
 import kotlin.math.abs
+import kotlin.math.max
+import kotlin.math.min
 
 /** What the photo view does. */
 interface ViewerActions {
@@ -393,24 +399,84 @@ fun InfoPanel(photo: Photo?, threshold: Int, act: ViewerActions, modifier: Modif
                 act.flag(photo.id, if (photo.flag < 0) 0 else -1)
             }
         }
-        // The culling assistant.
+        // The culling assistant: left = B-cut, right = A-cut.
         val b = photo.bPct
         if (b != null) {
-            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            val bPct = b.coerceIn(0, 100)
+            val aPct = 100 - bPct
+            val isB = bPct >= threshold
+            val isA = !isB && bPct < 30
+            val gaugeColor = when {
+                isB -> p.warning
+                isA -> p.success
+                else -> p.text2
+            }
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("B컷 가능성", color = p.text2, fontSize = 13.sp, modifier = Modifier.weight(1f))
                     Text(
-                        "$b%", fontWeight = FontWeight.SemiBold, fontSize = 15.sp,
-                        color = if (b >= threshold) p.warning else p.success,
+                        "← B컷 $bPct%",
+                        color = when {
+                            isB -> p.warning
+                            !isA && bPct > aPct -> p.text
+                            bPct == aPct -> p.text2
+                            else -> p.text3
+                        },
+                        fontWeight = if (isB || (!isA && bPct > aPct)) FontWeight.SemiBold else FontWeight.Normal,
+                        fontSize = if (isB) 14.sp else 12.sp,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Text(
+                        "A컷 $aPct% →",
+                        color = when {
+                            isA -> p.success
+                            !isB && aPct > bPct -> p.text
+                            bPct == aPct -> p.text2
+                            else -> p.text3
+                        },
+                        fontWeight = if (isA || (!isB && aPct > bPct)) FontWeight.SemiBold else FontWeight.Normal,
+                        fontSize = if (isA) 14.sp else 12.sp,
                     )
                 }
-                LinearProgressIndicator(
-                    progress = { b / 100f },
-                    modifier = Modifier.fillMaxWidth().height(5.dp).clip(RoundedCornerShape(3.dp)),
-                    color = if (b >= threshold) p.warning else p.success,
-                    trackColor = p.separator,
-                    drawStopIndicator = {},
-                )
+                Canvas(modifier = Modifier.fillMaxWidth().height(16.dp)) {
+                    val pad = 7.dp.toPx()
+                    val trackH = 6.dp.toPx()
+                    val r = trackH / 2f
+                    val cy = size.height / 2f
+                    val left = min(pad, size.width / 2f)
+                    val right = max(size.width - pad, size.width / 2f)
+                    val trackW = (right - left).coerceAtLeast(0f)
+                    val leftTint = lerp(p.control, p.warning, 0.36f)
+                    val rightTint = lerp(p.control, p.success, 0.36f)
+                    drawRoundRect(
+                        brush = Brush.horizontalGradient(
+                            colors = listOf(leftTint, p.control, rightTint),
+                            startX = left,
+                            endX = right,
+                        ),
+                        topLeft = Offset(left, cy - r),
+                        size = Size(trackW, trackH),
+                        cornerRadius = CornerRadius(r, r),
+                    )
+                    val cutX = left + trackW * (1f - threshold.coerceIn(0, 100) / 100f)
+                    val posX = left + trackW * (aPct / 100f)
+                    val segW = abs(posX - cutX)
+                    if (segW > 0.5f) {
+                        drawRoundRect(
+                            color = gaugeColor,
+                            topLeft = Offset(min(cutX, posX), cy - r),
+                            size = Size(segW, trackH),
+                            cornerRadius = CornerRadius(r, r),
+                        )
+                    }
+                    drawLine(
+                        color = p.text3,
+                        start = Offset(cutX, cy - r - 3.dp.toPx()),
+                        end = Offset(cutX, cy + r + 3.dp.toPx()),
+                        strokeWidth = 1.5.dp.toPx(),
+                    )
+                    drawCircle(color = p.panel, radius = 6.5.dp.toPx(), center = Offset(posX, cy))
+                    drawCircle(color = gaugeColor, radius = 4.8.dp.toPx(), center = Offset(posX, cy))
+                }
                 val notes = buildList {
                     photo.topPct?.let { if (it <= 30) add("가장 잘 나온 사진 상위 $it%") }
                     if (photo.burstSize > 0) add("연사 ${photo.burstSize}장 중 ${photo.burstRank}번째")
