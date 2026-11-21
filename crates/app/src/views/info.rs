@@ -282,27 +282,9 @@ impl PhotoApp {
             ui.label(egui::RichText::new(msg).font(font(11.5)).color(pal.text3));
             return;
         };
-        // Likelihood bar.
+        // Likelihood gauge: left = B-cut, right = A-cut.
         if a.b_prob.is_finite() {
-            let p = a.b_prob.clamp(0.0, 1.0);
-            let color = if p * 100.0 >= self.cfg.cull_threshold as f32 {
-                pal.warning
-            } else if p < 0.3 {
-                pal.success
-            } else {
-                pal.text2
-            };
-            ui.horizontal(|ui| {
-                ui.label(egui::RichText::new("B컷 가능성").font(font(12.0)));
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    ui.label(egui::RichText::new(format!("{:.0}%", p * 100.0)).font(bold(12.5)).color(color));
-                });
-            });
-            let (r, _) = ui.allocate_exact_size(vec2(ui.available_width(), 6.0), Sense::hover());
-            ui.painter().rect_filled(r, 3.0, pal.control_bg);
-            ui.painter().rect_filled(Rect::from_min_size(r.min, vec2(r.width() * p, r.height())), 3.0, color);
-            let t = r.left() + r.width() * self.cfg.cull_threshold as f32 / 100.0;
-            ui.painter().line_segment([pos2(t, r.top() - 2.0), pos2(t, r.bottom() + 2.0)], Stroke::new(1.0, pal.text3));
+            cull_gauge(ui, a.b_prob, self.cfg.cull_threshold, &pal);
             if a.keep_rank.is_finite() && a.keep_rank * 100.0 < 50.0 {
                 ui.label(
                     egui::RichText::new(format!(
@@ -617,4 +599,160 @@ fn chip(ui: &mut Ui, text: &str, bg: Color32, fg: Color32) {
     let (r, _) = ui.allocate_exact_size(vec2(g.size().x + 14.0, 20.0), Sense::hover());
     ui.painter().rect_filled(r, 10.0, bg);
     ui.painter().galley(pos2(r.left() + 7.0, r.center().y - g.size().y / 2.0), g, fg);
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct GaugeMetrics {
+    /// Marker position along the track: 0.0 = far left (B-cut), 1.0 = far right (A-cut).
+    pos: f32,
+    /// B-cut candidate cutoff position along the same track (`1.0 - threshold / 100.0`).
+    cut: f32,
+    b_pct: u32,
+    a_pct: u32,
+    is_b: bool,
+    is_a: bool,
+}
+
+fn gauge_metrics(b_prob: f32, threshold: u8) -> GaugeMetrics {
+    let b = b_prob.clamp(0.0, 1.0);
+    let b_pct = (b * 100.0).round() as u32;
+    let a_pct = 100 - b_pct;
+    let cut = (1.0 - threshold as f32 / 100.0).clamp(0.0, 1.0);
+    let is_b = b * 100.0 >= threshold as f32;
+    let is_a = !is_b && b < 0.3;
+    GaugeMetrics { pos: 1.0 - b, cut, b_pct, a_pct, is_b, is_a }
+}
+
+fn lerp_color(a: Color32, b: Color32, t: f32) -> Color32 {
+    let t = t.clamp(0.0, 1.0);
+    let mix = |x: u8, y: u8| (x as f32 + (y as f32 - x as f32) * t).round().clamp(0.0, 255.0) as u8;
+    Color32::from_rgba_unmultiplied(mix(a.r(), b.r()), mix(a.g(), b.g()), mix(a.b(), b.b()), mix(a.a(), b.a()))
+}
+
+/// Spectrum gauge: left end = B-cut, right end = A-cut, with the candidate cutoff tick and marker.
+fn cull_gauge(ui: &mut Ui, b_prob: f32, threshold: u8, pal: &crate::theme::Palette) {
+    let g = gauge_metrics(b_prob, threshold);
+    let accent = if g.is_b {
+        pal.warning
+    } else if g.is_a {
+        pal.success
+    } else {
+        pal.text2
+    };
+    let b_label = format!("← B컷 {}%", g.b_pct);
+    let a_label = format!("A컷 {}% →", g.a_pct);
+    let (b_text, a_text) = if g.is_b {
+        (
+            egui::RichText::new(b_label).font(bold(12.5)).color(pal.warning),
+            egui::RichText::new(a_label).font(font(11.5)).color(pal.text3),
+        )
+    } else if g.is_a {
+        (
+            egui::RichText::new(b_label).font(font(11.5)).color(pal.text3),
+            egui::RichText::new(a_label).font(bold(12.5)).color(pal.success),
+        )
+    } else if g.b_pct > g.a_pct {
+        (
+            egui::RichText::new(b_label).font(bold(12.0)).color(pal.text),
+            egui::RichText::new(a_label).font(font(11.5)).color(pal.text3),
+        )
+    } else if g.a_pct > g.b_pct {
+        (
+            egui::RichText::new(b_label).font(font(11.5)).color(pal.text3),
+            egui::RichText::new(a_label).font(bold(12.0)).color(pal.text),
+        )
+    } else {
+        (
+            egui::RichText::new(b_label).font(font(12.0)).color(pal.text2),
+            egui::RichText::new(a_label).font(font(12.0)).color(pal.text2),
+        )
+    };
+    ui.horizontal(|ui| {
+        ui.label(b_text);
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            ui.label(a_text);
+        });
+    });
+
+    let (r, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 16.0), Sense::hover());
+    let pad = 7.0;
+    let track = Rect::from_min_max(
+        pos2((r.left() + pad).min(r.center().x), r.center().y - 3.0),
+        pos2((r.right() - pad).max(r.center().x), r.center().y + 3.0),
+    );
+    let p = ui.painter();
+    let radius = 3.0;
+    let left_tint = lerp_color(pal.control_bg, pal.warning, 0.36);
+    let right_tint = lerp_color(pal.control_bg, pal.success, 0.36);
+    if track.width() > radius * 2.0 {
+        p.circle_filled(pos2(track.left() + radius, track.center().y), radius, left_tint);
+        p.circle_filled(pos2(track.right() - radius, track.center().y), radius, right_tint);
+        let inner_left = track.left() + radius;
+        let inner_w = track.width() - radius * 2.0;
+        const STEPS: usize = 24;
+        for i in 0..STEPS {
+            let t0 = i as f32 / STEPS as f32;
+            let t1 = (i + 1) as f32 / STEPS as f32;
+            let tm = 0.5 * (t0 + t1);
+            let c = if tm < 0.5 {
+                lerp_color(left_tint, pal.control_bg, tm * 2.0)
+            } else {
+                lerp_color(pal.control_bg, right_tint, (tm - 0.5) * 2.0)
+            };
+            let x0 = inner_left + inner_w * t0;
+            let x1 = (inner_left + inner_w * t1 + 0.5).min(track.right() - radius);
+            p.rect_filled(Rect::from_min_max(pos2(x0, track.top()), pos2(x1, track.bottom())), 0.0, c);
+        }
+    } else {
+        p.rect_filled(track, radius, pal.control_bg);
+    }
+
+    let cut_x = track.left() + track.width() * g.cut;
+    let pos_x = track.left() + track.width() * g.pos;
+    let seg = Rect::from_min_max(pos2(cut_x.min(pos_x), track.top()), pos2(cut_x.max(pos_x), track.bottom()));
+    if seg.width() > 0.5 {
+        p.rect_filled(seg, radius, accent);
+    }
+    p.line_segment([pos2(cut_x, track.top() - 3.0), pos2(cut_x, track.bottom() + 3.0)], Stroke::new(1.5, pal.text3));
+    let center = pos2(pos_x, track.center().y);
+    p.circle_filled(center, 6.5, pal.panel_bg);
+    p.circle_filled(center, 4.8, accent);
+
+    resp.on_hover_text(format!(
+        "왼쪽일수록 B컷, 오른쪽일수록 A컷 가능성이 높습니다 · 세로선은 B컷 후보 기준 (B컷 {}%)",
+        threshold
+    ));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::gauge_metrics;
+
+    #[test]
+    fn gauge_places_b_left_and_a_right() {
+        let b = gauge_metrics(0.94, 60);
+        assert_eq!((b.b_pct, b.a_pct), (94, 6));
+        assert!(b.pos < 0.1 && b.is_b && !b.is_a);
+        assert!((b.cut - 0.4).abs() < 1e-5);
+        assert!(b.pos < b.cut);
+
+        let a = gauge_metrics(0.08, 60);
+        assert_eq!((a.b_pct, a.a_pct), (8, 92));
+        assert!(a.pos > 0.9 && !a.is_b && a.is_a);
+        assert!(a.pos > a.cut);
+
+        let mid = gauge_metrics(0.45, 60);
+        assert_eq!((mid.b_pct, mid.a_pct), (45, 55));
+        assert!(!mid.is_b && !mid.is_a);
+        assert!(mid.pos > mid.cut);
+    }
+
+    #[test]
+    fn gauge_percentages_always_sum_to_100() {
+        for i in 0..=200 {
+            let g = gauge_metrics(i as f32 / 200.0, 60);
+            assert_eq!(g.b_pct + g.a_pct, 100);
+            assert!((0.0..=1.0).contains(&g.pos));
+        }
+    }
 }
