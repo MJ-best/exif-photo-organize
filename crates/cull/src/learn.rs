@@ -701,28 +701,38 @@ fn taste_features(items: &[Item], labels: &[Option<bool>], scores: &[Score], fea
     }
 }
 
-/// Shift a trained model's intercept so that, over the photos not judged yet (`open`), it expects
-/// as many B-cuts as the prior does — scaled by how the prior fared on the judged photos
-/// (`judged`: features and whether the user called it a B-cut).
+/// Guard a trained model against worst-first selection collapse without inflating B-cut scores.
 ///
-/// Labels are not a fair sample of the library (B-cuts are mostly rejected from the candidate
-/// list, starting with the worst), so a trained model knows *which* photos look like B-cuts to
-/// this user but not *how many* there are: left alone it learns that only the most extreme frames
-/// are B-cuts, and the candidate list collapses. A user who keeps photos the prior flagged gets
-/// fewer candidates; one who rejects photos it thought fine gets more.
+/// Class-balanced [`fit`] already places the 50 % boundary midway between the photographer's A-
+/// and B-cuts regardless of how many more `X` or `P` labels exist. The one case where that
+/// boundary drifts too low is when the photographer rejects only the most extreme candidates
+/// first: `fit` then thinks only extreme blur is a B-cut, and the candidate list collapses far
+/// below what the prior expects on `open`.
+///
+/// We therefore only lift the intercept when `fit`'s mean on `open` falls below a floor based on
+/// the prior's mean on `open` (scaled down — never above 1.0 — when the user keeps photos the
+/// prior flagged). Never amplifying `strictness` above 1.0 and never pulling a healthy learned
+/// model down prevents imbalanced `B >> A` labels (or deleted burst frames with `gone = true`)
+/// from pushing the whole library — including top A-cuts — toward 95 % B-cut, and prevents
+/// `A >> B` star-rating workflows from wiping out the candidate list.
 pub fn anchor(model: &Model, prior: &Model, open: &[&Features], judged: &[(&Features, bool)]) -> Model {
     if open.is_empty() || model == prior {
         return model.clone();
     }
+    let prior_open = open.iter().map(|x| prior.prob(x)).sum::<f64>() / open.len() as f64;
+    let fit_open = open.iter().map(|x| model.prob(x)).sum::<f64>() / open.len() as f64;
     let expected: f64 = judged.iter().map(|(x, _)| prior.prob(x)).sum();
     let actual = judged.iter().filter(|(_, b)| *b).count() as f64;
-    let strictness = ((actual + 3.0) / (expected + 3.0)).clamp(0.2, 5.0);
-    let target = (open.iter().map(|x| prior.prob(x)).sum::<f64>() / open.len() as f64 * strictness).clamp(0.001, 0.95);
+    let strictness = ((actual + 3.0) / (expected + 3.0)).clamp(0.2, 1.0);
+    let floor = (prior_open * strictness).clamp(0.001, 0.65);
+    if fit_open >= floor {
+        return model.clone();
+    }
     let mean = |shift: f64| open.iter().map(|x| sigmoid(model.logit(x) + shift)).sum::<f64>() / open.len() as f64;
-    let (mut lo, mut hi) = (-30.0, 30.0);
+    let (mut lo, mut hi) = (0.0, 30.0);
     for _ in 0..60 {
         let mid = (lo + hi) / 2.0;
-        if mean(mid) < target {
+        if mean(mid) < floor {
             lo = mid;
         } else {
             hi = mid;
@@ -941,8 +951,9 @@ mod tests {
         items.push(test_lo);
         let (scores, report, _) = score(&items, &LearnSettings::default());
         let p = |id: i64| scores.iter().find(|s| s.id == id).unwrap().b_prob;
-        // Learned which photos are B-cuts (the share of B-cuts among new photos stays anchored).
-        assert!(p(500) > 0.45 && p(501) < 0.05, "hi {} lo {}", p(500), p(501));
+        // Learned which photos are B-cuts: the ISO-12800 shot clears the 60% candidate threshold
+        // while the ISO-200 shot stays firmly on the A-cut side.
+        assert!(p(500) > 0.7 && p(501) < 0.15, "hi {} lo {}", p(500), p(501));
         assert_eq!(report.scenes[0].model, "전체 학습");
         assert!(report.scenes[0].accuracy.unwrap() > 0.9);
         let land = report.scenes.iter().find(|r| r.scene == Some(Scene::Landscape)).unwrap();
@@ -969,7 +980,7 @@ mod tests {
         items.push(test_lo);
         let (scores, report, _) = score(&items, &LearnSettings::default());
         let p = |id: i64| scores.iter().find(|s| s.id == id).unwrap().b_prob;
-        assert!(p(500) > 0.45 && p(501) < 0.05, "hi {} lo {}", p(500), p(501));
+        assert!(p(500) > 0.7 && p(501) < 0.15, "hi {} lo {}", p(500), p(501));
         assert_eq!(report.scenes[0].b, 60);
 
         // A deleted frame is not counted in its burst.
@@ -1170,5 +1181,95 @@ mod tests {
         let t = std::time::Instant::now();
         let (scores, report, _) = score(&items, &LearnSettings::default());
         println!("score 20k: {:?} ({} scores, {} scene reports)", t.elapsed(), scores.len(), report.scenes.len());
+    }
+
+    #[test]
+    fn imbalanced_b_labels_and_deleted_bursts_do_not_skew_scores() {
+        // Burst-heavy library where the photographer deleted many B-cuts (gone = true, losing
+        // their burst features) and picked far fewer A-cuts (6:1 B:A). `anchor` used to amplify
+        // `actual / expected` up to 5x, pushing >95 % of undecided photos — even the top 4 %
+        // best frames — into B-cut territory.
+        let mut seed = 42u64;
+        let mut rnd = || -> f64 {
+            seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            ((seed >> 33) as f64) / (1u64 << 31) as f64
+        };
+        let mut items = Vec::new();
+        let mut id = 1i64;
+        let mut t = 0i64;
+        for b in 0..400 {
+            t += 120_000;
+            let base_hash = (b as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15);
+            for f in 0..3 {
+                let peak = (4.5 + rnd() * 2.5) as f32 - f as f32 * 0.7;
+                let mut it = item(id, t + f * 400, peak);
+                it.scene = Scene::Landscape;
+                it.dhash = base_hash;
+                it.comp.tilt = ((rnd() - 0.5) * 7.0) as f32;
+                items.push(it);
+                id += 1;
+            }
+        }
+        let (mut nb, mut na) = (0, 0);
+        for it in &mut items {
+            let p_rej = if it.sharp_peak < 4.5 { 0.65 } else { 0.25 };
+            let r = rnd();
+            if r < p_rej && nb < 340 {
+                it.flag = -1;
+                it.gone = true;
+                nb += 1;
+            } else if it.sharp_peak > 5.0 && r > 0.80 && na < 55 {
+                it.flag = 1;
+                na += 1;
+            }
+        }
+        let settings = LearnSettings::default();
+        let (scores, _, _) = score(&items, &settings);
+        let mut open_p: Vec<f32> =
+            scores.iter().zip(&items).filter(|(_, it)| it.flag == 0 && it.rating == 0).map(|(s, _)| s.b_prob).collect();
+        open_p.sort_by(|a, b| a.total_cmp(b));
+        let top4 = open_p[(open_p.len() - 1) * 4 / 100];
+        let cand_rate = open_p.iter().filter(|&&p| p >= 0.6).count() as f64 / open_p.len() as f64;
+        let ev = crate::eval::evaluate(&items, &settings, 5, 0.6);
+        assert!(top4 < 0.25, "top 4% photo must stay on A-cut side, got b_prob={top4:.2}");
+        assert!(cand_rate < 0.5, "candidate list must not explode, got {cand_rate:.2}");
+        assert!(ev.learned.a_false_alarm < 0.25, "A-cut false alarm too high: {:?}", ev.learned);
+    }
+
+    #[test]
+    fn star_heavy_a_labels_do_not_collapse_candidates() {
+        // Photographer who rates many keepers (A >> B) and only rejects a handful of B-cuts:
+        // the candidate list must stay usable instead of collapsing towards 0 %.
+        let mut seed = 101u64;
+        let mut rnd = || -> f64 {
+            seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            ((seed >> 33) as f64) / (1u64 << 31) as f64
+        };
+        let mut items: Vec<Item> = (0..1200i64)
+            .map(|i| {
+                let peak = (2.2 + rnd() * 5.0) as f32;
+                let mut it = item(i + 1, i * 60_000, peak);
+                it.scene = Scene::Portrait;
+                it.face_area = 0.025;
+                it.face_sharp = Some(peak - (rnd() * 1.4) as f32);
+                it.eyes = Some((0.45 + rnd() * 0.55) as f32);
+                it.dhash = rnd().to_bits();
+                it
+            })
+            .collect();
+        let (mut nb, mut na) = (0, 0);
+        for it in &mut items {
+            let is_b = it.sharp_peak < 3.5 || it.eyes.unwrap() < 0.58;
+            if is_b && nb < 25 {
+                it.flag = -1;
+                nb += 1;
+            } else if !is_b && na < 250 {
+                it.rating = 4;
+                na += 1;
+            }
+        }
+        let ev = crate::eval::evaluate(&items, &LearnSettings::default(), 5, 0.6);
+        assert!(ev.learned.b_recall > 0.5, "B-cut recall collapsed: {:?}", ev.learned);
+        assert!(ev.learned.candidate_rate > 0.15, "candidate list collapsed: {:?}", ev.learned);
     }
 }
