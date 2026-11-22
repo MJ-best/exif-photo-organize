@@ -28,14 +28,14 @@ final class AnalysisCoordinator {
     private var lastLiveRefreshDone: Int = 0
 
     init(
-        thermalMonitor: ThermalBudgetMonitor = ThermalBudgetMonitor(),
+        thermalMonitor: ThermalBudgetMonitor? = nil,
         engineProvider: @escaping () -> (any PhotoEngineProtocol)?,
         isSuspendedProvider: @escaping () -> Bool,
         onChunkRefresh: @escaping () async -> Void,
         onLearnStatusUpdated: @escaping (LoupeLearnStatus) -> Void,
         onToast: @escaping (String, BottomToast.Tone) -> Void
     ) {
-        self.thermalMonitor = thermalMonitor
+        self.thermalMonitor = thermalMonitor ?? ThermalBudgetMonitor()
         self.engineProvider = engineProvider
         self.isSuspendedProvider = isSuspendedProvider
         self.onChunkRefresh = onChunkRefresh

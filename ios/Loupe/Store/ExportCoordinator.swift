@@ -17,10 +17,10 @@ final class ExportCoordinator {
 
     init(
         engineProvider: @escaping () -> (any PhotoEngineProtocol)?,
-        idleTimer: IdleTimerManager = .shared
+        idleTimer: IdleTimerManager? = nil
     ) {
         self.engineProvider = engineProvider
-        self.idleTimer = idleTimer
+        self.idleTimer = idleTimer ?? .shared
     }
 
     func open(for ids: [Int64]) {

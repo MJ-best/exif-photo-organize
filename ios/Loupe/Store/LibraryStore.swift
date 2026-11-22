@@ -90,8 +90,8 @@ final class LibraryStore {
     init(
         engine: (any PhotoEngineProtocol)? = nil,
         bookmarkStore: BookmarkStore = BookmarkStore(),
-        thermalMonitor: ThermalBudgetMonitor = ThermalBudgetMonitor(),
-        idleTimer: IdleTimerManager = .shared,
+        thermalMonitor: ThermalBudgetMonitor? = nil,
+        idleTimer: IdleTimerManager? = nil,
         learnDebounceNanoseconds: UInt64 = 1_200_000_000,
         engineFactory: @escaping @Sendable (String) throws -> any PhotoEngineProtocol
     ) {
@@ -104,6 +104,9 @@ final class LibraryStore {
         self.threshold = savedThreshold >= 30 ? savedThreshold : 60
         let savedKeepPct = UserDefaults.standard.integer(forKey: "loupe.keep_pct")
         self.keepPct = savedKeepPct >= 5 ? savedKeepPct : 15
+
+        let resolvedThermal = thermalMonitor ?? ThermalBudgetMonitor()
+        let resolvedIdle = idleTimer ?? .shared
 
         let box = EngineWeakBox()
         box.set(engine)
@@ -123,16 +126,16 @@ final class LibraryStore {
             onPresentError: { error in
                 storeBox.store?.presentError(error)
             },
-            idleTimer: idleTimer
+            idleTimer: resolvedIdle
         )
 
         self.exporter = ExportCoordinator(
             engineProvider: { storeBox.store?.engine },
-            idleTimer: idleTimer
+            idleTimer: resolvedIdle
         )
 
         self.analyzer = AnalysisCoordinator(
-            thermalMonitor: thermalMonitor,
+            thermalMonitor: resolvedThermal,
             engineProvider: { storeBox.store?.engine },
             isSuspendedProvider: { storeBox.store?.isSuspended ?? true },
             onChunkRefresh: {

@@ -186,9 +186,7 @@ final class ImagePipeline: @unchecked Sendable {
             guard let image = decoded, !Task.isCancelled else { return nil }
             let prepared = await image.byPreparingForDisplay() ?? image
             previewCache.setObject(prepared, forKey: key, cost: Self.pixelCost(prepared))
-            keyLock.lock()
-            previewKeysByPhotoID[id, default: []].insert(key)
-            keyLock.unlock()
+            recordPreviewKey(key, for: id)
             return prepared
         } catch {
             if !Task.isCancelled {
@@ -196,6 +194,12 @@ final class ImagePipeline: @unchecked Sendable {
             }
             return nil
         }
+    }
+
+    private func recordPreviewKey(_ key: NSString, for id: Int64) {
+        keyLock.lock()
+        previewKeysByPhotoID[id, default: []].insert(key)
+        keyLock.unlock()
     }
 
     /// Prefetches adjacent viewer photos (+1, -1, +2) at utility priority so swiping while zoomed

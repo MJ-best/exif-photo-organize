@@ -53,7 +53,7 @@ enum ThermalBudgetPolicy {
 final class ThermalBudgetMonitor {
     private(set) var thermalState: ProcessInfo.ThermalState = ProcessInfo.processInfo.thermalState
     private(set) var lowPowerMode: Bool = ProcessInfo.processInfo.isLowPowerModeEnabled
-    private var tokens: [NSObjectProtocol] = []
+    private let observers = NotificationObserverBag()
 
     var recommendedThreads: Int {
         ThermalBudgetPolicy.recommendedThreads(
@@ -72,7 +72,7 @@ final class ThermalBudgetMonitor {
 
     init() {
         let center = NotificationCenter.default
-        tokens.append(
+        observers.add(
             center.addObserver(
                 forName: ProcessInfo.thermalStateDidChangeNotification,
                 object: nil,
@@ -83,7 +83,7 @@ final class ThermalBudgetMonitor {
                 }
             }
         )
-        tokens.append(
+        observers.add(
             center.addObserver(
                 forName: .NSProcessInfoPowerStateDidChange,
                 object: nil,
@@ -96,17 +96,32 @@ final class ThermalBudgetMonitor {
         )
     }
 
-    deinit {
-        for token in tokens {
-            NotificationCenter.default.removeObserver(token)
-        }
-    }
-
     private func refresh() {
         thermalState = ProcessInfo.processInfo.thermalState
         lowPowerMode = ProcessInfo.processInfo.isLowPowerModeEnabled
         let budget = recommendedThreads
         LoupeLog.cull.info("Thermal budget updated: threads=\(budget) lowPower=\(self.lowPowerMode)")
         onThermalChange?(budget)
+    }
+}
+
+private final class NotificationObserverBag: @unchecked Sendable {
+    private let lock = NSLock()
+    private var tokens: [NSObjectProtocol] = []
+
+    func add(_ token: NSObjectProtocol) {
+        lock.lock()
+        tokens.append(token)
+        lock.unlock()
+    }
+
+    deinit {
+        lock.lock()
+        let toRemove = tokens
+        tokens.removeAll()
+        lock.unlock()
+        for token in toRemove {
+            NotificationCenter.default.removeObserver(token)
+        }
     }
 }

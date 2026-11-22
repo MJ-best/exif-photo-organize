@@ -23,12 +23,12 @@ final class ImportCoordinator {
         engineProvider: @escaping () -> (any PhotoEngineProtocol)?,
         onImportCompleted: @escaping () async -> Void,
         onPresentError: @escaping (LoupeError) -> Void,
-        idleTimer: IdleTimerManager = .shared
+        idleTimer: IdleTimerManager? = nil
     ) {
         self.engineProvider = engineProvider
         self.onImportCompleted = onImportCompleted
         self.onPresentError = onPresentError
-        self.idleTimer = idleTimer
+        self.idleTimer = idleTimer ?? .shared
     }
 
     func open() {

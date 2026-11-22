@@ -6,12 +6,12 @@ import XCTest
 final class LibraryStoreTests: XCTestCase {
     private func makeStore(
         sampleCount: Int = 12,
-        idleTimer: IdleTimerManager = IdleTimerManager(applyDisabled: { _ in })
+        idleTimer: IdleTimerManager? = nil
     ) -> (LibraryStore, MockPhotoEngine) {
         let mock = MockPhotoEngine(sampleCount: sampleCount)
         let store = LibraryStore(
             engine: mock,
-            idleTimer: idleTimer,
+            idleTimer: idleTimer ?? IdleTimerManager(applyDisabled: { _ in }),
             learnDebounceNanoseconds: 20_000_000,
             engineFactory: { _ in mock }
         )

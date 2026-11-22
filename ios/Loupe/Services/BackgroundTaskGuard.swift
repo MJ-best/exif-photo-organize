@@ -69,10 +69,10 @@ final class IdleTimerManager {
     static let shared = IdleTimerManager()
 
     private(set) var activeCount: Int = 0
-    private let applyDisabled: (Bool) -> Void
+    private let applyDisabled: @MainActor (Bool) -> Void
 
-    init(applyDisabled: @escaping (Bool) -> Void = { UIApplication.shared.isIdleTimerDisabled = $0 }) {
-        self.applyDisabled = applyDisabled
+    init(applyDisabled: (@MainActor (Bool) -> Void)? = nil) {
+        self.applyDisabled = applyDisabled ?? { UIApplication.shared.isIdleTimerDisabled = $0 }
     }
 
     func acquire(reason: String) -> Token {
