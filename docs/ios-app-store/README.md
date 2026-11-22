@@ -95,8 +95,44 @@ open Loupe.xcodeproj
 
 ---
 
-## 3. 남은 과제 (향후 고도화)
+## 3. App Store Connect 빌드 · 업로드 (GitHub Actions 권장)
+
+iOS / iPadOS 앱스토어용 `.ipa` 패키징에는 macOS + Xcode 16+ 서명 환경이 필요합니다. 기존 Mac App Store 용으로 등록해 둔 시크릿(`MAS_APP_CERT_P12`, `MAS_CERT_PASSWORD`, `APPLE_TEAM_ID`, `ASC_KEY_ID`, `ASC_ISSUER_ID`, `ASC_KEY_P8`)을 그대로 재사용합니다.
+
+### 사전에 적용된 App Store ITMS 필수 요건
+- **Privacy Manifest ([`PrivacyInfo.xcprivacy`](../../ios/Loupe/Resources/PrivacyInfo.xcprivacy))**: 추적 없음 · 데이터 수집 없음 + Required Reason API 선언(`UserDefaults CA92.1`, `DiskSpace E174.1/85F4.1`, `FileTimestamp C617.1/3B52.1/DDA9.1`) — `ITMS-91053` 대응.
+- **불투명 1024×1024 RGB 앱 아이콘**: 알파 채널을 제거한 24-bit RGB PNG — `ITMS-90717` 대응 (`ios/Scripts/sync-assets.sh` 가 자동 유지).
+- **비암호화 수출 규정**: `Info.plist` 에 `ITSAppUsesNonExemptEncryption = false`.
+- **정적 XCFramework 비임베드 & dSYM 포함**: `LoupeCore.xcframework` 는 정적 링크(`embed: false`)만 수행하고 Release `dwarf-with-dsym` 으로 크래시 심볼을 포함.
+- **iCloud 백업 제외**: `Documents/LOUPE` 에 `isExcludedFromBackup = true` 강제 적용 (App Review 2.23).
+
+### 번들 ID 선택 (통합 구매 vs 별도 앱)
+- **맥 LOUPE 와 통합 구매(Universal Purchase)**: App Store Connect 의 기존 Mac LOUPE 앱(`io.github.mj-best.loupe`) 화면에서 **+ iOS 앱** 을 추가하고, 워크플로 실행 시 `bundle_id` 에 **`io.github.mj-best.loupe`** 를 입력합니다.
+- **별도 iOS / iPadOS 앱으로 판매**: Apple Developer 에서 App ID **`io.github.mj-best.loupe.ios`** 를 등록하고 App Store Connect 에서 새 iOS 앱을 만든 뒤 기본값(`io.github.mj-best.loupe.ios`)으로 실행합니다.
+
+### GitHub Actions 로 빌드 및 업로드
+1. `main` 브랜치에 iOS 코드와 워크플로가 머지된 뒤, 저장소 **Actions → `ios-app-store` → Run workflow** 를 실행합니다.
+   - `upload`: `true` 로 두면 서명된 `.ipa` 를 만들고 `xcrun altool --validate-app` · `--upload-app` 으로 App Store Connect 에 바로 올립니다 (`false` 면 아티팩트 `loupe-ios-appstore` 로 `.ipa` 만 내려받아 Transporter 로 직접 올릴 수 있습니다).
+   - `bundle_id`: 통합 구매(`io.github.mj-best.loupe`) 또는 별도 앱(`io.github.mj-best.loupe.ios`).
+   - (선택) 수동 프로비저닝 프로필을 쓰려면 Apple Developer 에서 **iOS App Store Connect** 배포 프로필(`.mobileprovision`)을 받아 base64 로 GitHub 시크릿 `IOS_PROVISIONING_PROFILE` 에 넣습니다. 비워 두면 기존 `MAS_APP_CERT_P12` + `ASC_*` API 키로 Xcode 자동 배포 서명을 시도합니다.
+2. 업로드 뒤 15–30분 후 App Store Connect(TestFlight / App Store 버전)에서 빌드를 선택하고 [listing.md](listing.md) · [privacy.md](privacy.md) 내용을 채워 제출합니다.
+
+### Mac 에서 직접 빌드 / 드라이런
+```bash
+# 인증서 없이 Release arm64 아카이브 + ITMS 사전 점검만 실행
+ios/Scripts/ios-appstore.sh --dry-run
+
+# 서명된 .ipa 생성 및 App Store Connect 업로드
+TEAM_ID=ABCDE12345 \
+BUNDLE_ID=io.github.mj-best.loupe.ios \
+PROFILE=~/Downloads/LOUPE_iOS_AppStore.mobileprovision \
+ASC_KEY_ID=... ASC_ISSUER_ID=... \
+ios/Scripts/ios-appstore.sh --upload
+```
+
+---
+
+## 4. 남은 과제 (향후 고도화)
 
 - **Core ML / Apple Neural Engine(ANE) 추론 백엔드**: 현재는 `tract-onnx` CPU 추론 + 열 예산 스레드 제한으로 안전하게 동작합니다. 향후 `crates/cull` 의 `vision`/`segment` 추론을 Core ML `.mlpackage` 로 위임하는 어댑터를 붙이면 A17/M-series 기기에서 분석 속도를 5~10배 높이고 발열을 더 줄일 수 있습니다.
-- **실기기 프로파일링**: 리눅스 CI 환경에서는 실제 iPhone/iPad 실기기 메모리(Jetsam), USB-C 외장 SSD 분리/재연결, Apple Pencil/Magic Keyboard 단축키 동작을 직접 확인하지 못했습니다. macOS + Xcode 실기기에서 Instruments(Allocations · Time Profiler · Core Animation Hitches)로 확인이 필요합니다.
-- **App Store Connect iOS 배포 워크플로**: `app-store.yml`(macOS)처럼 iOS 인증서·프로비저닝 프로필·스크린샷이 준비되면 `ios-app-store.yml` 배포 파이프라인을 추가합니다.
+- **실기기 프로파일링**: 리눅스 환경에서는 실제 iPhone/iPad 실기기 메모리(Jetsam), USB-C 외장 SSD 분리/재연결, Apple Pencil/Magic Keyboard 단축키 동작을 직접 확인하지 못했습니다. TestFlight 배포 후 실기기 및 Xcode Instruments(Allocations · Time Profiler · Core Animation Hitches)로 확인이 필요합니다.

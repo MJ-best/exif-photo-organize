@@ -14,9 +14,17 @@ settings:
     SWIFT_VERSION: "5.10"
     TARGETED_DEVICE_FAMILY: "1,2"
     SUPPORTS_MACCATALYST: NO
+    ENABLE_BITCODE: NO
+    GENERATE_INFOPLIST_FILE: NO
     ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
     ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
     ENABLE_USER_SCRIPT_SANDBOXING: NO
+  configs:
+    Release:
+      DEBUG_INFORMATION_FORMAT: dwarf-with-dsym
+      SWIFT_COMPILATION_MODE: wholemodule
+      SWIFT_OPTIMIZATION_LEVEL: -O
+      STRIP_INSTALLED_PRODUCT: YES
 
 targets:
   Loupe:
@@ -31,6 +39,7 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: io.github.mj-best.loupe.ios
         INFOPLIST_FILE: Config/Info.plist
         SWIFT_OBJC_BRIDGING_HEADER: ""
+        CODE_SIGN_STYLE: Automatic
         OTHER_LDFLAGS:
           - "$(inherited)"
           - "-lc++"
@@ -57,3 +66,5 @@ schemes:
     test:
       targets:
         - LoupeTests
+    archive:
+      config: Release

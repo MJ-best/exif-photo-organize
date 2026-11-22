@@ -609,7 +609,29 @@ LOUPE(0.5.0 까지의 이름: Photo Organize)를 만들면서 받은 **요청과
   - 이 환경(Linux)에서는 macOS Xcode 빌드, `LoupeTests` 시뮬레이터 실행, 실제 iPhone/iPad UI·발열·USB-C SSD 연결 및 Instruments 프로파일링을 직접 확인하지 못했습니다.
 - **남은 점**
   - macOS + Xcode 시뮬레이터/실기기에서 `LoupeTests` 실행, UI 레이아웃, USB-C SD 카드/외장 SSD, Instruments 프로파일링 확인.
-  - Core ML / Apple Neural Engine(ANE) 추론 백엔드 연동 및 App Store Connect iOS 배포 파이프라인 추가.
+  - Core ML / Apple Neural Engine(ANE) 추론 백엔드 연동.
+
+### iOS · iPadOS App Store 패키징 · ITMS 요건 대응 · 업로드 워크플로 (11-21)
+
+- **요청**: `"이제 고쳤으면 앱스토어에 올릴 수 있게 빌드해"`
+- **반영**
+  - **App Store ITMS 자동 거절 요건 사전 수정**:
+    - `ios/Loupe/Resources/Assets.xcassets/AppIcon.appiconset/AppIcon-1024.png`: 기존 맥용 RGBA 아이콘(`color_type=6`)에서 알파 채널을 제거하고 모서리 그라디언트를 자연스럽게 채운 불투명 24-bit RGB PNG(`color_type=2`)로 변환(`ITMS-90717` 방지)하고 `ios/Scripts/sync-assets.sh` 에 자동화.
+    - `ios/Loupe/Resources/PrivacyInfo.xcprivacy`: 추적/데이터 수집 없음 + Required Reason API(`UserDefaults CA92.1`, `DiskSpace E174.1/85F4.1`, `FileTimestamp C617.1/3B52.1/DDA9.1`) 선언(`ITMS-91053` 방지).
+    - `ios/project.yml`: Release `dwarf-with-dsym` · `wholemodule` · `ENABLE_BITCODE=NO` · `STRIP_INSTALLED_PRODUCT=YES` 설정.
+  - **빌드 · 서명 · 업로드 파이프라인**:
+    - `ios/Scripts/build-rust-ios.sh`: 앱스토어 아카이브 시간을 절반으로 줄이는 `--device-only` 옵션 추가.
+    - `ios/Scripts/ios-appstore.sh`: `--dry-run`(무서명 Release arm64 `.xcarchive` + ITMS 사전 검증), 서명 `.ipa` 내보내기(수동 `.mobileprovision` 및 기존 `MAS_APP_CERT_P12` + `ASC_*` API 키 자동 서명 모두 지원), `--upload`(`xcrun altool --validate-app` · `--upload-app --type ios`) 지원.
+    - `.github/workflows/ios-app-store.yml`: 기존 Mac App Store 시크릿을 재사용하는 수동 실행(`upload`, `bundle_id` 입력) + PR 시 `--dry-run` 자동 검증 워크플로 추가.
+    - `docs/ios-app-store/privacy.md` · `listing.md` · `README.md`: 개인정보처리방침, 등록 문구, 심사 메모, 통합 구매(`io.github.mj-best.loupe`) vs 별도 앱(`io.github.mj-best.loupe.ios`) 업로드 절차 정리.
+- **확인**
+  - `AppIcon-1024.png` PNG 헤더 `1024x1024`, `bit_depth=8`, `color_type=2` (알파 채널 없음) 및 시각 렌더링 확인.
+  - `PrivacyInfo.xcprivacy` · `Info.plist` XML/plist 파싱, `ios/Scripts/*.sh` `bash -n` 문법 검사, `.github/workflows/ios-app-store.yml` · `ios/project.yml` 구조 검증 통과.
+  - 이 환경(Linux)에는 macOS · Xcode · Apple 키체인이 없어 실제 `.ipa` 아카이브·서명·업로드는 실행하지 못했습니다. 브랜치를 GitHub 에 올려 macOS 러너(`ios.yml` · `ios-app-store.yml`)에서 빌드·업로드해야 합니다.
+- **남은 점**
+  - `ios-ipados-app` 브랜치 푸시 → PR(macOS 러너 `LoupeTests` + `--dry-run` 아카이브 검증) → `main` 머지 후 사용자가 **Actions → `ios-app-store` → Run workflow** 실행.
+  - App Store Connect 에 iOS 앱(통합 구매 `+ iOS 앱` 또는 별도 앱) 생성 후 TestFlight / 심사 제출.
+
 
 
 
