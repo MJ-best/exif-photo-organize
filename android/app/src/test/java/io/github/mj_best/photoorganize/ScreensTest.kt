@@ -216,10 +216,10 @@ class ScreensTest {
         show(Preloaded(emptyList())) { ImportScreen(state, NoImportActions) }
         compose.onRoot().captureRoboImage("build/outputs/roborazzi/import-ready-phone.png")
         val copying = if (card != null) {
-            val files = Demo.folder(card).sortedBy { it.rel }
-            val done = files.take(files.size * 3 / 5)
-            val current = done.last { it.rel.endsWith(".jpg", ignoreCase = true) }.rel.substringAfterLast('/')
-            ImportStatus(done.size, files.size, done.sumOf { it.size }, info.newBytes, current)
+            // The count the scan shows (photos; XMP sidecars travel along uncounted), 3 of 5 done.
+            val photos = Demo.folder(card).filterNot { it.rel.endsWith(".xmp", ignoreCase = true) }.sortedBy { it.rel }
+            val done = photos.take(info.newFiles * 3 / 5)
+            ImportStatus(done.size, info.newFiles, done.sumOf { it.size }, info.newBytes, done.last().rel.substringAfterLast('/'))
         } else {
             ImportStatus(312, 771, 7_450_000_000, 18_420_000_000, "DSC01241.ARW")
         }
