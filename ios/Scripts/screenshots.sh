@@ -85,6 +85,9 @@ boot() {
     --dataNetwork wifi --wifiMode active --wifiBars 3 \
     --cellularMode active --cellularBars 4 \
     --batteryState charged --batteryLevel 100
+  # A freshly booted simulator shows system notices for a while ("Ready for Apple Intelligence"
+  # covered the first iPhone shot): let them pass before anything is captured.
+  sleep 30
 }
 
 # A fresh install with the library (`library`) or with an empty library and the card (`card`).
@@ -123,6 +126,11 @@ run_device() {
   shift 2
   boot "$udid"
   fresh "$udid" library
+  # Warm-up launch, not captured: first-launch work and any late system notice happen here.
+  xcrun simctl ui "$udid" appearance light
+  xcrun simctl launch "$udid" "$BUNDLE" -LoupeScene library >/dev/null
+  sleep "$WAIT"
+  xcrun simctl terminate "$udid" "$BUNDLE" 2>/dev/null || true
   local s file scene photo look
   for s in "$@"; do
     IFS='|' read -r file scene photo look <<<"$s"
