@@ -70,7 +70,7 @@ pub enum Bin {
 
 fn to_trash(lib: &Library, paths: &[PathBuf], bin: Bin) -> Result<(), String> {
     match bin {
-        #[cfg(not(target_os = "android"))]
+        #[cfg(not(any(target_os = "android", target_os = "ios")))]
         Bin::System => to_system_trash(paths),
         _ => to_library_trash(lib, paths),
     }
@@ -98,7 +98,7 @@ fn to_library_trash(lib: &Library, paths: &[PathBuf]) -> Result<(), String> {
     Ok(())
 }
 
-#[cfg(not(target_os = "android"))]
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 fn to_system_trash(paths: &[PathBuf]) -> Result<(), String> {
     if paths.is_empty() {
         return Ok(());

@@ -3,45 +3,56 @@
 
 use anyhow::{Context, Result};
 use image::{imageops, RgbImage};
-use std::sync::OnceLock;
+use std::sync::{Arc, RwLock};
 use tract_onnx::prelude::*;
 
 static YUNET_ONNX: &[u8] = include_bytes!("../models/face_detection_yunet_2023mar.onnx");
 static MOBILENET_ONNX: &[u8] = include_bytes!("../models/image_classification_mobilenetv2_2022apr.onnx");
 
-type Plan = std::sync::Arc<TypedRunnableModel>;
+type Plan = Arc<TypedRunnableModel>;
 
 struct Nets {
     yunet: Plan,
     mobilenet: Plan,
 }
 
-static NETS: OnceLock<std::result::Result<Nets, String>> = OnceLock::new();
+static NETS: RwLock<Option<Arc<Nets>>> = RwLock::new(None);
 
-fn nets() -> Result<&'static Nets> {
-    NETS.get_or_init(|| {
-        let load = || -> TractResult<Nets> {
-            let yunet = tract_onnx::onnx()
-                .model_for_read(&mut std::io::Cursor::new(YUNET_ONNX))?
-                .into_optimized()?
-                .into_runnable()?;
-            let mobilenet = tract_onnx::onnx().model_for_read(&mut std::io::Cursor::new(MOBILENET_ONNX))?;
-            // The class scores, and the pooled features just before the classifier.
-            let outputs = [
-                OutletId::new(mobilenet.node_id_by_name("Gemm_104")?, 0),
-                OutletId::new(mobilenet.node_id_by_name("GlobalAveragePool_97")?, 0),
-            ];
-            let mobilenet = mobilenet
-                .with_input_fact(0, f32::fact([1, 3, 224, 224]).into())?
-                .with_output_outlets(&outputs)?
-                .into_optimized()?
-                .into_runnable()?;
-            Ok(Nets { yunet, mobilenet })
-        };
-        load().map_err(|e| format!("{e:#}"))
-    })
-    .as_ref()
-    .map_err(|e| anyhow::anyhow!("모델을 불러오지 못했습니다: {e}"))
+fn load_nets() -> TractResult<Nets> {
+    let yunet =
+        tract_onnx::onnx().model_for_read(&mut std::io::Cursor::new(YUNET_ONNX))?.into_optimized()?.into_runnable()?;
+    let mobilenet = tract_onnx::onnx().model_for_read(&mut std::io::Cursor::new(MOBILENET_ONNX))?;
+    // The class scores, and the pooled features just before the classifier.
+    let outputs = [
+        OutletId::new(mobilenet.node_id_by_name("Gemm_104")?, 0),
+        OutletId::new(mobilenet.node_id_by_name("GlobalAveragePool_97")?, 0),
+    ];
+    let mobilenet = mobilenet
+        .with_input_fact(0, f32::fact([1, 3, 224, 224]).into())?
+        .with_output_outlets(&outputs)?
+        .into_optimized()?
+        .into_runnable()?;
+    Ok(Nets { yunet, mobilenet })
+}
+
+fn nets() -> Result<Arc<Nets>> {
+    if let Some(cached) = NETS.read().unwrap_or_else(|e| e.into_inner()).as_ref() {
+        return Ok(Arc::clone(cached));
+    }
+    let mut guard = NETS.write().unwrap_or_else(|e| e.into_inner());
+    if let Some(cached) = guard.as_ref() {
+        return Ok(Arc::clone(cached));
+    }
+    let loaded = Arc::new(load_nets().map_err(|e| anyhow::anyhow!("모델을 불러오지 못했습니다: {e:#}"))?);
+    *guard = Some(Arc::clone(&loaded));
+    Ok(loaded)
+}
+
+/// Drop cached YuNet and MobileNetV2 runtime graphs to reclaim heap memory (e.g. on iOS memory
+/// warning or backgrounding). Subsequent calls transparently reload them.
+pub fn release() {
+    let mut guard = NETS.write().unwrap_or_else(|e| e.into_inner());
+    *guard = None;
 }
 
 #[derive(Clone, Debug)]

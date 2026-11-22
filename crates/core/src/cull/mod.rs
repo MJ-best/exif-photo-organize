@@ -27,16 +27,28 @@ pub fn analyze_assets(
     cancel: &AtomicBool,
     on_done: &(dyn Fn(i64, usize) + Sync),
 ) -> Result<usize> {
+    analyze_assets_with_threads(lib, ids, cancel, 0, on_done)
+}
+
+/// Like [`analyze_assets`], but bounds concurrency to `max_threads` (`0` uses the global Rayon
+/// pool; `1` runs sequentially on the caller thread to keep peak RAM to one photo on iOS/mobile).
+pub fn analyze_assets_with_threads(
+    lib: &Library,
+    ids: &[i64],
+    cancel: &AtomicBool,
+    max_threads: usize,
+    on_done: &(dyn Fn(i64, usize) + Sync),
+) -> Result<usize> {
     let catalog = Mutex::new(lib.catalog()?);
     let count = AtomicUsize::new(0);
     let _ = vision::warm_up();
     let _ = segment::warm_up();
-    ids.par_iter().for_each(|&id| {
+    let run_one = |id: i64| {
         if cancel.load(Ordering::Relaxed) {
             return;
         }
         let (files, orientation) = {
-            let c = catalog.lock().unwrap();
+            let c = catalog.lock().unwrap_or_else(|e| e.into_inner());
             (c.files_for(id).unwrap_or_default(), c.metadata(id).map(|m| m.orientation).unwrap_or(1))
         };
         let Some(f) = files.iter().filter(|f| !f.kind.is_video()).min_by_key(|f| f.kind.preview_priority()) else {
@@ -44,14 +56,30 @@ pub fn analyze_assets(
         };
         match analyze_file(&lib.abs(&f.rel_path), f.kind, orientation, None) {
             Ok(a) => {
-                if catalog.lock().unwrap().put_analysis(id, &a).is_ok() {
+                if catalog.lock().unwrap_or_else(|e| e.into_inner()).put_analysis(id, &a).is_ok() {
                     let n = count.fetch_add(1, Ordering::Relaxed) + 1;
                     on_done(id, n);
                 }
             }
             Err(e) => log::debug!("analyse {}: {e:#}", f.rel_path),
         }
-    });
+    };
+    if max_threads == 1 {
+        for &id in ids {
+            if cancel.load(Ordering::Relaxed) {
+                break;
+            }
+            run_one(id);
+        }
+    } else if max_threads >= 2 {
+        let pool = rayon::ThreadPoolBuilder::new()
+            .num_threads(max_threads)
+            .build()
+            .context("build bounded analysis thread pool")?;
+        pool.install(|| ids.par_iter().for_each(|&id| run_one(id)));
+    } else {
+        ids.par_iter().for_each(|&id| run_one(id));
+    }
     Ok(count.load(Ordering::Relaxed))
 }
 

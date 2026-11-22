@@ -173,6 +173,43 @@ pub fn encode_jpeg(img: &RgbImage, quality: u8) -> Result<Vec<u8>> {
     Ok(out)
 }
 
+/// Location of a camera JPEG (or RAW-embedded JPEG preview) inside a file on disk.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct EmbeddedJpeg {
+    pub offset: u64,
+    pub len: u64,
+    pub width: u32,
+    pub height: u32,
+}
+
+/// Locate the smallest decodable embedded JPEG whose long edge is at least `min_edge` (or the
+/// largest available). Allows platforms with hardware JPEG decoders (e.g. Apple ImageIO) to decode
+/// straight from the file slice with zero software re-encoding and zero FFI byte copies.
+pub fn find_embedded_jpeg(
+    path: &Path,
+    kind: FileKind,
+    min_edge: u32,
+    previews: Option<&[JpegRef]>,
+) -> Result<EmbeddedJpeg> {
+    if !matches!(kind, FileKind::Jpeg | FileKind::Raw) {
+        bail!("no embedded jpeg for {:?}", kind);
+    }
+    let owned;
+    let previews = match previews {
+        Some(p) if !p.is_empty() => p,
+        _ => {
+            owned = metadata::probe(path, kind)?.previews;
+            &owned[..]
+        }
+    };
+    let cands = candidates(path, previews);
+    let c = choose(&cands, min_edge).context("no embedded preview found")?;
+    if c.jpeg.len > MAX_JPEG_BYTES {
+        bail!("embedded image too large");
+    }
+    Ok(EmbeddedJpeg { offset: c.jpeg.offset, len: c.jpeg.len, width: c.width, height: c.height })
+}
+
 /// Load an image of a file with its long edge close to `edge` (never smaller unless the source
 /// is smaller). `previews` may be passed when they are already known (e.g. from an import scan);
 /// otherwise the file is probed. The result is rotated according to `orientation`.
@@ -191,17 +228,8 @@ pub fn load_image(
         }
         FileKind::Video | FileKind::Heif => bail!("no decoder for {:?}", kind),
         FileKind::Jpeg | FileKind::Raw => {
-            let owned;
-            let previews = match previews {
-                Some(p) if !p.is_empty() => p,
-                _ => {
-                    owned = metadata::probe(path, kind)?.previews;
-                    &owned[..]
-                }
-            };
-            let cands = candidates(path, previews);
-            let c = choose(&cands, edge).context("no embedded preview found")?;
-            let bytes = read_range(path, c.jpeg.offset, c.jpeg.len)?;
+            let c = find_embedded_jpeg(path, kind, edge, previews)?;
+            let bytes = read_range(path, c.offset, c.len)?;
             decode_jpeg(&bytes, Some(edge))?
         }
     };
