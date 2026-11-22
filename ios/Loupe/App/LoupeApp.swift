@@ -22,6 +22,9 @@ struct LoupeApp: App {
             LoupeRootContainer(store: store)
                 .task {
                     await store.bootstrap()
+                    #if DEBUG
+                    await store.openScreenshotScene()
+                    #endif
                 }
                 .onChange(of: scenePhase) { _, newPhase in
                     Task { @MainActor in

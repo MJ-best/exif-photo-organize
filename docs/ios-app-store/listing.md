@@ -36,3 +36,22 @@ LOUPE 는 촬영 직후 **정리와 셀렉**에만 집중하는 사진가용 앱
 - LOUPE 는 완전 오프라인 사진 정리·셀렉 앱이며 로그인이나 계정이 필요하지 않습니다.
 - "SD 카드 · 폴더 가져오기" 버튼에서 파일 앱의 아무 이미지 폴더나 선택하면 EXIF 날짜 정리, 온디바이스 AI 셀렉 분석, 별점/픽/거절, 실행 취소(`⌘Z`), 자동 수평·구도 크롭, AirDrop/파일 내보내기를 모두 테스트할 수 있습니다.
 - 네트워크 통신, 광고, 사용자 추적은 일절 포함하지 않습니다 (`PrivacyInfo.xcprivacy` 에 앱 내부 저장소/사용자 선택 폴더 접근 사유만 선언).
+
+## 스크린샷
+
+`screenshots/` 에 있습니다. iOS 시뮬레이터에서 실제 앱을 띄워 찍은 그림이고, 사진은 사용자 사진 5장의 견본 카드입니다 ([방법](../screenshots/README.md)).
+
+| 기기 (App Store Connect 칸) | 크기 | 파일 |
+|---|---|---|
+| iPhone 6.9" | 1320 × 2868 | `iphone-1-library` · `iphone-2-viewer` · `iphone-3-info` · `iphone-4-composition` · `iphone-5-import` · `iphone-6-cocoa` |
+| iPad 13" | 2064 × 2752 | `ipad-1-library` · `ipad-2-viewer` · `ipad-3-composition` · `ipad-4-import` · `ipad-5-cocoa` |
+
+1. 라이브러리 — 날짜별 사진, A컷 후보 표시
+2. 사진 보기 — 필름스트립, 아래 띠의 A컷 · B컷 쪽 표시
+3. 정보 — 셀렉 도우미 게이지(← B컷 · A컷 →), A컷 근거, 자동 수평 · 구도
+4. 구도 표시(G) — 3분할 선과 피사체 영역
+5. SD 카드 가져오기 — 카드를 살펴본 결과 (새 사진 · 용량 · 카메라)
+6. 코코아 테마 (다크 모드)
+
+- 다시 찍기: 맥에서 `./ios/Scripts/screenshots.sh`, 또는 Actions → **ios-screenshots** → Run workflow (아티팩트).
+- 아이패드 그림 오른쪽 아래 모서리의 작은 곡선은 iPadOS 의 창 크기 조절 손잡이입니다 (시뮬레이터 기본 *창 모드*).

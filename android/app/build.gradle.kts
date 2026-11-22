@@ -180,6 +180,13 @@ tasks.withType<Test>().configureEach {
     // Korean file names (작품 folders) on machines whose default locale is not UTF-8.
     environment("LC_ALL", "C.UTF-8")
     (findProperty("demo") as String?)?.let { systemProperty("photoorg.demo", it) }
+    // -Pcard=<folder>: a real card imported for the screenshots (relative to the repository),
+    // e.g. docs/screenshots/sample-card; -Pphoto=<file name> picks the viewer's photo.
+    (findProperty("card") as String?)?.let {
+        val f = File(it)
+        systemProperty("photoorg.card", (if (f.isAbsolute) f else repoRoot.resolve(it)).path)
+    }
+    (findProperty("photo") as String?)?.let { systemProperty("photoorg.photo", it) }
 }
 
 dependencies {

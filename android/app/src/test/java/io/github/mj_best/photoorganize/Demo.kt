@@ -93,10 +93,25 @@ object Demo {
         }
     }
 
+    /** A real card or folder (`-Pcard=<folder>`): every file in it, listed the way the app lists a card. */
+    fun folder(dir: File): List<SourceEntry> =
+        dir.walkTopDown()
+            .filter { it.isFile && !it.name.startsWith(".") }
+            .sortedBy { it.path }
+            .map { f ->
+                SourceEntry(
+                    rel = f.relativeTo(dir).invariantSeparatorsPath,
+                    size = f.length(),
+                    mtimeMs = f.lastModified(),
+                    id = f.path,
+                )
+            }
+            .toList()
+
     /** A library with these photos imported and looked at by the culling assistant. */
-    fun library(root: File, card: List<SourceEntry>): PhotoLibrary {
+    fun library(root: File, card: List<SourceEntry>, label: String = "EOS_DIGITAL"): PhotoLibrary {
         val lib = PhotoLibrary.open(root.path)
-        lib.scan("EOS_DIGITAL", card, opener, true)
+        lib.scan(label, card, opener, true)
         lib.importScanned(object : ImportListener {
             override fun progress(status: ImportStatus) {}
         })

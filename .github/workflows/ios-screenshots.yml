@@ -1,0 +1,79 @@
+name: ios-screenshots
+
+# Store screenshots of the iOS app on the iOS Simulator (iPhone 6.9" · iPad 13") with the sample
+# card in docs/screenshots/sample-card: ios/Scripts/screenshots.sh.
+# On a work branch the pictures are committed back to that branch
+# (docs/ios-app-store/screenshots/); on main or a manual run they are only an artifact.
+
+on:
+  push:
+    branches-ignore: [main]
+    paths:
+      - "ios/Loupe/**"
+      - "ios/Scripts/screenshots.sh"
+      - "ios/project.yml"
+      - "docs/screenshots/sample-card/**"
+      - ".github/workflows/ios-screenshots.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+  IPHONEOS_DEPLOYMENT_TARGET: "17.0"
+
+jobs:
+  screenshots:
+    runs-on: macos-latest
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-ios-sim
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ios-screenshots
+
+      - name: Select newest non-beta Xcode
+        run: |
+          latest="$(ls -d /Applications/Xcode_*.app 2>/dev/null | grep -v -i beta | sort -V | tail -1)"
+          if [[ -n "$latest" ]]; then sudo xcode-select -s "$latest/Contents/Developer"; fi
+          xcodebuild -version
+          xcrun simctl list devices available | grep -E "iPhone .* Pro Max|iPad Pro 13" || true
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Build LoupeCore.xcframework & Swift bindings (Simulator)
+        run: ./ios/Scripts/build-rust-ios.sh --sim-only --debug
+
+      - name: Generate Xcode project
+        working-directory: ios
+        run: xcodegen generate
+
+      - name: Screenshots
+        run: ./ios/Scripts/screenshots.sh
+
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: ios-screenshots
+          path: docs/ios-app-store/screenshots/
+
+      - name: Commit the screenshots to this branch
+        if: github.event_name == 'push'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add docs/ios-app-store/screenshots
+          if git diff --cached --quiet; then
+            echo "No changes in the screenshots."
+            exit 0
+          fi
+          git commit -m "iOS 시뮬레이터 스크린샷 (${GITHUB_SHA::7})"
+          git pull --rebase origin "$GITHUB_REF_NAME"
+          git push origin "HEAD:$GITHUB_REF_NAME"

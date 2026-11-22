@@ -33,6 +33,7 @@ import io.github.mj_best.photoorganize.ui.ViewerActions
 import io.github.mj_best.photoorganize.ui.ViewerScreen
 import io.github.mj_best.photoorganize.ui.ViewerState
 import org.junit.Assert.assertTrue
+import org.junit.Assume.assumeTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -43,8 +44,10 @@ import java.io.File
 import java.nio.file.Files
 
 /**
- * The screens with a real library: one made here from test photos, or the one given with
- * `-Pdemo=<library folder>` (copied first). Screenshots go to build/outputs/roborazzi.
+ * The screens with a real library: one made here from test photos, the one given with
+ * `-Pdemo=<library folder>` (copied first), or one imported here from a real card with
+ * `-Pcard=<folder>` (e.g. docs/screenshots/sample-card; `-Pphoto=<name>` picks the viewer's photo).
+ * Screenshots go to build/outputs/roborazzi.
  */
 @RunWith(RobolectricTestRunner::class)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
@@ -52,14 +55,19 @@ class ScreensTest {
     @get:Rule val compose = createComposeRule()
 
     private object Lib {
+        /** A real card (`-Pcard=<folder>`), imported through the engine like the app does. */
+        val card: File? = System.getProperty("photoorg.card")?.let(::File)?.takeIf { it.isDirectory }
+
         val lib: PhotoLibrary by lazy {
             val dir = Files.createTempDirectory("photoorg-screens").toFile()
             val demo = System.getProperty("photoorg.demo")?.let(::File)
-            if (demo != null && demo.isDirectory) {
-                demo.copyRecursively(File(dir, "Library"))
-                PhotoLibrary.open(File(dir, "Library").path).also { it.learn() }
-            } else {
-                Demo.library(File(dir, "Library"), Demo.card(File(dir, "card"), 40))
+            when {
+                demo != null && demo.isDirectory -> {
+                    demo.copyRecursively(File(dir, "Library"))
+                    PhotoLibrary.open(File(dir, "Library").path).also { it.learn() }
+                }
+                card != null -> Demo.library(File(dir, "Library"), Demo.folder(card), CARD_LABEL)
+                else -> Demo.library(File(dir, "Library"), Demo.card(File(dir, "card"), 40))
             }
         }
     }
@@ -99,6 +107,8 @@ class ScreensTest {
 
     private fun library(view: View, file: String, selection: Set<Long> = emptySet()) {
         val ui = ui(view)
+        // A real card may have nothing in a list (good photos: no B컷 후보); skip that picture.
+        if (Lib.card != null) assumeTrue("$view has photos", ui.photos.isNotEmpty())
         assertTrue("$view has photos", ui.photos.isNotEmpty())
         show(Preloaded(ui.photos.take(80).map { it.id })) {
             LibraryScreen(ui, selection, NoLibraryActions, SnackbarHostState())
@@ -108,8 +118,11 @@ class ScreensTest {
 
     private fun viewer(file: String) {
         val all = lib.photos(View.ALL)
-        // A photo the assistant has something to say about.
-        val p: Photo = all.filter { it.reasons.isNotEmpty() }.maxByOrNull { it.bPct ?: 0 } ?: all.first()
+        // The photo asked for (-Pphoto=<name>), else one the assistant has something to say about.
+        val wanted = System.getProperty("photoorg.photo")?.takeIf { it.isNotBlank() }
+        val p: Photo = wanted?.let { w -> all.firstOrNull { it.name.startsWith(w) } }
+            ?: all.filter { it.reasons.isNotEmpty() }.maxByOrNull { it.bPct ?: 0 }
+            ?: all.first()
         val ids = all.map { it.id }
         val i = ids.indexOf(p.id)
         show(Preloaded(ids.subList((i - 1).coerceAtLeast(0), (i + 2).coerceAtMost(ids.size)), big = p.id)) {
@@ -139,6 +152,14 @@ class ScreensTest {
     @Test
     @Config(qualifiers = PHONE)
     fun candidatesPhone() = library(View.CANDIDATES, "candidates-phone.png")
+
+    @Test
+    @Config(qualifiers = RobolectricDeviceQualifiers.MediumTablet)
+    fun keepersTablet() = library(View.KEEPERS, "keepers-tablet.png")
+
+    @Test
+    @Config(qualifiers = PHONE)
+    fun keepersPhone() = library(View.KEEPERS, "keepers-phone.png")
 
     @Test
     @Config(qualifiers = PHONE)
@@ -178,23 +199,45 @@ class ScreensTest {
     @Config(qualifiers = PHONE)
     fun importPhone() {
         val day = 86_400_000L
-        val info = ScanInfo(
-            label = "SanDisk SD 카드 · DCIM", photos = 412, newPhotos = 386, newFiles = 771,
-            newBytes = 18_420_000_000, videos = 6, rawPairs = 379,
-            firstMs = 1_791_100_000_000, lastMs = 1_791_100_000_000 + 2 * day,
-            cameras = listOf("Sony ILCE-7M4 · 380장", "iPhone 15 Pro · 32장"), errors = emptyList(),
-        )
+        val card = Lib.card
+        // A real card is scanned into an empty library, so every photo on it is new.
+        val info = if (card != null) {
+            val empty = Files.createTempDirectory("photoorg-import").toFile()
+            PhotoLibrary.open(File(empty, "Library").path).scan(CARD_LABEL, Demo.folder(card), Demo.opener, true)
+        } else {
+            ScanInfo(
+                label = "SanDisk SD 카드 · DCIM", photos = 412, newPhotos = 386, newFiles = 771,
+                newBytes = 18_420_000_000, videos = 6, rawPairs = 379,
+                firstMs = 1_791_100_000_000, lastMs = 1_791_100_000_000 + 2 * day,
+                cameras = listOf("Sony ILCE-7M4 · 380장", "iPhone 15 Pro · 32장"), errors = emptyList(),
+            )
+        }
         var state by mutableStateOf<ImportUi>(ImportUi.Ready(info, true, 96_000_000_000))
         show(Preloaded(emptyList())) { ImportScreen(state, NoImportActions) }
         compose.onRoot().captureRoboImage("build/outputs/roborazzi/import-ready-phone.png")
-        state = ImportUi.Copying(ImportStatus(312, 771, 7_450_000_000, 18_420_000_000, "DSC01241.ARW"), info.label)
+        val copying = if (card != null) {
+            // The count the scan shows (photos; XMP sidecars travel along uncounted), 3 of 5 done.
+            val photos = Demo.folder(card).filterNot { it.rel.endsWith(".xmp", ignoreCase = true) }.sortedBy { it.rel }
+            val done = photos.take(info.newFiles * 3 / 5)
+            ImportStatus(done.size, info.newFiles, done.sumOf { it.size }, info.newBytes, done.last().rel.substringAfterLast('/'))
+        } else {
+            ImportStatus(312, 771, 7_450_000_000, 18_420_000_000, "DSC01241.ARW")
+        }
+        state = ImportUi.Copying(copying, info.label)
         compose.waitForIdle()
         compose.onRoot().captureRoboImage("build/outputs/roborazzi/import-copying-phone.png")
-        state = ImportUi.Done(ImportResult(386, 0, 26, 18_420_000_000, emptyList(), false))
+        state = if (card != null) {
+            ImportUi.Done(ImportResult(info.newPhotos, 0, 0, info.newBytes, emptyList(), false))
+        } else {
+            ImportUi.Done(ImportResult(386, 0, 26, 18_420_000_000, emptyList(), false))
+        }
         compose.waitForIdle()
         compose.onRoot().captureRoboImage("build/outputs/roborazzi/import-done-phone.png")
     }
 }
+
+/** The name a real card (`-Pcard`) is shown with, like the volume name of the camera's card. */
+const val CARD_LABEL = "NIKON Z f"
 
 /** Store screenshot sizes: phone 1080 × 1920, 7" tablet 1200 × 1920; 10" is MediumTablet (2560 × 1600). */
 const val PHONE = "w360dp-h640dp-normal-notlong-notround-any-xxhdpi-keyshidden-nonav"

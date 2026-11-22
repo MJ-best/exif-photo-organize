@@ -96,6 +96,12 @@ struct ViewerView: View {
                 if currentID != nil {
                     store.images.prefetchNeighbors(ids: session.ids, around: session.index, maxEdge: previewEdge)
                 }
+                #if DEBUG
+                // Store screenshots (`-LoupeScene info`): the info sheet on iPhone.
+                if ScreenshotScene.current == .info && !isWide {
+                    phoneInspectorPresented = true
+                }
+                #endif
             }
             .sheet(isPresented: $phoneInspectorPresented) {
                 InspectorView(

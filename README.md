@@ -125,12 +125,18 @@ Google Play 출시를 준비하고 있습니다 ([docs/play-store](docs/play-sto
 
 <p align="center">
   <img src="docs/play-store/graphics/tablet10-1-library.jpg" alt="안드로이드 태블릿 — 라이브러리" width="64%">
-  <img src="docs/play-store/graphics/phone-3-viewer.jpg" alt="안드로이드 폰 — 사진 보기와 셀렉 도우미" width="20%">
+  <img src="docs/play-store/graphics/phone-1-library.jpg" alt="안드로이드 폰 — 라이브러리" width="20%">
 </p>
 
 ### 아이폰 · 아이패드 (iOS · iPadOS) — 준비 중
 
 아이패드(`NavigationSplitView` · 외장 키보드 단축키)와 아이폰에서 USB-C SD 카드 리더·외장 SSD를 연결해 바로 셀렉하는 **네이티브 SwiftUI 앱**입니다 (`crates/ios`, `ios/`). 데스크톱과 같은 Rust 엔진을 UniFFI(`LoupeCore.xcframework`)로 연결하며, 외장 SSD의 `.photo-organize` 카탈로그를 맥 LOUPE 와 그대로 이어서 쓸 수 있습니다.
+
+<p align="center">
+  <img src="docs/ios-app-store/screenshots/ipad-2-viewer.jpg" alt="아이패드 — 사진 보기와 셀렉 도우미 정보 패널" width="44%">
+  <img src="docs/ios-app-store/screenshots/iphone-3-info.jpg" alt="아이폰 — 셀렉 도우미 게이지와 A컷 근거" width="21%">
+  <img src="docs/ios-app-store/screenshots/iphone-4-composition.jpg" alt="아이폰 — 구도 표시(3분할)" width="21%">
+</p>
 
 아키텍처 설계와 빌드 방법은 [docs/ios-app-store](docs/ios-app-store/README.md) 에 있습니다. macOS + Xcode 16 이상에서 `./ios/Scripts/build-rust-ios.sh --sim-only --debug && (cd ios && xcodegen generate)` 로 시뮬레이터·실기기 프로젝트를 바로 열 수 있습니다.
 
