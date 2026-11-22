@@ -37,7 +37,7 @@ jobs:
       tag: ${{ steps.plan.outputs.tag }}
       target: ${{ steps.plan.outputs.target }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
       - id: plan
@@ -79,7 +79,7 @@ jobs:
     needs: plan
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: aarch64-apple-darwin,x86_64-apple-darwin
@@ -127,7 +127,7 @@ jobs:
           # both architectures) and fails with "No space left on device": give it headroom.
           size_mb=$(( $(du -sm dmg | cut -f1) * 12 / 10 + 20 ))
           hdiutil create -volname "LOUPE" -srcfolder dmg -size "${size_mb}m" -ov -format UDZO photo-organize-macos-universal.dmg
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: photo-organize-macos-universal
           path: |
@@ -156,7 +156,7 @@ jobs:
             name: linux-x86_64
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: Test
@@ -175,7 +175,7 @@ jobs:
         run: |
           mkdir dist && cp target/release/photo-organize target/release/photoorg dist/
           tar -czf "photo-organize-${{ matrix.name }}.tar.gz" -C dist .
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: photo-organize-${{ matrix.name }}
           path: photo-organize-${{ matrix.name }}.*
