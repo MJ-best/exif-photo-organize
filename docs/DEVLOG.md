@@ -29,6 +29,7 @@ LOUPE(0.5.0 까지의 이름: Photo Organize)를 만들면서 받은 **요청과
 | 최신 버전 | **0.7.4** — main, GitHub 릴리스 (맥 유니버설 dmg · zip, Windows zip, Linux tar.gz) |
 | 데스크톱 배포 | GitHub 릴리스. 맥은 Apple 공증 전이라 **터미널 한 줄 설치 · 업데이트** 를 안내함 (릴리스 노트마다 들어 있음) |
 | Mac App Store | 업로드된 빌드: 0.6.0 (3) · 0.6.1 (4) · 0.7.1 (5) · 0.7.2 (6) · 0.7.3 (7, 새 아이콘 — `winit` 의 `_CGSSetWindowBackgroundBlurRadius` 비공개 API 참조로 2.5.1 자동 거절). #27 에서 해당 심볼을 제거했으므로 **app-store 워크플로를 다시 실행해 새 빌드를 올려 재제출** 해야 함 (4절) |
+| iOS · iPadOS (`ios/`, `crates/ios`) | SwiftUI Universal 앱 + UniFFI 브릿지 + CI(`ios.yml`) 초안 완성 (로컬 브랜치 `ios-ipados-app`). macOS Xcode 실기기 · 시뮬레이터 확인 전 |
 | Google Play | 개인 개발자 계정이 구글 검토 중이라 앱을 만들 수 없음. 업로드 키 시크릿 · 테스터 12명 (14일 연속) 필요 |
 | 판매 사이트 (`site/`) | 코드 · 에뮬레이터 테스트 완료, **배포 전**. 앱의 *설정 → 라이선스* 칸은 사이트가 열릴 때까지 숨김 |
 | 셀렉 엔진 (`crates/cull`) | 분석 버전 4, 학습 특징 24개. BUSL 1.1, 0.7.4 의 MIT 전환일 2030-11-21 |
@@ -94,6 +95,7 @@ LOUPE(0.5.0 까지의 이름: Photo Organize)를 만들면서 받은 **요청과
 - [ ] **"같은 순간" 묶음.** 연사 3초를 넘어 임베딩과 시간으로 묶고, 묶음마다 A컷 1장을 고릅니다.
 - [ ] **학습이 기본 기준보다 나쁘면** 자동으로 기본 기준 쪽으로 돌아가게 합니다 (M1).
 - [ ] **안드로이드 실기기 확인.** 지금까지는 Robolectric 시뮬레이션뿐입니다. 고른 사진을 컴퓨터로 옮기는 기능도 아직 없습니다.
+- [ ] **iOS · iPadOS 실기기 확인 및 Core ML(ANE) 가속.** macOS Xcode 시뮬레이터 · 실기기에서 UI, USB-C 외장 SSD/SD 카드 북마크, Instruments 메모리/발열을 확인하고, 추후 `crates/cull` 의 ONNX 추론을 Core ML(ANE) 백엔드로 확장합니다.
 - [ ] **맥 App Store 판 실사용 확인.** TestFlight 에서 샌드박스 권한 기억, SD 카드 가져오기, 라이선스 칸 없음을 봅니다.
 
 ---
@@ -129,6 +131,7 @@ LOUPE(0.5.0 까지의 이름: Photo Organize)를 만들면서 받은 **요청과
 | — | 11-17 | #27 | Mac App Store 2.5.1 비공개 API(`_CGSSetWindowBackgroundBlurRadius`) 제거 |
 | — | 11-18 | #28 #29 | Mac App Store 스크린샷 · README 대표 그림을 실제 사진 · 0.7.3 화면으로 교체 |
 | 0.7.4 | 11-21 | #30 | 셀렉 도우미 왼쪽(B컷) ↔ 오른쪽(A컷) 게이지 · `learn::anchor` 점수 쏠림 수정 |
+| — | 11-21 | — | 아이폰 · 아이패드 (iOS · iPadOS) SwiftUI 앱 및 `crates/ios` UniFFI 브릿지 신규 설계 · 구현 |
 
 ---
 
@@ -533,5 +536,43 @@ LOUPE(0.5.0 까지의 이름: Photo Organize)를 만들면서 받은 **요청과
   - 이 환경(Linux)에 사용자의 실제 1.6만 장 라이브러리가 없어 실데이터 `photoorg cull-eval` 은 실행하지 못했습니다.
 - **남은 점**
   - 업데이트 뒤 사용자의 실제 라이브러리에서 재채점 결과(후보 수 · 상위 A컷 점수)와 `photoorg cull-eval` 숫자를 확인해 기준 데이터셋 v1 으로 기록하면 좋습니다.
+
+### 아이폰 · 아이패드 (iOS · iPadOS) 앱 신규 설계 · 구현 (11-21)
+
+- **요청**: "2번. 아이폰/아이패드용으로 새로 만들어줘. 이때 시스템 아키텍쳐설계 관점에서 애플, 당근, 토스 개발자의 관점에서 놀림받을 포인트를 짚어줘"
+- **반영**
+  - **코어 · 엔진 개선 (`crates/core`, `crates/cull`)**:
+    - `crates/core/Cargo.toml` · `trash.rs`: 데스크톱 `trash` 크레이트를 `not(any(target_os = "android", target_os = "ios"))` 로 가드해 iOS 빌드를 복구.
+    - `crates/core/src/catalog.rs`: `Catalog::checkpoint_truncate()` · `ThumbStore::checkpoint_truncate()` 추가 (`PRAGMA wal_checkpoint(TRUNCATE)`).
+    - `crates/cull/src/vision.rs` · `segment.rs` · `lib.rs`: `OnceLock` 을 `RwLock<Option<Arc<...>>>` 로 교체하고 `release_models()` 를 추가해 iOS 메모리 경고 · 백그라운드 시 ~100MB+ ONNX 런타임 힙을 즉시 반납 가능하게 함.
+    - `crates/core/src/cull/mod.rs`: `analyze_assets_with_threads()` 로 동시 분석 스레드 수 제한(열 · RAM 예산) 및 `catalog.lock()` poison 패닉 제거.
+    - `crates/core/src/preview.rs`: `find_embedded_jpeg()` 로 RAW/JPEG 내장 JPEG 오프셋·길이 반환(Zero-Reencode 패스트패스).
+  - **iOS UniFFI 브릿지 (`crates/ios`)**:
+    - `RwLock<IndexState>` + 분리된 상주 `Catalog` · `ThumbStore` 커넥션 (썸네일당 DB 재오픈 제거).
+    - `suspend()` / `resume()` (백그라운드 `0xdead10cc` 크래시 방어) + `release_ml_models()`.
+    - 단일 락 원자적 `snapshot(LibraryView)` (Torn Read 방지, `SwiftUI.View` 이름 충돌 회피) + 가시 영역 배치 조회 `photos_batch(ids)` + 상세/구도 오버레이 `photo_detail(id)`.
+    - `preview_descriptor(id, max_edge)` (`EmbeddedSlice` vs `RenderedJpeg`), 디스크 여유 공간 사전 검증(`InsufficientStorage`), 구조화된 10종 `PhotoError`, AirDrop/Files/Lightroom 연동용 `export_plan` · `export_photos`.
+  - **네이티브 SwiftUI 앱 (`ios/`) & CI (`.github/workflows/ios.yml`)**:
+    - Anti-Corruption Layer (`PhotoEngineProtocol` ↔ `RustPhotoEngine` ↔ `MockPhotoEngine`), 블로킹 FFI 를 전용 GCD 큐로 격리해 Swift Concurrency cooperative pool 기아 방지.
+    - `ImagePipeline`: `FileHandle` 슬라이스 읽기 + `CGImageSourceCreateThumbnailAtIndex` 하드웨어 1회 디코딩 + `byPreparingForDisplay()` + 비용 기반 `NSCache` + 메모리 경고 해제 + 스크롤 취소 + 뷰어 ±2 프리페치.
+    - `BookmarkStore`: `isExcludedFromBackup = true` (App Review 2.23) + 외장 SSD Security-Scoped Bookmark (`.minimalBookmark`, `withExtendedLifetime`).
+    - `ThermalBudgetMonitor`: `ProcessInfo.thermalState` · 저전력 모드 · RAM 기반 동시 스레드 예산(0~3).
+    - `LibraryStore`: `@MainActor @Observable` 단방향 상태 머신, 리비전 기반 스테일 스냅샷 폐기, 낙관적 업데이트 + 롤백, 에러별 복구 CTA (`RecoveryAlert`), `OSLog` · `OSSignposter` 계측.
+    - iPad `NavigationSplitView` + 외장 키보드 단축키 + 확대 유지 뷰어(0.6.1) + `G` 구도 오버레이 + 0.7.4 B컷↔A컷 스펙트럼 게이지 + 사진 가리지 않는 하단 띠 알림 + 크림/코코아 테마 + `XCTest` (`LoupeTests/`).
+    - 아키텍처 결정 기록 및 빌드 가이드: `docs/ios-app-store/README.md`, `ios/README.md`, `ios/project.yml`, `ios/Scripts/build-rust-ios.sh`.
+- **결정과 이유**
+  - `crates/android` 를 복붙하지 않고 iOS 의 OS 제약(`0xdead10cc`, Jetsam, iCloud 2.23, ImageIO, Security-Scoped 로컬 경로)에 맞춰 `crates/ios` 를 설계하면서, 근본 개선(모델 메모리 해제, WAL checkpoint, 스레드 제한, 내장 JPEG 오프셋 조회)은 `crates/core` · `crates/cull` 에 반영해 전 플랫폼이 혜택을 받게 했습니다.
+  - UniFFI 열거형 이름을 `View` 대신 `LibraryView` 로 정해 같은 Swift 타깃 안의 `SwiftUI.View` 와 충돌하지 않게 했습니다 (`uniffi-bindgen` 실제 생성 결과로 확인).
+  - 앱 아이콘 · 마스코트는 `crates/app/assets/` 원본에서 `Assets.xcassets` 로 동기화했습니다.
+- **확인**
+  - `cargo fmt --all`, `cargo clippy -p photoorg-ios --all-targets --no-deps -- -D warnings` (경고 0), `cargo clippy --workspace --all-targets` (수정한 파일 경고 0), `cargo test --workspace`, `cargo test -p photoorg-app --no-default-features` 통과.
+  - `uniffi-bindgen generate --library target/debug/libphotoorg_ios.a --language swift` 로 실제 `.swift` · `.h` · `.modulemap` 생성 및 API 시그니처 일치 확인.
+  - `bash -n`, `Info.plist`, Asset Catalog JSON, `ios/project.yml`, `.github/workflows/ios.yml` 문법 검증 및 Swift 정적 감사(괄호 · import · 안티패턴 0 · 네트워크 코드 0) 완료.
+  - 이 환경(Linux)에는 macOS · Xcode · iOS 시뮬레이터 · 실기기가 없어 `xcodebuild test`, 실제 iPhone/iPad UI 렌더링, Instruments 프로파일링, USB-C 외장 SSD 실기기 연결은 확인하지 못했습니다 (macOS 러너 CI `ios.yml` 에서 시뮬레이터 빌드·테스트 검증).
+- **남은 점**
+  - macOS + Xcode 시뮬레이터/실기기에서 UI · USB-C SD 카드/외장 SSD · `0xdead10cc`/Jetsam Instruments 프로파일링 확인.
+  - Core ML / Apple Neural Engine(ANE) 추론 백엔드 어댑터 연동(현재는 `tract-onnx` CPU + 열 예산 스레드 제한).
+  - App Store Connect iOS 인증서 · 스크린샷 준비 후 `ios-app-store.yml` 배포 파이프라인 추가.
+
 
 

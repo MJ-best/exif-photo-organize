@@ -1,0 +1,33 @@
+[package]
+name = "photoorg-ios"
+description = "LOUPE on iOS / iPadOS: lifecycle-safe, zero-reencode UniFFI bridge for the SwiftUI app."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lib]
+name = "photoorg_ios"
+# staticlib for Apple XCFramework linking; cdylib/lib for uniffi-bindgen metadata extraction & tests.
+crate-type = ["staticlib", "cdylib", "lib"]
+
+[[bin]]
+# Generates the Swift bindings: cargo run -p photoorg-ios --features bindgen --bin uniffi-bindgen -- ...
+name = "uniffi-bindgen"
+required-features = ["bindgen"]
+
+[features]
+bindgen = ["uniffi/cli"]
+
+[dependencies]
+photoorg-core.workspace = true
+anyhow.workspace = true
+log.workspace = true
+chrono.workspace = true
+crossbeam-channel.workspace = true
+uniffi = "0.29"
+thiserror = "2"
+
+[dev-dependencies]
+tempfile = "3"

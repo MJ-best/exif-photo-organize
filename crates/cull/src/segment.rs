@@ -5,35 +5,47 @@
 
 use anyhow::{Context, Result};
 use image::{imageops, RgbImage};
-use std::sync::OnceLock;
+use std::sync::{Arc, RwLock};
 use tract_onnx::prelude::*;
 
 static HUMANSEG_ONNX: &[u8] = include_bytes!("../models/human_segmentation_pphumanseg_2023mar.onnx");
 
 const HUMANSEG_SIZE: usize = 192;
 
-type Plan = std::sync::Arc<TypedRunnableModel>;
+type Plan = Arc<TypedRunnableModel>;
 
-static NET: OnceLock<std::result::Result<Plan, String>> = OnceLock::new();
+static NET: RwLock<Option<Plan>> = RwLock::new(None);
 
-fn net() -> Result<&'static Plan> {
-    NET.get_or_init(|| {
-        let load = || -> TractResult<Plan> {
-            tract_onnx::onnx()
-                .model_for_read(&mut std::io::Cursor::new(HUMANSEG_ONNX))?
-                .with_input_fact(0, f32::fact([1, 3, HUMANSEG_SIZE, HUMANSEG_SIZE]).into())?
-                .into_optimized()?
-                .into_runnable()
-        };
-        load().map_err(|e| format!("{e:#}"))
-    })
-    .as_ref()
-    .map_err(|e| anyhow::anyhow!("인물 분할 모델을 불러오지 못했습니다: {e}"))
+fn load_net() -> TractResult<Plan> {
+    tract_onnx::onnx()
+        .model_for_read(&mut std::io::Cursor::new(HUMANSEG_ONNX))?
+        .with_input_fact(0, f32::fact([1, 3, HUMANSEG_SIZE, HUMANSEG_SIZE]).into())?
+        .into_optimized()?
+        .into_runnable()
+}
+
+fn net() -> Result<Plan> {
+    if let Some(cached) = NET.read().unwrap_or_else(|e| e.into_inner()).as_ref() {
+        return Ok(Arc::clone(cached));
+    }
+    let mut guard = NET.write().unwrap_or_else(|e| e.into_inner());
+    if let Some(cached) = guard.as_ref() {
+        return Ok(Arc::clone(cached));
+    }
+    let loaded = load_net().map_err(|e| anyhow::anyhow!("인물 분할 모델을 불러오지 못했습니다: {e:#}"))?;
+    *guard = Some(Arc::clone(&loaded));
+    Ok(loaded)
 }
 
 /// Load the network ahead of time.
 pub fn warm_up() -> Result<()> {
     net().map(|_| ())
+}
+
+/// Drop the cached PP-HumanSeg runtime graph to reclaim heap memory.
+pub fn release() {
+    let mut guard = NET.write().unwrap_or_else(|e| e.into_inner());
+    *guard = None;
 }
 
 /// Probabilities 0..1 on a `w`×`h` grid stretched over the whole frame (row-major).

@@ -22,6 +22,7 @@
 | `crates/cli` | `photoorg` 명령줄 도구 (`cull-eval` 포함) | MIT |
 | `crates/macos` | 샌드박스 북마크 · Finder · 추출 | MIT |
 | `crates/android` · `android/` | UniFFI 다리 · Kotlin/Compose 앱 | MIT |
+| `crates/ios` · `ios/` | UniFFI 다리(`LoupeCore.xcframework`) · SwiftUI 아이폰/아이패드 앱 | MIT |
 | `site/` | 판매 사이트 (Firebase · 토스페이먼츠) | MIT |
 
 ## 3. 바꾼 뒤 확인할 것
@@ -34,6 +35,7 @@ cargo test -p photoorg-app --no-default-features   # Mac App Store 판 (CI 도 �
 ```
 
 - **안드로이드**: `cd android && ./gradlew :app:testDebugUnitTest` 로 확인합니다. JDK 21 이 필요합니다 (Robolectric).
+- **iOS / iPadOS**: macOS(Xcode 16+ · XcodeGen)에서 `./ios/Scripts/build-rust-ios.sh --sim-only --debug && (cd ios && xcodegen generate)` 후 `LoupeTests` 를 돌립니다 (CI `ios.yml` 도 돌림).
 - **화면을 바꿨으면** 앱을 실제로 띄워 스크린샷으로 봅니다. 리눅스에서는 Xvfb + xdotool 로 띄웁니다.
   - 창 폭 **960(최소) · 1200 · 1600** 에서 봅니다.
   - **정보 패널 · 사이드바를 켜고 끈** 상태를 모두 봅니다.

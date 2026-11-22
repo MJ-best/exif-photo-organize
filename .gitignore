@@ -5,3 +5,7 @@ target/
 # macOS packaging output
 dist-appstore/
 dist-sandbox-test/
+
+# iOS generated UniFFI bindings, XCFramework, and XcodeGen output
+ios/Generated/
+ios/Loupe.xcodeproj/

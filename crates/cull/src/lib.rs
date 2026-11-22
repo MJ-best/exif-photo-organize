@@ -189,6 +189,13 @@ pub fn analyze_image(img: &RgbImage) -> Analysis {
     a
 }
 
+/// Drop all cached neural network runtime graphs (YuNet, MobileNetV2, PP-HumanSeg) to reclaim
+/// heap memory under mobile memory pressure or backgrounding.
+pub fn release_models() {
+    vision::release();
+    segment::release();
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -205,6 +212,17 @@ mod tests {
         assert!((taste::dot(&a.embed, &a.embed) - 1.0).abs() < 0.01);
         let blurred = analyze_image(&image::imageops::blur(&img, 4.0));
         assert!(blurred.sharp_peak < a.sharp_peak - 1.0);
+    }
+
+    #[test]
+    fn release_models_allows_clean_reload() {
+        let img = metrics::tests::scene(320, 213);
+        let before = analyze_image(&img);
+        assert!(before.nets);
+        release_models();
+        let after = analyze_image(&img);
+        assert!(after.nets);
+        assert_eq!(before.scene, after.scene);
     }
 
     /// Faces/eyes on real photos: `PHOTOORG_TEST_IMAGES=dir cargo test -- --ignored faces`

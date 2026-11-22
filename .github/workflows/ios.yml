@@ -1,0 +1,71 @@
+name: ios
+
+# Builds the Rust iOS UniFFI bridge (LoupeCore.xcframework), generates Swift bindings,
+# generates Loupe.xcodeproj via XcodeGen, and runs the XCTest suite on iOS Simulator.
+
+on:
+  push:
+    branches: [main]
+    paths: ["ios/**", "crates/ios/**", "crates/core/**", "crates/cull/**", "Cargo.lock", "Cargo.toml", ".github/workflows/ios.yml"]
+  pull_request:
+    paths: ["ios/**", "crates/ios/**", "crates/core/**", "crates/cull/**", "Cargo.lock", "Cargo.toml", ".github/workflows/ios.yml"]
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  ios:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-ios,aarch64-apple-ios-sim
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ios
+
+      - name: Select newest non-beta Xcode
+        run: |
+          latest="$(ls -d /Applications/Xcode_*.app 2>/dev/null | grep -v -i beta | sort -V | tail -1)"
+          if [[ -n "$latest" ]]; then sudo xcode-select -s "$latest/Contents/Developer"; fi
+          xcodebuild -version
+          xcrun --sdk iphonesimulator --show-sdk-version
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Rust engine unit tests (host)
+        run: cargo test -p photoorg-ios -p photoorg-cull
+
+      - name: Build LoupeCore.xcframework & Swift bindings (Simulator)
+        run: ./ios/Scripts/build-rust-ios.sh --sim-only --debug
+
+      - name: Generate Xcode project
+        working-directory: ios
+        run: xcodegen generate
+
+      - name: Run iOS Simulator unit tests (LoupeTests)
+        working-directory: ios
+        run: |
+          SIM_ID="$(xcrun simctl list devices available 'iPhone' -j | python3 -c '
+          import json, sys
+          data = json.load(sys.stdin)["devices"]
+          for rt in sorted(data.keys(), reverse=True):
+              for d in data[rt]:
+                  if d.get("isAvailable"):
+                      print(d["udid"]); sys.exit(0)
+          sys.exit(1)
+          ')"
+          echo "Using simulator UDID: $SIM_ID"
+          xcodebuild test \
+            -project Loupe.xcodeproj \
+            -scheme Loupe \
+            -destination "id=$SIM_ID" \
+            CODE_SIGNING_ALLOWED=NO
+
+      - name: Verify iOS device Rust staticlib compiles (aarch64-apple-ios)
+        run: cargo build -p photoorg-ios --target aarch64-apple-ios --release

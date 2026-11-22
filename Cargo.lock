@@ -3404,6 +3404,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "photoorg-ios"
+version = "0.7.4"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "crossbeam-channel",
+ "log",
+ "photoorg-core",
+ "tempfile",
+ "thiserror 2.0.21",
+ "uniffi",
+]
+
+[[package]]
 name = "photoorg-macos"
 version = "0.7.4"
 dependencies = [

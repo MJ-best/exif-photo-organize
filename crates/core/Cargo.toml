@@ -25,7 +25,7 @@ crc32fast = "1"
 [dev-dependencies]
 tempfile = "3"
 
-# Android has no system trash for files of an app; deleted photos go to a folder of the library.
-[target.'cfg(not(target_os = "android"))'.dependencies]
+# Android and iOS have no desktop system trash for an app's own files; deleted photos go to the library trash folder.
+[target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 # 휴지통으로 옮기기 (Delete). On macOS through NSFileManager, which also works in the App Sandbox.
 trash = "5"

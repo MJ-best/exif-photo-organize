@@ -516,6 +516,14 @@ impl Catalog {
         &self.conn
     }
 
+    /// Flush and truncate the SQLite WAL file before closing the connection (essential on iOS
+    /// before suspending in background to avoid `0xdead10cc` termination on held file locks).
+    pub fn checkpoint_truncate(&self) -> Result<()> {
+        let _: (i64, i64, i64) =
+            self.conn.query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?;
+        Ok(())
+    }
+
     pub fn begin_import(&self, source: &str, label: &str) -> Result<i64> {
         let now = chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
         self.conn.execute(
@@ -1653,6 +1661,13 @@ impl ThumbStore {
         for id in ids {
             self.conn.execute("DELETE FROM thumbs WHERE asset_id=?1", [id])?;
         }
+        Ok(())
+    }
+
+    /// Flush and truncate the WAL file before closing the connection on iOS background suspend.
+    pub fn checkpoint_truncate(&self) -> Result<()> {
+        let _: (i64, i64, i64) =
+            self.conn.query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?;
         Ok(())
     }
 }
