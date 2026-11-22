@@ -29,7 +29,7 @@ LOUPE(0.5.0 까지의 이름: Photo Organize)를 만들면서 받은 **요청과
 | 최신 버전 | **0.7.4** — main, GitHub 릴리스 (맥 유니버설 dmg · zip, Windows zip, Linux tar.gz) |
 | 데스크톱 배포 | GitHub 릴리스. 맥은 Apple 공증 전이라 **터미널 한 줄 설치 · 업데이트** 를 안내함 (릴리스 노트마다 들어 있음) |
 | Mac App Store | 업로드된 빌드: 0.6.0 (3) · 0.6.1 (4) · 0.7.1 (5) · 0.7.2 (6) · 0.7.3 (7, 새 아이콘 — `winit` 의 `_CGSSetWindowBackgroundBlurRadius` 비공개 API 참조로 2.5.1 자동 거절). #27 에서 해당 심볼을 제거했으므로 **app-store 워크플로를 다시 실행해 새 빌드를 올려 재제출** 해야 함 (4절) |
-| iOS · iPadOS (`ios/`, `crates/ios`) | SwiftUI Universal 앱 + UniFFI 브릿지 + 2차 아키텍처 하드닝 + CI(`ios.yml`) 완료 (로컬 브랜치 `ios-ipados-app`). macOS Xcode 실기기 · 시뮬레이터 확인 전 |
+| iOS · iPadOS (`ios/`, `crates/ios`) | SwiftUI Universal 앱 + UniFFI 브릿지 + 2차 아키텍처 하드닝 + CI(`ios.yml`) 완료. 11-22 iOS 26.5 시뮬레이터(아이폰 17 Pro Max · 아이패드 Pro 13")에서 실제 사진으로 화면을 띄워 스토어 스크린샷 11장(`docs/ios-app-store/screenshots/`). 실기기 확인 전 |
 | Google Play | 개인 개발자 계정이 구글 검토 중이라 앱을 만들 수 없음. 업로드 키 시크릿 · 테스터 12명 (14일 연속) 필요 |
 | 판매 사이트 (`site/`) | 코드 · 에뮬레이터 테스트 완료, **배포 전**. 앱의 *설정 → 라이선스* 칸은 사이트가 열릴 때까지 숨김 |
 | 셀렉 엔진 (`crates/cull`) | 분석 버전 4, 학습 특징 24개. BUSL 1.1, 0.7.4 의 MIT 전환일 2030-11-21 |
@@ -667,7 +667,10 @@ LOUPE(0.5.0 까지의 이름: Photo Organize)를 만들면서 받은 **요청과
 - **확인**
   - 셀렉 도우미 결과(기본 기준 60%): `DSC_0606` B컷 5% · 상위 1% A컷 후보, `DSC_1930` 11%, `DSC_1929` 30%(초점 흐림), `DSC_2039` 39%, `DSC_1926` 42%(초점 흐림). B컷 후보 0장.
   - 안드로이드: `./gradlew :app:testDebugUnitTest --tests '*ScreensTest*' -Pcard=… -Pphoto=DSC_2039` — 13개 중 통과 11 · 건너뜀 2(B컷 후보 화면). 그림을 하나씩 봤습니다.
-  - 아이폰 · 아이패드: `ios-screenshots` 워크플로(macOS 러너)에서 찍는 중입니다.
+  - 아이폰 · 아이패드: `ios-screenshots` 워크플로(macOS 러너, iOS 26.5 시뮬레이터 **iPhone 17 Pro Max** · **iPad Pro 13-inch (M5)**) 첫 실행이 성공했습니다. Debug 앱 빌드(새 `ScreenshotScene.swift` 포함)부터 11장(1320×2868 · 2064×2752) 커밋까지 끝났습니다. 그림을 하나씩 봤습니다.
+    - 첫 실행의 `iphone-1-library` 는 시뮬레이터의 시스템 알림 "Ready for Apple Intelligence" 가 위쪽(필터 띠)을 덮었습니다. 부팅 뒤 30초 기다리고 찍지 않는 예열 실행을 한 번 더한 뒤 다시 찍었습니다.
+    - 아이패드 그림 오른쪽 아래의 작은 곡선은 iPadOS 창 크기 조절 손잡이입니다 (시뮬레이터 기본 창 모드). 사진을 가리지 않아 그대로 두었습니다.
+    - 실기기 화면은 아직 보지 못했습니다.
 - **발견한 문제**
   - **안드로이드 휴대전화 · 7인치 태블릿의 사진 보기에서 정보 패널이 사진을 거의 다 가립니다.** 패널(불투명도 97%)이 사진 위에 겹쳐 그려지고, 0.7.x 에서 구도 메모 · 자동 수평/구도 버튼이 들어가며 화면 높이의 약 2/3 가 되었습니다. 가로 사진(`DSC_2039`)은 사진이 패널 뒤에 완전히 숨습니다. 3절 *사진을 가리지 말 것* 과 부딪힙니다. 10인치(옆 패널) · iOS 는 해당 없습니다.
   - 그래서 `phone-3-viewer` · `tablet7-2-viewer` 는 사진이 거의 보이지 않습니다. 레이아웃을 고친 뒤 다시 찍어야 합니다 (4절).
