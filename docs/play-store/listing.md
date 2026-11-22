@@ -2,7 +2,10 @@
 
 그림은 `graphics/` 에 있습니다.
 
-- **스크린샷**은 실제 앱 화면을 엔진 그대로 그린 것입니다 — `android/app/src/test/…/ScreensTest.kt`, 데모 라이브러리로 `./gradlew :app:testDebugUnitTest -Pdemo=<라이브러리 폴더>`.
+- **스크린샷**은 실제 앱 화면을 엔진 그대로 그린 것입니다 — `android/app/src/test/…/ScreensTest.kt`.
+  - 지금 그림은 사용자 사진 5장의 견본 카드(`docs/screenshots/sample-card`)를 안드로이드 엔진으로 가져와 찍었습니다: `./gradlew :app:testDebugUnitTest --tests '*ScreensTest*' -Pcard=docs/screenshots/sample-card -Pphoto=DSC_2039` ([방법](../screenshots/README.md)).
+  - 데모 라이브러리로는 `-Pdemo=<라이브러리 폴더>`.
+  - 견본 5장에는 B컷 후보가 없어서 두 번째 그림은 *A컷 후보* 화면입니다 (`phone-2-keepers` · `tablet10-2-keepers`).
 - **앱 아이콘**은 `python3 scripts/make-icons.py`, **그래픽 이미지**는 `python3 scripts/make-store-images.py` 가 아이콘 원본(`crates/app/assets/icon-source.webp`)에서 만듭니다.
 
 | 항목 | 파일 |
