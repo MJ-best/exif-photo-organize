@@ -9,8 +9,14 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.test.getBoundsInRoot
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
+import androidx.compose.ui.test.performClick
+import androidx.compose.ui.unit.height
+import androidx.compose.ui.unit.width
 import com.github.takahirom.roborazzi.RobolectricDeviceQualifiers
 import com.github.takahirom.roborazzi.captureRoboImage
 import io.github.mj_best.photoorganize.core.ImportResult
@@ -28,6 +34,9 @@ import io.github.mj_best.photoorganize.ui.LibraryActions
 import io.github.mj_best.photoorganize.ui.LibraryScreen
 import io.github.mj_best.photoorganize.ui.LibraryUi
 import io.github.mj_best.photoorganize.ui.NoCounts
+import io.github.mj_best.photoorganize.ui.PANEL_TAG
+import io.github.mj_best.photoorganize.ui.PHOTO_TAG
+import io.github.mj_best.photoorganize.ui.TOP_TAG
 import io.github.mj_best.photoorganize.ui.PhotoTheme
 import io.github.mj_best.photoorganize.ui.ViewerActions
 import io.github.mj_best.photoorganize.ui.ViewerScreen
@@ -116,7 +125,8 @@ class ScreensTest {
         compose.onRoot().captureRoboImage("build/outputs/roborazzi/$file")
     }
 
-    private fun viewer(file: String) {
+    /** The photo view, its panel folded or [details] open; the panel's toggle works as in the app. */
+    private fun viewer(file: String, details: Boolean = false) {
         val all = lib.photos(View.ALL)
         // The photo asked for (-Pphoto=<name>), else one the assistant has something to say about.
         val wanted = System.getProperty("photoorg.photo")?.takeIf { it.isNotBlank() }
@@ -125,16 +135,57 @@ class ScreensTest {
             ?: all.first()
         val ids = all.map { it.id }
         val i = ids.indexOf(p.id)
+        var open by mutableStateOf(details)
+        val act = object : ViewerActions by NoViewerActions {
+            override fun showDetails(on: Boolean) {
+                open = on
+            }
+        }
         show(Preloaded(ids.subList((i - 1).coerceAtLeast(0), (i + 2).coerceAtMost(ids.size)), big = p.id)) {
             ViewerScreen(
                 ViewerState(ids, i),
                 { id -> lib.photo(id) ?: all.firstOrNull { it.id == id } },
                 60,
-                NoViewerActions,
+                act,
                 SnackbarHostState(),
+                details = open,
             )
         }
+        assertPhotoUncovered()
         compose.onRoot().captureRoboImage("build/outputs/roborazzi/$file")
+    }
+
+    /**
+     * The panel is beside or under the photo, never over it (DEVLOG 3절 "사진을 가리지 말 것");
+     * with the panel under it (phone, 7"), the top row is above the photo too.
+     */
+    private fun assertPhotoUncovered() {
+        val photo = compose.onNodeWithTag(PHOTO_TAG).getBoundsInRoot()
+        val panel = compose.onNodeWithTag(PANEL_TAG).getBoundsInRoot()
+        val under = photo.bottom <= panel.top
+        assertTrue("photo $photo, panel $panel", under || photo.right <= panel.left)
+        if (under) {
+            val top = compose.onNodeWithTag(TOP_TAG).getBoundsInRoot()
+            assertTrue("top row $top, photo $photo", top.bottom <= photo.top)
+        }
+        // And the photo keeps a good part of the screen.
+        val root = compose.onRoot().getBoundsInRoot()
+        val share = (photo.height.value * photo.width.value) / (root.height.value * root.width.value)
+        assertTrue("photo area is ${(share * 100).toInt()}% of the screen", share >= 0.4f)
+    }
+
+    /** Folded: no details. Open: the details, the photo still above them. Folded again. */
+    private fun viewerDetails(file: String) {
+        viewer("$file.png")
+        compose.onNodeWithText(HINT).assertDoesNotExist()
+        compose.onNodeWithText("자세히").performClick()
+        compose.waitForIdle()
+        compose.onNodeWithText(HINT).assertExists()
+        assertPhotoUncovered()
+        compose.onRoot().captureRoboImage("build/outputs/roborazzi/$file-details.png")
+        compose.onNodeWithText("접기").performClick()
+        compose.waitForIdle()
+        compose.onNodeWithText(HINT).assertDoesNotExist()
     }
 
     @Test
@@ -170,7 +221,7 @@ class ScreensTest {
 
     @Test
     @Config(qualifiers = PHONE)
-    fun viewerPhone() = viewer("viewer-phone.png")
+    fun viewerPhone() = viewerDetails("viewer-phone")
 
     @Test
     @Config(qualifiers = RobolectricDeviceQualifiers.MediumTablet)
@@ -184,7 +235,7 @@ class ScreensTest {
 
     @Test
     @Config(qualifiers = TABLET7)
-    fun viewerTablet7() = viewer("viewer-tablet7.png")
+    fun viewerTablet7() = viewerDetails("viewer-tablet7")
 
     @Test
     @Config(qualifiers = PHONE)
@@ -235,6 +286,9 @@ class ScreensTest {
         compose.onRoot().captureRoboImage("build/outputs/roborazzi/import-done-phone.png")
     }
 }
+
+/** The last line of the panel's details. */
+private const val HINT = "위로 밀면 픽, 아래로 밀면 거절 · 두 번 눌러 확대"
 
 /** The name a real card (`-Pcard`) is shown with, like the volume name of the camera's card. */
 const val CARD_LABEL = "NIKON Z f"

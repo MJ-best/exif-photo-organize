@@ -99,6 +99,10 @@ class AppViewModel(
         private set
     var message by mutableStateOf<String?>(null)
     var settingsOpen by mutableStateOf(false)
+
+    /** Whether the photo view's panel (phone, 7" tablet) shows its details; kept between runs. */
+    var viewerDetails by mutableStateOf(prefs.getBoolean("viewer_details", false))
+        private set
     var trashBytes by mutableLongStateOf(0L)
         private set
 
@@ -252,6 +256,11 @@ class AppViewModel(
 
     private fun refreshOnMain() {
         viewModelScope.launch(Dispatchers.Main) { if (viewer == null) refresh() }
+    }
+
+    fun showViewerDetails(on: Boolean) {
+        viewerDetails = on
+        prefs.edit { putBoolean("viewer_details", on) }
     }
 
     fun setThreshold(percent: Int) {

@@ -55,6 +55,7 @@ fun PhotoOrganizeApp(vm: AppViewModel) {
             override fun delete(id: Long) = vm.askDelete(listOf(id))
             override fun autoFrame(id: Long, compose: Boolean) = vm.autoFrame(id, compose)
             override fun resetFraming(id: Long) = vm.resetFraming(id)
+            override fun showDetails(on: Boolean) = vm.showViewerDetails(on)
         }
     }
     val import = remember(vm) {
@@ -89,6 +90,7 @@ fun PhotoOrganizeApp(vm: AppViewModel) {
                     threshold = vm.ui.threshold,
                     act = viewer,
                     snackbar = snackbar,
+                    details = vm.viewerDetails,
                 )
             }
             else -> {

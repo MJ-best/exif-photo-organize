@@ -6,6 +6,7 @@ import io.github.mj_best.photoorganize.core.PhotoLibrary
 import io.github.mj_best.photoorganize.core.View
 import io.github.mj_best.photoorganize.ui.AppViewModel
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -89,5 +90,16 @@ class ViewModelTest {
         until("deleted") { vm.ui.counts.all == 16 - candidates.size }
         assertEquals(0, vm.ui.counts.rejected)
         assertTrue(vm.message!!.contains("휴지통"))
+    }
+
+    @Test
+    fun remembersTheViewerDetails() {
+        val app = ApplicationProvider.getApplicationContext<PhotoApp>()
+        val vm = AppViewModel(app) { error("no library needed") }
+        assertFalse("the panel starts folded", vm.viewerDetails)
+        vm.showViewerDetails(true)
+        assertTrue(vm.viewerDetails)
+        // The next run of the app opens it the same way.
+        assertTrue(AppViewModel(app) { error("no library needed") }.viewerDetails)
     }
 }

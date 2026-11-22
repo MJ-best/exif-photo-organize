@@ -47,4 +47,8 @@ cd android
 
 - 견본 카드를 안드로이드 엔진으로 가져오고 분석한 뒤 화면을 그립니다. 결과는 `android/app/build/outputs/roborazzi/` 입니다.
 - 가져오기 화면의 *준비* 단계는 카드를 실제로 살펴본 값입니다. *복사 중* · *완료* 단계의 숫자는 그 값에서 만든 것입니다.
-- 스토어 그림 `docs/play-store/graphics/` 는 여기서 JPEG 로 옮긴 것입니다.
+- 사진 보기는 패널을 접은 상태(`viewer-phone` · `viewer-tablet7`)와 **자세히** 를 누른 상태(`*-details`)를 찍습니다. 두 상태 모두 사진 영역이 패널 · 위쪽 막대와 겹치지 않는지 테스트가 검사합니다.
+- 스토어 그림 `docs/play-store/graphics/` 는 여기서 JPEG(화질 90)로 옮긴 것입니다.
+  - `phone-3-viewer.jpg` ← `viewer-phone.png` (접은 상태: 사진이 크게)
+  - `tablet7-2-viewer.jpg` ← `viewer-tablet7-details.png` (펼친 상태: 7인치는 펼쳐도 가로 사진이 다 보이므로 셀렉 도우미의 이유 · 구도까지 보여 줌)
+  - `tablet10-3-viewer.jpg` ← `viewer-tablet.png`

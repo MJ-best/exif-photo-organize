@@ -1,10 +1,10 @@
 package io.github.mj_best.photoorganize.ui
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -26,6 +26,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -42,6 +43,8 @@ import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.Block
 import androidx.compose.material.icons.outlined.CropRotate
 import androidx.compose.material.icons.outlined.Delete
+import androidx.compose.material.icons.outlined.ExpandLess
+import androidx.compose.material.icons.outlined.ExpandMore
 import androidx.compose.material.icons.outlined.Flag
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -61,6 +64,7 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.geometry.CornerRadius
@@ -68,6 +72,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.input.key.Key
@@ -78,8 +83,10 @@ import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.github.mj_best.photoorganize.core.Photo
@@ -99,8 +106,15 @@ interface ViewerActions {
     fun delete(id: Long)
     fun autoFrame(id: Long, compose: Boolean) {}
     fun resetFraming(id: Long) {}
+
+    /** Opens or folds the details of the panel under the photo (phone, 7" tablet). */
+    fun showDetails(on: Boolean) {}
 }
 
+/**
+ * The photo view. [details]: on a phone or 7" tablet, whether the panel under the photo shows
+ * everything (reasons, composition, framing, camera) or only stars, pick / reject and the gauge.
+ */
 @Composable
 fun ViewerScreen(
     state: ViewerState,
@@ -108,6 +122,7 @@ fun ViewerScreen(
     threshold: Int,
     act: ViewerActions,
     snackbar: SnackbarHostState,
+    details: Boolean = false,
 ) {
     val p = LocalPalette.current
     val pager = rememberPagerState(initialPage = state.index) { state.ids.size }
@@ -153,6 +168,7 @@ fun ViewerScreen(
             Key.U -> act.flag(id, 0)
             Key.Z -> toggleCenterZoom()
             Key.R -> act.autoFrame(id, false)
+            Key.I -> act.showDetails(!details)
             Key.DirectionLeft -> go(-1)
             Key.DirectionRight -> go(1)
             Key.Spacebar -> {
@@ -175,8 +191,12 @@ fun ViewerScreen(
     BoxWithConstraints(Modifier.fillMaxSize().background(p.viewer).then(keys).focusRequester(focus).focusable()) {
         val wide = maxWidth >= 840.dp && maxWidth > maxHeight
         val edge = with(LocalDensity.current) { maxOf(maxWidth, maxHeight).toPx() }.toInt().coerceIn(1024, 3200)
-        Row(Modifier.fillMaxSize()) {
-            Box(Modifier.weight(1f).fillMaxHeight()) {
+        // Phone / 7": the most the panel under the photo may take (navigation bar included).
+        val panelMax = maxHeight * 0.5f
+        // The photo (with its top row over it on a 10" tablet); clipped so a zoomed photo never
+        // draws over the panel or the top row.
+        val photoArea: @Composable (Modifier) -> Unit = { modifier ->
+            Box(modifier.clipToBounds().testTag(PHOTO_TAG)) {
                 HorizontalPager(
                     state = pager,
                     key = { state.ids[it] },
@@ -198,17 +218,8 @@ fun ViewerScreen(
                         onSwipeDown = { act.flag(pid, -1) },
                     )
                 }
-                TopRow(current, act, Modifier.align(Alignment.TopStart))
-                if (!wide) {
-                    Column(
-                        Modifier.align(Alignment.BottomCenter),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                    ) {
-                        FlagToast(current, Modifier.padding(bottom = 8.dp))
-                        SnackbarHost(snackbar)
-                        InfoPanel(current, threshold, act, Modifier.fillMaxWidth().navigationBarsPadding())
-                    }
-                } else {
+                if (wide) {
+                    TopRow(current, act, Modifier.align(Alignment.TopStart), overlay = true)
                     Column(
                         Modifier.align(Alignment.BottomCenter).padding(bottom = 12.dp),
                         horizontalAlignment = Alignment.CenterHorizontally,
@@ -218,32 +229,77 @@ fun ViewerScreen(
                     }
                 }
             }
-            if (wide) {
+        }
+        if (wide) {
+            // 10" landscape: the panel beside the photo.
+            Row(Modifier.fillMaxSize()) {
+                photoArea(Modifier.weight(1f).fillMaxHeight())
                 Box(Modifier.width(1.dp).fillMaxHeight().background(p.separator))
                 InfoPanel(
                     current, threshold, act,
-                    Modifier.width(340.dp).fillMaxHeight().verticalScroll(rememberScrollState()).statusBarsPadding(),
+                    Modifier.width(340.dp).fillMaxHeight().verticalScroll(rememberScrollState()).statusBarsPadding()
+                        .testTag(PANEL_TAG),
                 )
+            }
+        } else {
+            // Phone and 7" tablet: the photo takes the space between the top row and the panel,
+            // never under either (DEVLOG 3절 "사진을 가리지 말 것"). The panel is compact unless the
+            // details are open, and even then takes at most half the height; the details scroll
+            // inside it.
+            Column(Modifier.fillMaxSize()) {
+                TopRow(current, act, Modifier, overlay = false)
+                photoArea(Modifier.weight(1f).fillMaxWidth())
+                Box(Modifier.fillMaxWidth().height(1.dp).background(p.separator))
+                Box(Modifier.fillMaxWidth()) {
+                    BottomPanel(
+                        current, threshold, act, details,
+                        maxHeight = panelMax,
+                        modifier = Modifier.fillMaxWidth().testTag(PANEL_TAG),
+                    )
+                    // Notices go over the panel's bottom (the camera lines when open), not over the photo.
+                    Column(
+                        Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(bottom = 6.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                    ) {
+                        FlagToast(current, Modifier.padding(bottom = 6.dp))
+                        SnackbarHost(snackbar)
+                    }
+                }
             }
         }
     }
 }
 
+/** Test tags: the photo area, the info panel and the top row (phone, 7"), which must never overlap. */
+const val PHOTO_TAG = "viewer-photo"
+const val PANEL_TAG = "viewer-panel"
+const val TOP_TAG = "viewer-top"
+
+/** Back, the name and date, delete: over the photo's top edge ([overlay]), or a bar above it. */
 @Composable
-private fun TopRow(photo: Photo?, act: ViewerActions, modifier: Modifier) {
+private fun TopRow(photo: Photo?, act: ViewerActions, modifier: Modifier, overlay: Boolean) {
+    val p = LocalPalette.current
+    val fg = if (overlay) Color.White else p.text
     Row(
         modifier
+            .testTag(TOP_TAG)
             .fillMaxWidth()
-            .background(androidx.compose.ui.graphics.Brush.verticalGradient(listOf(Color(0x88000000), Color.Transparent)))
+            .background(
+                if (overlay) {
+                    Brush.verticalGradient(listOf(Color(0x88000000), Color.Transparent))
+                } else {
+                    SolidColor(p.toolbar)
+                },
+            )
             .statusBarsPadding()
             .padding(horizontal = 4.dp, vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        IconButton(onClick = act::close) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, "닫기", tint = Color.White) }
+        IconButton(onClick = act::close) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, "닫기", tint = fg) }
         Column(Modifier.weight(1f)) {
             Text(
                 photo?.name ?: "",
-                color = Color.White,
+                color = fg,
                 fontWeight = FontWeight.SemiBold,
                 fontSize = 16.sp,
                 maxLines = 1,
@@ -252,7 +308,7 @@ private fun TopRow(photo: Photo?, act: ViewerActions, modifier: Modifier) {
             if (photo != null) {
                 Text(
                     Fmt.dateTimeKo(photo.capturedMs),
-                    color = Color(0xDDFFFFFF),
+                    color = if (overlay) Color(0xDDFFFFFF) else p.text2,
                     fontSize = 12.sp,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
@@ -260,7 +316,7 @@ private fun TopRow(photo: Photo?, act: ViewerActions, modifier: Modifier) {
             }
         }
         if (photo != null) {
-            IconButton(onClick = { act.delete(photo.id) }) { Icon(Icons.Outlined.Delete, "휴지통으로", tint = Color.White) }
+            IconButton(onClick = { act.delete(photo.id) }) { Icon(Icons.Outlined.Delete, "휴지통으로", tint = fg) }
         }
     }
 }
@@ -366,117 +422,198 @@ private fun ZoomableImage(
     }
 }
 
-@OptIn(ExperimentalLayoutApi::class, ExperimentalFoundationApi::class)
+/** 10" landscape: everything, beside the photo. */
 @Composable
 fun InfoPanel(photo: Photo?, threshold: Int, act: ViewerActions, modifier: Modifier) {
     val p = LocalPalette.current
     Column(
-        modifier.background(p.panel.copy(alpha = 0.97f)).padding(horizontal = 18.dp, vertical = 12.dp),
+        modifier.background(p.panel).padding(horizontal = 18.dp, vertical = 12.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         if (photo == null) return@Column
-        // Stars.
+        PanelHead(photo, threshold, act, toggle = null)
+        PanelDetails(photo, act)
+    }
+}
+
+/**
+ * Phone and 7" tablet: under the photo. Folded, only what every photo needs (stars, pick / reject,
+ * the gauge); open, the details too, scrolling under a head that stays put. At most [maxHeight].
+ */
+@Composable
+private fun BottomPanel(
+    photo: Photo?,
+    threshold: Int,
+    act: ViewerActions,
+    details: Boolean,
+    maxHeight: Dp,
+    modifier: Modifier,
+) {
+    val p = LocalPalette.current
+    Column(
+        modifier
+            .background(p.panel)
+            .animateContentSize()
+            .heightIn(max = maxHeight)
+            .navigationBarsPadding()
+            .padding(horizontal = 18.dp, vertical = 10.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        if (photo == null) return@Column
+        PanelHead(photo, threshold, act) { DetailsToggle(details) { act.showDetails(!details) } }
+        if (details) {
+            PanelDetails(photo, act, Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState()))
+        }
+    }
+}
+
+/** "자세히 ⌃" / "접기 ⌄" at the end of the stars row. */
+@Composable
+private fun DetailsToggle(open: Boolean, onClick: () -> Unit) {
+    val p = LocalPalette.current
+    Row(
+        Modifier
+            .heightIn(min = 40.dp)
+            .clip(RoundedCornerShape(8.dp))
+            .clickable(onClick = onClick)
+            .padding(start = 10.dp, end = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(if (open) "접기" else "자세히", color = p.text2, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+        Icon(
+            if (open) Icons.Outlined.ExpandMore else Icons.Outlined.ExpandLess, null,
+            tint = p.text2, modifier = Modifier.size(20.dp),
+        )
+    }
+}
+
+/** Stars, pick / reject and the assistant's gauge: what culling needs on every photo. */
+@Composable
+private fun PanelHead(photo: Photo, threshold: Int, act: ViewerActions, toggle: (@Composable () -> Unit)?) {
+    val p = LocalPalette.current
+    // Stars.
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        for (r in 1..5) {
+            Text(
+                if (r <= photo.rating) "★" else "☆",
+                color = if (r <= photo.rating) p.star else p.text3,
+                fontSize = 30.sp,
+                modifier = Modifier
+                    .clip(RoundedCornerShape(6.dp))
+                    .clickable { act.rate(photo.id, if (photo.rating == r) 0 else r) }
+                    .padding(horizontal = 4.dp),
+            )
+        }
+        Spacer(Modifier.weight(1f))
+        toggle?.invoke()
+    }
+    // Pick / reject.
+    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        FlagButton("픽", Icons.Outlined.Flag, p.success, photo.flag > 0, Modifier.weight(1f)) {
+            act.flag(photo.id, if (photo.flag > 0) 0 else 1)
+        }
+        FlagButton("거절", Icons.Outlined.Block, p.danger, photo.flag < 0, Modifier.weight(1f)) {
+            act.flag(photo.id, if (photo.flag < 0) 0 else -1)
+        }
+    }
+    val b = photo.bPct
+    if (b != null) {
+        Gauge(b, threshold)
+    } else {
+        Text("셀렉 도우미가 아직 보지 않은 사진이에요.", color = p.text3, fontSize = 13.sp)
+    }
+}
+
+/** The culling assistant: left = B-cut, right = A-cut. */
+@Composable
+private fun Gauge(b: Int, threshold: Int) {
+    val p = LocalPalette.current
+    val bPct = b.coerceIn(0, 100)
+    val aPct = 100 - bPct
+    val isB = bPct >= threshold
+    val isA = !isB && bPct < 30
+    val gaugeColor = when {
+        isB -> p.warning
+        isA -> p.success
+        else -> p.text2
+    }
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            for (r in 1..5) {
-                Text(
-                    if (r <= photo.rating) "★" else "☆",
-                    color = if (r <= photo.rating) p.star else p.text3,
-                    fontSize = 30.sp,
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(6.dp))
-                        .clickable { act.rate(photo.id, if (photo.rating == r) 0 else r) }
-                        .padding(horizontal = 4.dp),
+            Text(
+                "← B컷 $bPct%",
+                color = when {
+                    isB -> p.warning
+                    !isA && bPct > aPct -> p.text
+                    bPct == aPct -> p.text2
+                    else -> p.text3
+                },
+                fontWeight = if (isB || (!isA && bPct > aPct)) FontWeight.SemiBold else FontWeight.Normal,
+                fontSize = if (isB) 14.sp else 12.sp,
+                modifier = Modifier.weight(1f),
+            )
+            Text(
+                "A컷 $aPct% →",
+                color = when {
+                    isA -> p.success
+                    !isB && aPct > bPct -> p.text
+                    bPct == aPct -> p.text2
+                    else -> p.text3
+                },
+                fontWeight = if (isA || (!isB && aPct > bPct)) FontWeight.SemiBold else FontWeight.Normal,
+                fontSize = if (isA) 14.sp else 12.sp,
+            )
+        }
+        Canvas(modifier = Modifier.fillMaxWidth().height(16.dp)) {
+            val pad = 7.dp.toPx()
+            val trackH = 6.dp.toPx()
+            val r = trackH / 2f
+            val cy = size.height / 2f
+            val left = min(pad, size.width / 2f)
+            val right = max(size.width - pad, size.width / 2f)
+            val trackW = (right - left).coerceAtLeast(0f)
+            val leftTint = lerp(p.control, p.warning, 0.36f)
+            val rightTint = lerp(p.control, p.success, 0.36f)
+            drawRoundRect(
+                brush = Brush.horizontalGradient(
+                    colors = listOf(leftTint, p.control, rightTint),
+                    startX = left,
+                    endX = right,
+                ),
+                topLeft = Offset(left, cy - r),
+                size = Size(trackW, trackH),
+                cornerRadius = CornerRadius(r, r),
+            )
+            val cutX = left + trackW * (1f - threshold.coerceIn(0, 100) / 100f)
+            val posX = left + trackW * (aPct / 100f)
+            val segW = abs(posX - cutX)
+            if (segW > 0.5f) {
+                drawRoundRect(
+                    color = gaugeColor,
+                    topLeft = Offset(min(cutX, posX), cy - r),
+                    size = Size(segW, trackH),
+                    cornerRadius = CornerRadius(r, r),
                 )
             }
-            Spacer(Modifier.weight(1f))
+            drawLine(
+                color = p.text3,
+                start = Offset(cutX, cy - r - 3.dp.toPx()),
+                end = Offset(cutX, cy + r + 3.dp.toPx()),
+                strokeWidth = 1.5.dp.toPx(),
+            )
+            drawCircle(color = p.panel, radius = 6.5.dp.toPx(), center = Offset(posX, cy))
+            drawCircle(color = gaugeColor, radius = 4.8.dp.toPx(), center = Offset(posX, cy))
         }
-        // Pick / reject.
-        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            FlagButton("픽", Icons.Outlined.Flag, p.success, photo.flag > 0, Modifier.weight(1f)) {
-                act.flag(photo.id, if (photo.flag > 0) 0 else 1)
-            }
-            FlagButton("거절", Icons.Outlined.Block, p.danger, photo.flag < 0, Modifier.weight(1f)) {
-                act.flag(photo.id, if (photo.flag < 0) 0 else -1)
-            }
-        }
-        // The culling assistant: left = B-cut, right = A-cut.
-        val b = photo.bPct
-        if (b != null) {
-            val bPct = b.coerceIn(0, 100)
-            val aPct = 100 - bPct
-            val isB = bPct >= threshold
-            val isA = !isB && bPct < 30
-            val gaugeColor = when {
-                isB -> p.warning
-                isA -> p.success
-                else -> p.text2
-            }
-            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        "← B컷 $bPct%",
-                        color = when {
-                            isB -> p.warning
-                            !isA && bPct > aPct -> p.text
-                            bPct == aPct -> p.text2
-                            else -> p.text3
-                        },
-                        fontWeight = if (isB || (!isA && bPct > aPct)) FontWeight.SemiBold else FontWeight.Normal,
-                        fontSize = if (isB) 14.sp else 12.sp,
-                        modifier = Modifier.weight(1f),
-                    )
-                    Text(
-                        "A컷 $aPct% →",
-                        color = when {
-                            isA -> p.success
-                            !isB && aPct > bPct -> p.text
-                            bPct == aPct -> p.text2
-                            else -> p.text3
-                        },
-                        fontWeight = if (isA || (!isB && aPct > bPct)) FontWeight.SemiBold else FontWeight.Normal,
-                        fontSize = if (isA) 14.sp else 12.sp,
-                    )
-                }
-                Canvas(modifier = Modifier.fillMaxWidth().height(16.dp)) {
-                    val pad = 7.dp.toPx()
-                    val trackH = 6.dp.toPx()
-                    val r = trackH / 2f
-                    val cy = size.height / 2f
-                    val left = min(pad, size.width / 2f)
-                    val right = max(size.width - pad, size.width / 2f)
-                    val trackW = (right - left).coerceAtLeast(0f)
-                    val leftTint = lerp(p.control, p.warning, 0.36f)
-                    val rightTint = lerp(p.control, p.success, 0.36f)
-                    drawRoundRect(
-                        brush = Brush.horizontalGradient(
-                            colors = listOf(leftTint, p.control, rightTint),
-                            startX = left,
-                            endX = right,
-                        ),
-                        topLeft = Offset(left, cy - r),
-                        size = Size(trackW, trackH),
-                        cornerRadius = CornerRadius(r, r),
-                    )
-                    val cutX = left + trackW * (1f - threshold.coerceIn(0, 100) / 100f)
-                    val posX = left + trackW * (aPct / 100f)
-                    val segW = abs(posX - cutX)
-                    if (segW > 0.5f) {
-                        drawRoundRect(
-                            color = gaugeColor,
-                            topLeft = Offset(min(cutX, posX), cy - r),
-                            size = Size(segW, trackH),
-                            cornerRadius = CornerRadius(r, r),
-                        )
-                    }
-                    drawLine(
-                        color = p.text3,
-                        start = Offset(cutX, cy - r - 3.dp.toPx()),
-                        end = Offset(cutX, cy + r + 3.dp.toPx()),
-                        strokeWidth = 1.5.dp.toPx(),
-                    )
-                    drawCircle(color = p.panel, radius = 6.5.dp.toPx(), center = Offset(posX, cy))
-                    drawCircle(color = gaugeColor, radius = 4.8.dp.toPx(), center = Offset(posX, cy))
-                }
+    }
+}
+
+/** Why the assistant thinks so (reasons, composition), the framing tools and the camera. */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun PanelDetails(photo: Photo, act: ViewerActions, modifier: Modifier = Modifier) {
+    val p = LocalPalette.current
+    Column(modifier, verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        if (photo.bPct != null) {
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 val notes = buildList {
                     photo.topPct?.let { if (it <= 30) add("가장 잘 나온 사진 상위 $it%") }
                     if (photo.burstSize > 0) add("연사 ${photo.burstSize}장 중 ${photo.burstRank}번째")
@@ -490,7 +627,7 @@ fun InfoPanel(photo: Photo?, threshold: Int, act: ViewerActions, modifier: Modif
                     }
                 }
                 if (photo.compNotes.isNotEmpty()) {
-                    Column(verticalArrangement = Arrangement.spacedBy(3.dp), modifier = Modifier.padding(top = 2.dp)) {
+                    Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
                         photo.compNotes.forEach { n ->
                             val dot = when {
                                 n.ignored || n.ok == null -> p.text3
@@ -534,8 +671,6 @@ fun InfoPanel(photo: Photo?, threshold: Int, act: ViewerActions, modifier: Modif
                     }
                 }
             }
-        } else {
-            Text("셀렉 도우미가 아직 보지 않은 사진이에요.", color = p.text3, fontSize = 13.sp)
         }
         // Camera.
         val camera = listOf(photo.camera, photo.lens).filter { it.isNotBlank() }.joinToString(" · ")

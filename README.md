@@ -121,11 +121,13 @@ Linux 는 X11/Wayland, Vulkan 또는 OpenGL 드라이버(Mesa), `libxkbcommon-x1
 
 촬영 현장에서 SD 카드(태블릿 슬롯 또는 USB-C 카드 리더)로 사진을 가져와 B컷을 걸러 두는 **셀렉 앱**입니다. 엔진(가져오기 · 셀렉 도우미 · 학습)은 데스크톱과 같고, 위로 밀면 픽 · 아래로 밀면 거절합니다. 권한 · 인터넷 · 로그인 없이 동작합니다.
 
+휴대전화 · 7인치 태블릿의 사진 보기는 사진 아래에 별점 · 픽/거절 · B컷↔A컷 게이지만 두고, 패널은 사진을 가리지 않습니다. **자세히** 를 누르면 이유 · 구도 · 자동 수평/구도 · 촬영 정보가 펼쳐지고 (키보드 `I`), 그만큼 사진이 패널 위에서 작아집니다. 펼친 상태는 다음에도 기억합니다. 10인치 가로 화면은 패널이 사진 옆에 있습니다.
+
 Google Play 출시를 준비하고 있습니다 ([docs/play-store](docs/play-store/README.md)). 그전에 써 보려면 [Actions → android](https://github.com/MJ-best/exif-photo-organize/actions/workflows/android.yml) 의 아티팩트 `photo-organize-android` 에 있는 `app-debug.apk` 를 설치하세요. 직접 빌드: `cd android && ./gradlew :app:assembleDebug` (JDK 21 · Android SDK · NDK 28 · `cargo install cargo-ndk` 필요).
 
 <p align="center">
   <img src="docs/play-store/graphics/tablet10-1-library.jpg" alt="안드로이드 태블릿 — 라이브러리" width="64%">
-  <img src="docs/play-store/graphics/phone-1-library.jpg" alt="안드로이드 폰 — 라이브러리" width="20%">
+  <img src="docs/play-store/graphics/phone-3-viewer.jpg" alt="안드로이드 폰 — 사진 보기와 셀렉 도우미 (패널은 사진 아래)" width="20%">
 </p>
 
 ### 아이폰 · 아이패드 (iOS · iPadOS) — 준비 중
