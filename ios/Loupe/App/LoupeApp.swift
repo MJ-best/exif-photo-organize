@@ -4,7 +4,7 @@ import UIKit
 
 @main
 struct LoupeApp: App {
-    static let backgroundAnalysisTaskID = "io.github.mj-best.loupe.ios.analyze"
+    static let backgroundAnalysisTaskID = "io.github.mj-best.loupe.analyze"
 
     @State private var store: LibraryStore
     @Environment(\.scenePhase) private var scenePhase

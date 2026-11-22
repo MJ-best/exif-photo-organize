@@ -36,7 +36,7 @@ targets:
         optional: true
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: io.github.mj-best.loupe.ios
+        PRODUCT_BUNDLE_IDENTIFIER: io.github.mj-best.loupe
         INFOPLIST_FILE: Config/Info.plist
         SWIFT_OBJC_BRIDGING_HEADER: ""
         CODE_SIGN_STYLE: Automatic

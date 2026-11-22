@@ -12,7 +12,7 @@ name: ios-app-store
 # Optional:
 #   IOS_PROVISIONING_PROFILE  base64 of the iOS App Store provisioning profile (.mobileprovision).
 #                             When omitted, Xcode uses automatic distribution signing via ASC_* API key.
-#   vars.IOS_BUNDLE_ID        default io.github.mj-best.loupe.ios (or io.github.mj-best.loupe for Universal Purchase)
+#   vars.IOS_BUNDLE_ID        default io.github.mj-best.loupe (Universal Purchase with Mac App Store)
 
 on:
   workflow_dispatch:
@@ -22,9 +22,9 @@ on:
         type: boolean
         default: true
       bundle_id:
-        description: "번들 ID (맥 LOUPE 와 통합 구매하려면 io.github.mj-best.loupe, 별도 앱은 io.github.mj-best.loupe.ios)"
+        description: "번들 ID (기본값 io.github.mj-best.loupe = 맥과 통합 구매)"
         type: string
-        default: "io.github.mj-best.loupe.ios"
+        default: "io.github.mj-best.loupe"
   # Dry run (unsigned Release arm64 archive + ITMS preflight verification) on PRs touching iOS packaging.
   pull_request:
     paths:
@@ -66,7 +66,7 @@ jobs:
       - name: Dry run (unsigned Release arm64 archive + ITMS checks)
         if: github.event_name == 'pull_request'
         env:
-          BUNDLE_ID: ${{ vars.IOS_BUNDLE_ID || 'io.github.mj-best.loupe.ios' }}
+          BUNDLE_ID: ${{ vars.IOS_BUNDLE_ID || 'io.github.mj-best.loupe' }}
           BUILD: ${{ github.run_number }}
         run: ios/Scripts/ios-appstore.sh --dry-run
 
@@ -120,7 +120,7 @@ jobs:
         if: github.event_name != 'pull_request'
         env:
           TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-          BUNDLE_ID: ${{ inputs.bundle_id || vars.IOS_BUNDLE_ID || 'io.github.mj-best.loupe.ios' }}
+          BUNDLE_ID: ${{ inputs.bundle_id || vars.IOS_BUNDLE_ID || 'io.github.mj-best.loupe' }}
           BUILD: ${{ github.run_number }}
           ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
           ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}

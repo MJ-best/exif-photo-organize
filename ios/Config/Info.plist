@@ -57,7 +57,7 @@
     </array>
     <key>BGTaskSchedulerPermittedIdentifiers</key>
     <array>
-        <string>io.github.mj-best.loupe.ios.analyze</string>
+        <string>io.github.mj-best.loupe.analyze</string>
     </array>
     <key>UIBackgroundModes</key>
     <array>

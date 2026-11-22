@@ -4,7 +4,7 @@ import OSLog
 /// Structured Apple unified logging (`OSLog`) and Instruments signpost instrumentation.
 /// All telemetry stays 100% on-device; LOUPE performs zero network calls.
 enum LoupeLog {
-    private static let subsystem = Bundle.main.bundleIdentifier ?? "io.github.mj-best.loupe.ios"
+    private static let subsystem = Bundle.main.bundleIdentifier ?? "io.github.mj-best.loupe"
 
     static let lifecycle = Logger(subsystem: subsystem, category: "lifecycle")
     static let engine = Logger(subsystem: subsystem, category: "engine")

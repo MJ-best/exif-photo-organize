@@ -14,7 +14,8 @@
 #        (reuses the imported Apple Distribution certificate + auto-manages the iOS profile)
 #
 # Optional:
-#   BUNDLE_ID   default io.github.mj-best.loupe.ios (set io.github.mj-best.loupe for Universal Purchase)
+#   BUNDLE_ID   default io.github.mj-best.loupe (Universal Purchase with Mac App Store; override
+#               with io.github.mj-best.loupe.ios if selling iOS/iPadOS separately)
 #   BUILD       build number, strictly increasing per upload (default: YYMMDDHHMM)
 #
 # Modes:
@@ -28,7 +29,7 @@ ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$ROOT"
 
 MODE="${1:-}"
-BUNDLE_ID="${BUNDLE_ID:-io.github.mj-best.loupe.ios}"
+BUNDLE_ID="${BUNDLE_ID:-io.github.mj-best.loupe}"
 BUILD="${BUILD:-$(date +%y%m%d%H%M)}"
 VERSION="$(grep -m1 '^version' Cargo.toml | sed -E 's/.*"(.*)".*/\1/')"
 OUT="$ROOT/dist-ios-appstore"

@@ -2,7 +2,7 @@
 
 촬영 현장에서 아이패드·아이폰에 USB-C SD 카드 리더나 외장 SSD를 꽂아 EXIF 날짜별로 정리하고, **기기 안에서 B컷·A컷을 셀렉**하고, 크롭·수평을 맞춘 뒤 AirDrop · 파일 · Lightroom 으로 바로 넘기는 네이티브 SwiftUI 앱입니다.
 
-- **번들 ID**: `io.github.mj-best.loupe.ios`
+- **번들 ID**: `io.github.mj-best.loupe` (Mac App Store 와 통합 구매 · Universal Purchase)
 - **지원 기기**: iPhone · iPad (iOS 17 / iPadOS 17 이상, Universal)
 - **엔진 공유**: 데스크톱(macOS · Windows · Linux)과 동일한 `photoorg-core` · `photoorg-cull` Rust 엔진을 `crates/ios` (`photoorg-ios`) UniFFI 정적 라이브러리(`LoupeCore.xcframework`)로 링크합니다.
 - **네트워크 코드 0줄**: 사진과 AI 모델(YuNet · MobileNetV2 · PP-HumanSeg)은 기기 밖으로 나가지 않습니다.
@@ -106,15 +106,15 @@ iOS / iPadOS 앱스토어용 `.ipa` 패키징에는 macOS + Xcode 16+ 서명 환
 - **정적 XCFramework 비임베드 & dSYM 포함**: `LoupeCore.xcframework` 는 정적 링크(`embed: false`)만 수행하고 Release `dwarf-with-dsym` 으로 크래시 심볼을 포함.
 - **iCloud 백업 제외**: `Documents/LOUPE` 에 `isExcludedFromBackup = true` 강제 적용 (App Review 2.23).
 
-### 번들 ID 선택 (통합 구매 vs 별도 앱)
-- **맥 LOUPE 와 통합 구매(Universal Purchase)**: App Store Connect 의 기존 Mac LOUPE 앱(`io.github.mj-best.loupe`) 화면에서 **+ iOS 앱** 을 추가하고, 워크플로 실행 시 `bundle_id` 에 **`io.github.mj-best.loupe`** 를 입력합니다.
-- **별도 iOS / iPadOS 앱으로 판매**: Apple Developer 에서 App ID **`io.github.mj-best.loupe.ios`** 를 등록하고 App Store Connect 에서 새 iOS 앱을 만든 뒤 기본값(`io.github.mj-best.loupe.ios`)으로 실행합니다.
+### 번들 ID (통합 구매 · Universal Purchase 기본값)
+- 기본 번들 ID 는 맥 LOUPE 와 동일한 **`io.github.mj-best.loupe`** 입니다. App Store Connect 의 기존 Mac LOUPE 앱 화면에서 **+ iOS 앱** 을 추가하면 구매자가 1회 결제로 macOS · iPadOS · iOS 를 모두 사용할 수 있습니다.
+- 별도 iOS 앱으로 분리하려면 워크플로 실행 시 `bundle_id` 에 다른 번들 ID 를 입력하면 됩니다.
 
 ### GitHub Actions 로 빌드 및 업로드
 1. `main` 브랜치에 iOS 코드와 워크플로가 머지된 뒤, 저장소 **Actions → `ios-app-store` → Run workflow** 를 실행합니다.
    - `upload`: `true` 로 두면 서명된 `.ipa` 를 만들고 `xcrun altool --validate-app` · `--upload-app` 으로 App Store Connect 에 바로 올립니다 (`false` 면 아티팩트 `loupe-ios-appstore` 로 `.ipa` 만 내려받아 Transporter 로 직접 올릴 수 있습니다).
-   - `bundle_id`: 통합 구매(`io.github.mj-best.loupe`) 또는 별도 앱(`io.github.mj-best.loupe.ios`).
-   - (선택) 수동 프로비저닝 프로필을 쓰려면 Apple Developer 에서 **iOS App Store Connect** 배포 프로필(`.mobileprovision`)을 받아 base64 로 GitHub 시크릿 `IOS_PROVISIONING_PROFILE` 에 넣습니다. 비워 두면 기존 `MAS_APP_CERT_P12` + `ASC_*` API 키로 Xcode 자동 배포 서명을 시도합니다.
+   - `bundle_id`: 기본값 **`io.github.mj-best.loupe`** (통합 구매).
+   - (선택) 수동 프로비저닝 프로필을 쓰려면 Apple Developer 에서 `io.github.mj-best.loupe` 용 **iOS App Store Connect** 배포 프로필(`.mobileprovision`)을 받아 base64 로 GitHub 시크릿 `IOS_PROVISIONING_PROFILE` 에 넣습니다. 비워 두면 기존 `MAS_APP_CERT_P12` + `ASC_*` API 키로 Xcode 자동 배포 서명을 시도합니다.
 2. 업로드 뒤 15–30분 후 App Store Connect(TestFlight / App Store 버전)에서 빌드를 선택하고 [listing.md](listing.md) · [privacy.md](privacy.md) 내용을 채워 제출합니다.
 
 ### Mac 에서 직접 빌드 / 드라이런
@@ -124,7 +124,7 @@ ios/Scripts/ios-appstore.sh --dry-run
 
 # 서명된 .ipa 생성 및 App Store Connect 업로드
 TEAM_ID=ABCDE12345 \
-BUNDLE_ID=io.github.mj-best.loupe.ios \
+BUNDLE_ID=io.github.mj-best.loupe \
 PROFILE=~/Downloads/LOUPE_iOS_AppStore.mobileprovision \
 ASC_KEY_ID=... ASC_ISSUER_ID=... \
 ios/Scripts/ios-appstore.sh --upload
