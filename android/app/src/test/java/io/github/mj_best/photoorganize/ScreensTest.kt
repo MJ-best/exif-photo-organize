@@ -33,6 +33,7 @@ import io.github.mj_best.photoorganize.ui.ViewerActions
 import io.github.mj_best.photoorganize.ui.ViewerScreen
 import io.github.mj_best.photoorganize.ui.ViewerState
 import org.junit.Assert.assertTrue
+import org.junit.Assume.assumeTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -106,6 +107,8 @@ class ScreensTest {
 
     private fun library(view: View, file: String, selection: Set<Long> = emptySet()) {
         val ui = ui(view)
+        // A real card may have nothing in a list (good photos: no B컷 후보); skip that picture.
+        if (Lib.card != null) assumeTrue("$view has photos", ui.photos.isNotEmpty())
         assertTrue("$view has photos", ui.photos.isNotEmpty())
         show(Preloaded(ui.photos.take(80).map { it.id })) {
             LibraryScreen(ui, selection, NoLibraryActions, SnackbarHostState())
@@ -149,6 +152,14 @@ class ScreensTest {
     @Test
     @Config(qualifiers = PHONE)
     fun candidatesPhone() = library(View.CANDIDATES, "candidates-phone.png")
+
+    @Test
+    @Config(qualifiers = RobolectricDeviceQualifiers.MediumTablet)
+    fun keepersTablet() = library(View.KEEPERS, "keepers-tablet.png")
+
+    @Test
+    @Config(qualifiers = PHONE)
+    fun keepersPhone() = library(View.KEEPERS, "keepers-phone.png")
 
     @Test
     @Config(qualifiers = PHONE)
