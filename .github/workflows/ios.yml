@@ -13,6 +13,7 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
+  IPHONEOS_DEPLOYMENT_TARGET: "17.0"
 
 jobs:
   ios:

@@ -39,6 +39,9 @@ on:
 permissions:
   contents: read
 
+env:
+  IPHONEOS_DEPLOYMENT_TARGET: "17.0"
+
 jobs:
   ios-appstore:
     runs-on: macos-latest

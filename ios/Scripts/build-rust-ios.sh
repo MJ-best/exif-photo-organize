@@ -18,6 +18,10 @@ BUILD_SIM=true
 BUILD_DEV=true
 PROFILE="release"
 
+# Match ios/project.yml deploymentTarget (17.0) so cc-rs (sqlite3.o, tract-linalg) and rustc
+# emit iOS 17.0 LC_BUILD_VERSION load commands instead of the latest SDK version.
+export IPHONEOS_DEPLOYMENT_TARGET="${IPHONEOS_DEPLOYMENT_TARGET:-17.0}"
+
 for arg in "$@"; do
   case "$arg" in
     --sim-only) BUILD_DEV=false ;;

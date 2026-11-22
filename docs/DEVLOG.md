@@ -623,14 +623,17 @@ LOUPE(0.5.0 까지의 이름: Photo Organize)를 만들면서 받은 **요청과
     - `ios/Scripts/build-rust-ios.sh`: 앱스토어 아카이브 시간을 절반으로 줄이는 `--device-only` 옵션 추가.
     - `ios/Scripts/ios-appstore.sh`: `--dry-run`(무서명 Release arm64 `.xcarchive` + ITMS 사전 검증), 서명 `.ipa` 내보내기(수동 `.mobileprovision` 및 기존 `MAS_APP_CERT_P12` + `ASC_*` API 키 자동 서명 모두 지원), `--upload`(`xcrun altool --validate-app` · `--upload-app --type ios`) 지원.
     - `.github/workflows/ios-app-store.yml`: 기존 Mac App Store 시크릿을 재사용하는 수동 실행(`upload`, `bundle_id` 입력) + PR 시 `--dry-run` 자동 검증 워크플로 추가.
-    - `docs/ios-app-store/privacy.md` · `listing.md` · `README.md`: 개인정보처리방침, 등록 문구, 심사 메모, 통합 구매(`io.github.mj-best.loupe`) vs 별도 앱(`io.github.mj-best.loupe.ios`) 업로드 절차 정리.
+    - `ios/Scripts/build-rust-ios.sh` · `.github/workflows/ios.yml` · `.github/workflows/ios-app-store.yml`: `IPHONEOS_DEPLOYMENT_TARGET=17.0` 고정으로 `sqlite3.o` · `tract-linalg` C/어셈블리 오브젝트가 최신 SDK 버전(iOS 26.5)으로 빌드되던 링커 `minos` 경고 제거(iOS 17/18 실기기 런타임 호환 보장).
+    - `docs/ios-app-store/privacy.md` · `listing.md` · `README.md`: 개인정보처리방침, 등록 문구, 심사 메모, 맥 통합 구매(`io.github.mj-best.loupe`) 업로드 절차 정리.
 - **확인**
-  - `AppIcon-1024.png` PNG 헤더 `1024x1024`, `bit_depth=8`, `color_type=2` (알파 채널 없음) 및 시각 렌더링 확인.
-  - `PrivacyInfo.xcprivacy` · `Info.plist` XML/plist 파싱, `ios/Scripts/*.sh` `bash -n` 문법 검사, `.github/workflows/ios-app-store.yml` · `ios/project.yml` 구조 검증 통과.
-  - 이 환경(Linux)에는 macOS · Xcode · Apple 키체인이 없어 실제 `.ipa` 아카이브·서명·업로드는 실행하지 못했습니다. 브랜치를 GitHub 에 올려 macOS 러너(`ios.yml` · `ios-app-store.yml`)에서 빌드·업로드해야 합니다.
+  - **PR #31 GitHub Actions 7/7 전체 통과**:
+    - `ios-appstore` (macOS Xcode 16): Release arm64 `.xcarchive` 빌드(Swift 오류 0 · 경고 0) + ITMS 사전 점검(`PrivacyInfo.xcprivacy`, 불투명 24-bit RGB 아이콘, `CFBundleIdentifier=io.github.mj-best.loupe`, `ITSAppUsesNonExemptEncryption=false`, `dSYMs`, 정적 `LoupeCore.xcframework` 비임베드, `otool -L` 시스템 프레임워크 검증) 통과.
+    - `ios` (macOS Xcode 16 + iOS 시뮬레이터): Rust 엔진 테스트 + `LoupeCore.xcframework` + `LoupeTests` **17/17 전체 통과** (`LibraryStoreTests` 11건 · `ThermalAndPipelineTests` 6건, 0 실패) + `aarch64-apple-ios` 릴리스 빌드 통과.
+    - 기존 플랫폼 회귀(`macos` · `linux-x86_64` · `windows-x86_64` · `android`) 전체 통과.
+  - 실기기(iPhone/iPad) 화면 렌더링, USB-C 외장 SSD/SD 카드 연결, Instruments 프로파일링, 실제 App Store Connect 서명 업로드는 TestFlight 배포 후 확인이 필요합니다.
 - **남은 점**
-  - `ios-ipados-app` 브랜치 푸시 → PR(macOS 러너 `LoupeTests` + `--dry-run` 아카이브 검증) → `main` 머지 후 사용자가 **Actions → `ios-app-store` → Run workflow** 실행.
-  - App Store Connect 에 iOS 앱(통합 구매 `+ iOS 앱` 또는 별도 앱) 생성 후 TestFlight / 심사 제출.
+  - PR #31 머지 후 사용자가 **Actions → `ios-app-store` → Run workflow** (`upload: true`, `bundle_id: io.github.mj-best.loupe`) 실행.
+  - App Store Connect 기존 Mac LOUPE 앱(`io.github.mj-best.loupe`)에서 **+ iOS 앱** 추가 후 TestFlight 실기기 검증 및 심사 제출.
 
 
 
