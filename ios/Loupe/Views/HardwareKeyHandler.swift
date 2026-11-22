@@ -17,6 +17,7 @@ struct HardwareKeyHandler: UIViewControllerRepresentable {
         let onPrevious: () -> Void
         let onNext: () -> Void
         let onSpace: () -> Void
+        let onUndo: () -> Void
         let onDelete: () -> Void
         let onClose: () -> Void
     }
@@ -64,6 +65,7 @@ struct HardwareKeyHandler: UIViewControllerRepresentable {
                 makeCommand("x", title: "거절 (B컷)", action: #selector(reject)),
                 makeCommand("u", title: "픽/거절 해제", action: #selector(clearFlag)),
                 makeCommand("z", title: "100% 확대 전환", action: #selector(toggleZoom)),
+                makeCommand("z", modifiers: .command, title: "실행 취소", action: #selector(undoLast)),
                 makeCommand("g", title: "구도 표시", action: #selector(toggleOverlay)),
                 makeCommand("r", title: "자동 수평", action: #selector(autoStraighten)),
                 makeCommand(UIKeyCommand.inputLeftArrow, title: "이전 사진", action: #selector(prevPhoto)),
@@ -75,8 +77,13 @@ struct HardwareKeyHandler: UIViewControllerRepresentable {
             ]
         }
 
-        private func makeCommand(_ input: String, title: String?, action: Selector) -> UIKeyCommand {
-            let cmd = UIKeyCommand(input: input, modifierFlags: [], action: action)
+        private func makeCommand(
+            _ input: String,
+            modifiers: UIKeyModifierFlags = [],
+            title: String?,
+            action: Selector
+        ) -> UIKeyCommand {
+            let cmd = UIKeyCommand(input: input, modifierFlags: modifiers, action: action)
             cmd.discoverabilityTitle = title
             cmd.wantsPriorityOverSystemBehavior = true
             return cmd
@@ -92,6 +99,7 @@ struct HardwareKeyHandler: UIViewControllerRepresentable {
         @objc private func reject() { callbacks?.onReject() }
         @objc private func clearFlag() { callbacks?.onClearFlag() }
         @objc private func toggleZoom() { callbacks?.onToggleZoom() }
+        @objc private func undoLast() { callbacks?.onUndo() }
         @objc private func toggleOverlay() { callbacks?.onToggleOverlay() }
         @objc private func autoStraighten() { callbacks?.onAutoStraighten() }
         @objc private func prevPhoto() { callbacks?.onPrevious() }

@@ -19,6 +19,24 @@ struct SettingsSheetView: View {
         return order.map { ($0, map[$0] ?? []) }
     }
 
+    private var thermalBudgetSummary: String {
+        let monitor = store.analyzer.thermalMonitor
+        let threads = monitor.recommendedThreads
+        let stateLabel: String
+        switch monitor.thermalState {
+        case .nominal: stateLabel = "정상"
+        case .fair: stateLabel = "약간 따뜻함"
+        case .serious: stateLabel = "발열 주의"
+        case .critical: stateLabel = "과열 일시정지"
+        @unknown default: stateLabel = "자동"
+        }
+        if threads == 0 {
+            return "일시정지 (\(stateLabel))"
+        }
+        let lowPower = monitor.lowPowerMode ? " · 저전력" : ""
+        return "최대 \(threads)스레드 (\(stateLabel)\(lowPower))"
+    }
+
     var body: some View {
         NavigationStack {
             Form {
@@ -47,6 +65,7 @@ struct SettingsSheetView: View {
                 Section("셀렉 도우미") {
                     LabeledContent("학습 상태", value: store.learn.summary)
                     LabeledContent("분석 완료", value: "\(store.learn.analysed) / \(store.learn.total)장")
+                    LabeledContent("분석 스레드 예산", value: thermalBudgetSummary)
                     Button("미분석 사진 지금 분석하기") {
                         store.startAnalysisIfNeeded()
                     }
@@ -71,10 +90,24 @@ struct SettingsSheetView: View {
                         confirmEmptyTrash = true
                     }
                     .disabled(store.trashBytes == 0)
+
+                    Button {
+                        store.optimizeStorage()
+                    } label: {
+                        HStack {
+                            Text("카탈로그 최적화 (WAL 정리)")
+                            Spacer()
+                            if store.isOptimizingStorage {
+                                ProgressView().controlSize(.small)
+                            }
+                        }
+                    }
+                    .foregroundStyle(palette.accent)
+                    .disabled(store.isOptimizingStorage)
                 } header: {
-                    Text("휴지통")
+                    Text("저장소 · 휴지통")
                 } footer: {
-                    Text("거절 후 휴지통으로 옮긴 사진은 비우기 전까지 보관됩니다. 비워도 셀렉 도우미가 배운 판정 기록은 남습니다.")
+                    Text("거절 후 휴지통으로 옮긴 사진은 비우기 전까지 보관되며, 비워도 셀렉 도우미 학습 기록은 남습니다. 외장 SSD를 분리하기 전에 WAL 정리를 실행하면 다른 기기에서도 안전하게 바로 열 수 있습니다.")
                 }
 
                 Section("개인정보 · 보안") {

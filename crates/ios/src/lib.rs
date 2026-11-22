@@ -38,7 +38,8 @@ use photoorg_core::{format, preview, trash, Library};
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
-use std::sync::{Arc, Mutex, MutexGuard, RwLock, RwLockReadGuard, RwLockWriteGuard};
+use std::sync::{Arc, Condvar, Mutex, MutexGuard, RwLock, RwLockReadGuard, RwLockWriteGuard};
+use std::time::{Duration, Instant};
 
 uniffi::setup_scaffolding!();
 
@@ -319,6 +320,14 @@ pub struct DeleteResult {
     pub first_error: Option<String>,
 }
 
+/// Snapshot of a photo's prior rating/flag state used for atomic batch Undo.
+#[derive(Clone, Debug, PartialEq, uniffi::Record)]
+pub struct DecisionRestore {
+    pub id: i64,
+    pub rating: i32,
+    pub flag: i32,
+}
+
 #[uniffi::export(callback_interface)]
 pub trait ImportListener: Send + Sync {
     fn progress(&self, status: ImportStatus);
@@ -327,6 +336,62 @@ pub trait ImportListener: Send + Sync {
 #[uniffi::export(callback_interface)]
 pub trait ProgressListener: Send + Sync {
     fn progress(&self, done: i32, total: i32);
+}
+
+/// Tracks active FFI operations so [`PhotoLibrary::suspend`] can drain all running workers before
+/// truncating WAL files and closing SQLite handles (zero lingering file locks on iOS suspend).
+struct OpBarrier {
+    active: Mutex<usize>,
+    cv: Condvar,
+}
+
+impl OpBarrier {
+    fn new() -> Self {
+        OpBarrier { active: Mutex::new(0), cv: Condvar::new() }
+    }
+
+    fn try_enter(&self, suspended: &AtomicBool) -> Res<OpGuard<'_>> {
+        let mut count = self.active.lock().unwrap_or_else(|e| e.into_inner());
+        if suspended.load(Ordering::Acquire) {
+            return Err(PhotoError::LibrarySuspended);
+        }
+        *count += 1;
+        Ok(OpGuard { barrier: self })
+    }
+
+    fn wait_drained(&self, timeout: Duration) {
+        let deadline = Instant::now() + timeout;
+        let mut count = self.active.lock().unwrap_or_else(|e| e.into_inner());
+        while *count > 0 {
+            let Some(remaining) = deadline.checked_duration_since(Instant::now()) else {
+                break;
+            };
+            let (next, res) = self.cv.wait_timeout(count, remaining).unwrap_or_else(|e| e.into_inner());
+            count = next;
+            if res.timed_out() {
+                break;
+            }
+        }
+    }
+
+    #[cfg(test)]
+    fn active_count(&self) -> usize {
+        *self.active.lock().unwrap_or_else(|e| e.into_inner())
+    }
+}
+
+struct OpGuard<'a> {
+    barrier: &'a OpBarrier,
+}
+
+impl Drop for OpGuard<'_> {
+    fn drop(&mut self) {
+        let mut count = self.barrier.active.lock().unwrap_or_else(|e| e.into_inner());
+        *count = count.saturating_sub(1);
+        if *count == 0 {
+            self.barrier.cv.notify_all();
+        }
+    }
 }
 
 struct IndexState {
@@ -376,6 +441,7 @@ pub struct PhotoLibrary {
     thumbs: Mutex<Option<ThumbStore>>,
     scan: Mutex<Option<ScanResult>>,
     settings: RwLock<Settings>,
+    ops: OpBarrier,
     revision: AtomicI64,
     suspended: AtomicBool,
     cancel_import: Arc<AtomicBool>,
@@ -597,6 +663,7 @@ impl PhotoLibrary {
             thumbs: Mutex::new(Some(thumbs)),
             scan: Mutex::new(None),
             settings: RwLock::new(Settings::default()),
+            ops: OpBarrier::new(),
             revision: AtomicI64::new(1),
             suspended: AtomicBool::new(false),
             cancel_import: Arc::new(AtomicBool::new(false)),
@@ -618,13 +685,15 @@ impl PhotoLibrary {
     }
 
     /// Gracefully suspend database connections before iOS moves the app to background:
-    /// cancels in-flight background work, truncates SQLite WAL files, and drops both `Catalog` and
-    /// `ThumbStore` handles so zero file locks remain held (prevents `0xdead10cc`).
+    /// cancels in-flight background work, drains all active operations so no untracked SQLite
+    /// connections remain open, truncates WAL files, and drops both `Catalog` and `ThumbStore`
+    /// handles so zero file locks remain held (prevents `0xdead10cc`).
     pub fn suspend(&self) -> Res<()> {
         self.suspended.store(true, Ordering::Release);
         self.cancel_import.store(true, Ordering::Relaxed);
         self.cancel_analysis.store(true, Ordering::Relaxed);
         self.cancel_export.store(true, Ordering::Relaxed);
+        self.ops.wait_drained(Duration::from_secs(4));
         {
             let mut cat = self.catalog_guard();
             if let Some(c) = cat.as_ref() {
@@ -678,6 +747,7 @@ impl PhotoLibrary {
 
     /// Fetch full photo details, composition evaluation notes, and toggleable overlay geometry.
     pub fn photo_detail(&self, id: i64) -> Res<Option<PhotoDetail>> {
+        let _op = self.try_enter_op()?;
         let off = self.settings_read().learn.off;
         let (mut detail, framing) = {
             let st = self.index_read();
@@ -705,7 +775,7 @@ impl PhotoLibrary {
     /// Persistent-connection thumbnail fetch (zero per-call SQLite open). Applies non-destructive
     /// crop/straighten framing only when active.
     pub fn thumbnail(&self, id: i64) -> Res<Option<Vec<u8>>> {
-        self.ensure_active()?;
+        let _op = self.try_enter_op()?;
         let framing = self.index_read().index.get(id).and_then(|a| a.framing).filter(|f| !f.is_identity());
         let bytes = {
             let th_guard = self.thumbs_guard();
@@ -728,11 +798,23 @@ impl PhotoLibrary {
         Ok(Some(bytes))
     }
 
+    /// Return the local path to a video asset so iOS `AVAssetImageGenerator` can extract a
+    /// hardware-accelerated video thumbnail.
+    pub fn video_path(&self, id: i64) -> Res<Option<String>> {
+        let _op = self.try_enter_op()?;
+        let cat_guard = self.catalog_guard();
+        let Some(cat) = cat_guard.as_ref() else {
+            return Err(PhotoError::LibrarySuspended);
+        };
+        let files = cat.files_for(id)?;
+        Ok(files.iter().find(|f| f.kind.is_video()).map(|f| self.lib.abs(&f.rel_path).display().to_string()))
+    }
+
     /// Describe how iOS should load the viewer preview for `id`.
     /// Returns [`PreviewDescriptor::EmbeddedSlice`] (zero software decode/re-encode, zero FFI byte
     /// copy) whenever possible so Apple ImageIO decodes directly via mmap.
     pub fn preview_descriptor(&self, id: i64, max_edge: i32) -> Res<PreviewDescriptor> {
-        self.ensure_active()?;
+        let _op = self.try_enter_op()?;
         let edge = max_edge.clamp(64, 8192) as u32;
         let framing = self.index_read().index.get(id).and_then(|a| a.framing).filter(|f| !f.is_identity());
         let (files, orientation) = {
@@ -768,7 +850,7 @@ impl PhotoLibrary {
 
     /// Set star rating (0 clears). Writes catalog + XMP sidecar and returns the new revision.
     pub fn set_rating(&self, ids: Vec<i64>, rating: i32) -> Res<i64> {
-        self.ensure_active()?;
+        let _op = self.try_enter_op()?;
         let rating = rating.clamp(0, 5) as u8;
         {
             let mut cat_guard = self.catalog_guard();
@@ -791,7 +873,7 @@ impl PhotoLibrary {
 
     /// Set flag: 1 = pick (A컷), -1 = reject (B컷), 0 = undecided. Returns the new revision.
     pub fn set_flag(&self, ids: Vec<i64>, flag: i32) -> Res<i64> {
-        self.ensure_active()?;
+        let _op = self.try_enter_op()?;
         let flag = flag.signum() as i8;
         {
             let mut cat_guard = self.catalog_guard();
@@ -806,6 +888,36 @@ impl PhotoLibrary {
             for id in &ids {
                 if let Some(a) = st.index.get_mut(*id) {
                     a.flag = flag;
+                }
+            }
+        }
+        Ok(self.revision.fetch_add(1, Ordering::AcqRel) + 1)
+    }
+
+    /// Atomically restore prior rating and flag values for a batch of photos (Undo support).
+    pub fn restore_decisions(&self, items: Vec<DecisionRestore>) -> Res<i64> {
+        let _op = self.try_enter_op()?;
+        if items.is_empty() {
+            return Ok(self.revision());
+        }
+        let ids: Vec<i64> = items.iter().map(|i| i.id).collect();
+        {
+            let mut cat_guard = self.catalog_guard();
+            let Some(cat) = cat_guard.as_mut() else {
+                return Err(PhotoError::LibrarySuspended);
+            };
+            for item in &items {
+                cat.set_rating(&[item.id], item.rating.clamp(0, 5) as u8)?;
+                cat.set_flag(&[item.id], item.flag.signum() as i8)?;
+            }
+            self.write_sidecars(cat, &ids);
+        }
+        {
+            let mut st = self.index_write();
+            for item in &items {
+                if let Some(a) = st.index.get_mut(item.id) {
+                    a.rating = item.rating.clamp(0, 5) as u8;
+                    a.flag = item.flag.signum() as i8;
                 }
             }
         }
@@ -857,7 +969,7 @@ impl PhotoLibrary {
 
     /// Non-destructive auto straighten (and optional gentle composition crop).
     pub fn auto_frame(&self, id: i64, compose: bool) -> Res<String> {
-        self.ensure_active()?;
+        let _op = self.try_enter_op()?;
         let off = self.settings_read().learn.off;
         let a = self
             .index_read()
@@ -902,7 +1014,7 @@ impl PhotoLibrary {
             rec.framing = stored;
         }
         self.revision.fetch_add(1, Ordering::AcqRel);
-        let _ = self.learn();
+        let _ = self.learn_locked();
         Ok(match (level, composed) {
             (true, true) => format!("{:.1}° 돌려 수평을 맞추고 구도에 맞춰 잘랐습니다", f.angle.abs()),
             (true, false) => format!("{:.1}° 돌려 수평을 맞췄습니다", f.angle.abs()),
@@ -913,7 +1025,7 @@ impl PhotoLibrary {
     }
 
     pub fn reset_framing(&self, id: i64) -> Res<()> {
-        self.ensure_active()?;
+        let _op = self.try_enter_op()?;
         {
             let cat_guard = self.catalog_guard();
             let Some(cat) = cat_guard.as_ref() else {
@@ -925,14 +1037,14 @@ impl PhotoLibrary {
             rec.framing = None;
         }
         self.revision.fetch_add(1, Ordering::AcqRel);
-        let _ = self.learn();
+        let _ = self.learn_locked();
         Ok(())
     }
 
     /// Scan an SD card / USB-C external drive / local folder chosen via iOS `UIDocumentPicker`.
     /// Caller must hold `startAccessingSecurityScopedResource()` on `path` until import finishes.
     pub fn scan_directory(&self, path: String, label: String, include_videos: bool) -> Res<ScanInfo> {
-        self.ensure_active()?;
+        let _op = self.try_enter_op()?;
         let root = PathBuf::from(&path);
         if !root.exists() {
             return Err(PhotoError::NotFound { detail: path });
@@ -984,7 +1096,7 @@ impl PhotoLibrary {
     /// Pass `available_bytes` from `URLResourceKey.volumeAvailableCapacityForImportantUsageKey`
     /// (pass `-1` if unknown to skip the preflight check).
     pub fn import_scanned(&self, available_bytes: i64, listener: Box<dyn ImportListener>) -> Res<ImportResult> {
-        self.ensure_active()?;
+        let _op = self.try_enter_op()?;
         let scan = self
             .scan_guard()
             .take()
@@ -1021,7 +1133,9 @@ impl PhotoLibrary {
             let _ = forward.join();
             res
         })?;
-        self.reload()?;
+        if !self.is_suspended() {
+            self.reload_locked()?;
+        }
         Ok(ImportResult {
             added: summary.assets_added as i32,
             updated: summary.assets_updated as i32,
@@ -1037,14 +1151,15 @@ impl PhotoLibrary {
     }
 
     pub fn pending_analysis(&self) -> Res<i32> {
-        self.ensure_active()?;
+        let _op = self.try_enter_op()?;
         Ok(self.pending()?.len() as i32)
     }
 
-    /// Analyze unanalyzed photos with a caller-supplied thread budget (`1` under thermal/memory
-    /// pressure, `2` normal iPhone/iPad). Blocks; [`Self::cancel_analysis`] stops it promptly.
+    /// Analyze unanalyzed photos in incremental 64-photo chunks with a caller-supplied thread
+    /// budget (`1` under thermal/memory pressure, `2..=3` normal). Each completed chunk reloads
+    /// and rescores so B-cut/A-cut candidates appear live while a large card finishes analyzing.
     pub fn analyze(&self, max_threads: i32, listener: Box<dyn ProgressListener>) -> Res<i32> {
-        self.ensure_active()?;
+        let _op = self.try_enter_op()?;
         self.cancel_analysis.store(false, Ordering::Relaxed);
         let ids = self.pending()?;
         let total = ids.len() as i32;
@@ -1053,34 +1168,40 @@ impl PhotoLibrary {
             return Ok(0);
         }
         let budget = max_threads.clamp(1, 4) as usize;
-        let done = cull::analyze_assets_with_threads(&self.lib, &ids, &self.cancel_analysis, budget, &|_, n| {
-            if n % 4 == 0 || n as i32 == total {
-                listener.progress(n as i32, total);
+        const CHUNK: usize = 64;
+        let mut completed: usize = 0;
+
+        for chunk in ids.chunks(CHUNK) {
+            if self.cancel_analysis.load(Ordering::Relaxed) || self.is_suspended() {
+                break;
             }
-        })?;
-        if !self.is_suspended() {
-            self.reload()?;
-            self.learn()?;
+            let base = completed;
+            let done_chunk =
+                cull::analyze_assets_with_threads(&self.lib, chunk, &self.cancel_analysis, budget, &|_, n| {
+                    let overall = (base + n) as i32;
+                    if overall % 4 == 0 || overall >= total {
+                        listener.progress(overall.min(total), total);
+                    }
+                })?;
+            completed += done_chunk;
+            if !self.is_suspended() && done_chunk > 0 {
+                let _ = self.reload_locked();
+                let _ = self.learn_locked();
+            }
         }
-        Ok(done as i32)
+        listener.progress((completed as i32).min(total), total);
+        Ok(completed as i32)
     }
 
     pub fn cancel_analysis(&self) {
         self.cancel_analysis.store(true, Ordering::Relaxed);
     }
 
-    /// Retrain and rescore every photo from current decisions (no image decoding).
+    /// Retrain and rescore every photo from current decisions using the persistent catalog
+    /// connection (no untracked SQLite connections left open across background suspension).
     pub fn learn(&self) -> Res<LearnStatus> {
-        self.ensure_active()?;
-        let settings = self.settings_read().learn;
-        let mut cat = self.lib.catalog()?;
-        let (scores, report) = cull::rescore(&mut cat, &settings)?;
-        let mut st = self.index_write();
-        apply_scores(&mut st.index, &scores);
-        let status = compute_learn_status(&st.index, Some(&report));
-        st.report = Some(report);
-        self.revision.fetch_add(1, Ordering::AcqRel);
-        Ok(status)
+        let _op = self.try_enter_op()?;
+        self.learn_locked()
     }
 
     pub fn learn_status(&self) -> LearnStatus {
@@ -1088,9 +1209,30 @@ impl PhotoLibrary {
         compute_learn_status(&st.index, st.report.as_ref())
     }
 
+    /// Flush WAL files and run SQLite `PRAGMA optimize` on catalog & thumbnail databases.
+    pub fn optimize_storage(&self) -> Res<()> {
+        let _op = self.try_enter_op()?;
+        {
+            let cat_guard = self.catalog_guard();
+            let Some(cat) = cat_guard.as_ref() else {
+                return Err(PhotoError::LibrarySuspended);
+            };
+            let _ = cat.conn().execute_batch("PRAGMA optimize;");
+            cat.checkpoint_truncate()?;
+        }
+        {
+            let th_guard = self.thumbs_guard();
+            let Some(th) = th_guard.as_ref() else {
+                return Err(PhotoError::LibrarySuspended);
+            };
+            th.checkpoint_truncate()?;
+        }
+        Ok(())
+    }
+
     /// Estimate bytes and counts before exporting selected photos (for AirDrop / Files / Lightroom).
     pub fn export_plan(&self, ids: Vec<i64>) -> Res<ExportPlan> {
-        self.ensure_active()?;
+        let _op = self.try_enter_op()?;
         let framed_count = {
             let st = self.index_read();
             ids.iter().filter(|id| st.index.get(**id).is_some_and(|a| a.framing.is_some())).count() as i32
@@ -1122,7 +1264,7 @@ impl PhotoLibrary {
         date_names: bool,
         listener: Box<dyn ProgressListener>,
     ) -> Res<ExportResult> {
-        self.ensure_active()?;
+        let _op = self.try_enter_op()?;
         self.cancel_export.store(false, Ordering::Relaxed);
         let kind = match mode {
             ExportMode::Originals => ExportKind::Originals,
@@ -1137,6 +1279,7 @@ impl PhotoLibrary {
             export::export(&self.lib, &cat, &ids, Path::new(&dest_dir), &opts, &self.cancel_export, &|d, t| {
                 listener.progress(d as i32, t as i32);
             })?;
+        drop(cat);
         Ok(ExportResult {
             files: summary.files as i32,
             from_raw: summary.from_raw as i32,
@@ -1151,7 +1294,7 @@ impl PhotoLibrary {
     }
 
     pub fn delete_plan(&self, ids: Vec<i64>) -> Res<DeletePlan> {
-        self.ensure_active()?;
+        let _op = self.try_enter_op()?;
         let cat_guard = self.catalog_guard();
         let Some(cat) = cat_guard.as_ref() else {
             return Err(PhotoError::LibrarySuspended);
@@ -1162,7 +1305,7 @@ impl PhotoLibrary {
 
     /// Move photos into the library's own trash folder while preserving culling decisions for learning.
     pub fn delete_photos(&self, ids: Vec<i64>) -> Res<DeleteResult> {
-        self.ensure_active()?;
+        let _op = self.try_enter_op()?;
         let report = {
             let mut cat_guard = self.catalog_guard();
             let Some(cat) = cat_guard.as_mut() else {
@@ -1197,12 +1340,8 @@ impl PhotoLibrary {
 }
 
 impl PhotoLibrary {
-    fn ensure_active(&self) -> Res<()> {
-        if self.is_suspended() {
-            Err(PhotoError::LibrarySuspended)
-        } else {
-            Ok(())
-        }
+    fn try_enter_op(&self) -> Res<OpGuard<'_>> {
+        self.ops.try_enter(&self.suspended)
     }
 
     fn index_read(&self) -> RwLockReadGuard<'_, IndexState> {
@@ -1245,9 +1384,31 @@ impl PhotoLibrary {
         Ok(st.index.assets.iter().rev().filter(|a| !a.is_video() && !done.contains(&a.id)).map(|a| a.id).collect())
     }
 
-    fn reload(&self) -> Res<()> {
-        let cat = self.lib.catalog()?;
-        let mut fresh = cat.load_index()?;
+    fn learn_locked(&self) -> Res<LearnStatus> {
+        let settings = self.settings_read().learn;
+        let (scores, report) = {
+            let mut cat_guard = self.catalog_guard();
+            let Some(cat) = cat_guard.as_mut() else {
+                return Err(PhotoError::LibrarySuspended);
+            };
+            cull::rescore(cat, &settings)?
+        };
+        let mut st = self.index_write();
+        apply_scores(&mut st.index, &scores);
+        let status = compute_learn_status(&st.index, Some(&report));
+        st.report = Some(report);
+        self.revision.fetch_add(1, Ordering::AcqRel);
+        Ok(status)
+    }
+
+    fn reload_locked(&self) -> Res<()> {
+        let mut fresh = {
+            let cat_guard = self.catalog_guard();
+            let Some(cat) = cat_guard.as_ref() else {
+                return Err(PhotoError::LibrarySuspended);
+            };
+            cat.load_index()?
+        };
         fresh.rank_keepers();
         self.index_write().index = fresh;
         self.revision.fetch_add(1, Ordering::AcqRel);
@@ -1409,5 +1570,121 @@ mod tests {
         assert!(lib.trash_bytes() > 0);
         lib.empty_trash().unwrap();
         assert_eq!(lib.trash_bytes(), 0);
+    }
+
+    #[test]
+    fn restore_decisions_supports_batch_undo() {
+        let tmp = tempfile::tempdir().unwrap();
+        let card = tmp.path().join("card");
+        let lib_dir = tmp.path().join("lib");
+        std::fs::create_dir_all(&card).unwrap();
+        write_sample_jpeg(&card.join("IMG_0001.JPG"), 1);
+        write_sample_jpeg(&card.join("IMG_0002.JPG"), 2);
+        write_sample_jpeg(&card.join("IMG_0003.JPG"), 3);
+
+        let lib = PhotoLibrary::open(lib_dir.display().to_string()).unwrap();
+        lib.scan_directory(card.display().to_string(), "SD".into(), true).unwrap();
+        lib.import_scanned(-1, Box::new(CountImport(Arc::new(AtomicUsize::new(0))))).unwrap();
+
+        let ids = lib.snapshot(LibraryView::All).unwrap().ids;
+        lib.set_rating(vec![ids[0]], 4).unwrap();
+        lib.set_flag(vec![ids[1]], 1).unwrap();
+
+        // Capture prior state, perform a bulk reject, then undo atomically.
+        let prior = lib
+            .photos_batch(ids.clone())
+            .unwrap()
+            .into_iter()
+            .map(|p| DecisionRestore { id: p.id, rating: p.rating, flag: p.flag })
+            .collect::<Vec<_>>();
+
+        lib.set_flag(ids.clone(), -1).unwrap();
+        assert_eq!(lib.snapshot(LibraryView::Rejected).unwrap().ids.len(), 3);
+
+        lib.restore_decisions(prior).unwrap();
+        let after = lib.photos_batch(ids.clone()).unwrap();
+        assert_eq!(after[0].rating, 4);
+        assert_eq!(after[0].flag, 0);
+        assert_eq!(after[1].flag, 1);
+        assert_eq!(after[2].flag, 0);
+        assert_eq!(lib.snapshot(LibraryView::Rejected).unwrap().ids.len(), 0);
+    }
+
+    #[test]
+    fn suspend_drains_inflight_ops_and_truncates_wal() {
+        let tmp = tempfile::tempdir().unwrap();
+        let card = tmp.path().join("card");
+        let lib_dir = tmp.path().join("lib");
+        std::fs::create_dir_all(&card).unwrap();
+        for i in 0..4u8 {
+            write_sample_jpeg(&card.join(format!("IMG_00{i}.JPG")), i + 10);
+        }
+
+        let lib = PhotoLibrary::open(lib_dir.display().to_string()).unwrap();
+        lib.scan_directory(card.display().to_string(), "SD".into(), true).unwrap();
+        lib.import_scanned(-1, Box::new(CountImport(Arc::new(AtomicUsize::new(0))))).unwrap();
+
+        // Start background analysis and call suspend concurrently; suspend must drain cleanly.
+        let lib_bg = Arc::clone(&lib);
+        let worker = std::thread::spawn(move || {
+            let _ = lib_bg.analyze(1, Box::new(CountProgress(Arc::new(AtomicUsize::new(0)))));
+        });
+        std::thread::sleep(Duration::from_millis(50));
+        lib.suspend().unwrap();
+        worker.join().unwrap();
+
+        assert!(lib.is_suspended());
+        assert_eq!(lib.ops.active_count(), 0);
+        // WAL file is either absent or truncated to 0 bytes after suspend().
+        let wal = lib_dir.join(".photo-organize").join("catalog.db-wal");
+        if wal.exists() {
+            assert_eq!(std::fs::metadata(&wal).unwrap().len(), 0);
+        }
+
+        lib.resume().unwrap();
+        lib.optimize_storage().unwrap();
+        assert_eq!(lib.snapshot(LibraryView::All).unwrap().ids.len(), 4);
+    }
+
+    #[test]
+    fn concurrent_readers_and_mutations_preserve_snapshot_invariants() {
+        let tmp = tempfile::tempdir().unwrap();
+        let card = tmp.path().join("card");
+        let lib_dir = tmp.path().join("lib");
+        std::fs::create_dir_all(&card).unwrap();
+        for i in 0..6u8 {
+            write_sample_jpeg(&card.join(format!("IMG_10{i}.JPG")), i + 20);
+        }
+
+        let lib = PhotoLibrary::open(lib_dir.display().to_string()).unwrap();
+        lib.scan_directory(card.display().to_string(), "SD".into(), true).unwrap();
+        lib.import_scanned(-1, Box::new(CountImport(Arc::new(AtomicUsize::new(0))))).unwrap();
+        let ids = lib.snapshot(LibraryView::All).unwrap().ids;
+
+        std::thread::scope(|s| {
+            let reader_lib = Arc::clone(&lib);
+            let reader_ids = ids.clone();
+            s.spawn(move || {
+                for _ in 0..25 {
+                    let snap = reader_lib.snapshot(LibraryView::Picked).unwrap();
+                    // Atomic snapshot invariant: ids.len() must always equal counts.picked.
+                    assert_eq!(snap.ids.len() as i32, snap.counts.picked);
+                    let _ = reader_lib.thumbnail(reader_ids[0]).unwrap();
+                }
+            });
+
+            let writer_lib = Arc::clone(&lib);
+            s.spawn(move || {
+                for (k, &id) in ids.iter().enumerate() {
+                    writer_lib.set_flag(vec![id], if k % 2 == 0 { 1 } else { -1 }).unwrap();
+                    writer_lib.set_rating(vec![id], ((k % 5) + 1) as i32).unwrap();
+                }
+            });
+        });
+
+        let final_snap = lib.snapshot(LibraryView::All).unwrap();
+        assert_eq!(final_snap.counts.picked, 3);
+        assert_eq!(final_snap.counts.rejected, 3);
+        assert_eq!(final_snap.counts.rated, 6);
     }
 }

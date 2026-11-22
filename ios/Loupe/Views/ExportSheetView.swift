@@ -4,7 +4,7 @@ import UIKit
 /// Export selected photos as JPEG-only, resized (GPS stripped), or originals (RAW + XMP) and hand
 /// them off via the system Share Sheet (AirDrop, Files, Lightroom Mobile).
 struct ExportSheetView: View {
-    @Bindable var store: LibraryStore
+    @Bindable var exporter: ExportCoordinator
     @State private var mode: LoupeExportMode = .jpegOnly
     @State private var longEdge: Int = 2048
     @State private var quality: Int = 88
@@ -18,7 +18,7 @@ struct ExportSheetView: View {
     var body: some View {
         NavigationStack {
             VStack(spacing: 16) {
-                switch store.exportPhase {
+                switch exporter.phase {
                 case .idle, .planning:
                     ProgressView("내보내기 준비 중…")
                         .tint(palette.accent)
@@ -81,7 +81,7 @@ struct ExportSheetView: View {
                     .scrollContentBackground(.hidden)
 
                     Button("내보내기 · 공유하기") {
-                        store.runExport(mode: mode, longEdge: longEdge, quality: quality, dateNames: dateNames)
+                        exporter.run(mode: mode, longEdge: longEdge, quality: quality, dateNames: dateNames)
                     }
                     .buttonStyle(.borderedProminent)
                     .tint(palette.accent)
@@ -95,7 +95,7 @@ struct ExportSheetView: View {
                         Text("내보내는 중… (\(done) / \(total))")
                             .font(.subheadline.monospacedDigit())
                             .foregroundStyle(palette.text)
-                        Button("취소", role: .destructive) { store.cancelExport() }
+                        Button("취소", role: .destructive) { exporter.cancel() }
                             .buttonStyle(.bordered)
                     }
                     .padding(24)
@@ -148,9 +148,7 @@ struct ExportSheetView: View {
                 ActivityShareSheet(items: shareItems)
             }
             .onDisappear {
-                if case let .done(_, outDir) = store.exportPhase {
-                    try? FileManager.default.removeItem(at: outDir)
-                }
+                exporter.cleanupTempDirectory()
             }
         }
     }

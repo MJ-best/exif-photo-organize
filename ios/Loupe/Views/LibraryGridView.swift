@@ -18,7 +18,7 @@ struct LibraryGridView: View {
                 compactFilterRibbon
             }
 
-            if let progress = store.analysisProgress {
+            if let progress = store.analyzer.progress {
                 analysisBanner(progress)
             }
 
@@ -68,6 +68,15 @@ struct LibraryGridView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItemGroup(placement: .topBarTrailing) {
+                if store.canUndo && !store.isSelectionMode {
+                    Button {
+                        store.undoLastDecision()
+                    } label: {
+                        Image(systemName: "arrow.uturn.backward")
+                    }
+                    .accessibilityLabel("실행 취소")
+                }
+
                 if !store.visibleIDs.isEmpty {
                     Button(store.isSelectionMode ? "완료" : "선택") {
                         if store.isSelectionMode {
@@ -304,7 +313,7 @@ struct LibraryGridView: View {
         } else if let toast = store.toast {
             VStack(spacing: 0) {
                 Divider().overlay(palette.separator)
-                HStack {
+                HStack(spacing: 10) {
                     Spacer()
                     Text(toast.text)
                         .font(.caption.weight(.semibold))
@@ -313,6 +322,14 @@ struct LibraryGridView: View {
                         .padding(.horizontal, 12)
                         .padding(.vertical, 5)
                         .background(toastColor(toast.tone), in: Capsule())
+                    if toast.undoAvailable && store.canUndo {
+                        Button("되돌리기") {
+                            store.undoLastDecision()
+                        }
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(palette.accent)
+                        .buttonStyle(.plain)
+                    }
                     Spacer()
                 }
                 .padding(.vertical, 6)

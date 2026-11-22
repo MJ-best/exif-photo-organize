@@ -50,26 +50,40 @@ struct LoupeApp: App {
                 task.setTaskCompleted(success: false)
                 return
             }
+            let completionGate = TaskCompletionGate()
+
             let work = Task {
                 guard let engine = await MainActor.run(body: { store.engine }) else {
-                    processingTask.setTaskCompleted(success: false)
+                    if completionGate.tryComplete() {
+                        processingTask.setTaskCompleted(success: false)
+                    }
                     return
                 }
                 do {
                     try await engine.resume()
                     let pending = try await engine.pendingAnalysis()
                     if pending > 0 {
-                        _ = try await engine.analyze(maxThreads: 1) { _, _ in }
+                        let done = try await engine.analyze(maxThreads: 1) { _, _ in }
+                        if done >= pending {
+                            await MainActor.run { store.analyzer.markBackgroundAnalysisCompleted() }
+                        }
+                    } else {
+                        await MainActor.run { store.analyzer.markBackgroundAnalysisCompleted() }
                     }
                     try await engine.suspend()
                     await engine.releaseMLModels()
-                    processingTask.setTaskCompleted(success: true)
+                    if completionGate.tryComplete() {
+                        processingTask.setTaskCompleted(success: true)
+                    }
                 } catch {
                     try? await engine.suspend()
                     await engine.releaseMLModels()
-                    processingTask.setTaskCompleted(success: false)
+                    if completionGate.tryComplete() {
+                        processingTask.setTaskCompleted(success: false)
+                    }
                 }
             }
+
             processingTask.expirationHandler = {
                 work.cancel()
                 Task {
@@ -78,6 +92,9 @@ struct LoupeApp: App {
                         try? await engine.suspend()
                         await engine.releaseMLModels()
                     }
+                    if completionGate.tryComplete() {
+                        processingTask.setTaskCompleted(success: false)
+                    }
                 }
             }
         }
@@ -85,7 +102,7 @@ struct LoupeApp: App {
 
     @MainActor
     private static func scheduleBackgroundAnalysisIfPending(store: LibraryStore) {
-        guard store.analysisProgress != nil else { return }
+        guard store.analyzer.hasPendingBackgroundAnalysis else { return }
         let request = BGProcessingTaskRequest(identifier: backgroundAnalysisTaskID)
         request.requiresExternalPower = true
         request.requiresNetworkConnectivity = false
@@ -95,6 +112,21 @@ struct LoupeApp: App {
         } catch {
             LoupeLog.lifecycle.debug("BGProcessingTask submit skipped: \(error.localizedDescription)")
         }
+    }
+}
+
+/// Ensures `BGTask.setTaskCompleted(success:)` is invoked at most once even if expiration races
+/// with normal task completion.
+private final class TaskCompletionGate: @unchecked Sendable {
+    private let lock = NSLock()
+    private var completed = false
+
+    func tryComplete() -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        guard !completed else { return false }
+        completed = true
+        return true
     }
 }
 

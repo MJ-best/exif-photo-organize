@@ -39,7 +39,7 @@ else
 fi
 
 echo "==> Building photoorg-ios for simulator ($SIM_TARGET, $PROFILE)…"
-cargo build -p photoorg-ios --target "$SIM_TARGET" "${CARGO_PROFILE_FLAG[@]}"
+cargo build -p photoorg-ios --target "$SIM_TARGET" ${CARGO_PROFILE_FLAG[@]+"${CARGO_PROFILE_FLAG[@]}"}
 
 SIM_LIB="$ROOT/target/$SIM_TARGET/$PROFILE/libphotoorg_ios.a"
 
@@ -55,7 +55,7 @@ XC_ARGS=(-library "$SIM_LIB" -headers "$HEADERS_DIR")
 
 if [[ "$SIM_ONLY" == "false" ]]; then
   echo "==> Building photoorg-ios for iOS device (aarch64-apple-ios, $PROFILE)…"
-  cargo build -p photoorg-ios --target aarch64-apple-ios "${CARGO_PROFILE_FLAG[@]}"
+  cargo build -p photoorg-ios --target aarch64-apple-ios ${CARGO_PROFILE_FLAG[@]+"${CARGO_PROFILE_FLAG[@]}"}
   DEV_LIB="$ROOT/target/aarch64-apple-ios/$PROFILE/libphotoorg_ios.a"
   XC_ARGS+=(-library "$DEV_LIB" -headers "$HEADERS_DIR")
 fi

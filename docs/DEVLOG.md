@@ -29,7 +29,7 @@ LOUPE(0.5.0 까지의 이름: Photo Organize)를 만들면서 받은 **요청과
 | 최신 버전 | **0.7.4** — main, GitHub 릴리스 (맥 유니버설 dmg · zip, Windows zip, Linux tar.gz) |
 | 데스크톱 배포 | GitHub 릴리스. 맥은 Apple 공증 전이라 **터미널 한 줄 설치 · 업데이트** 를 안내함 (릴리스 노트마다 들어 있음) |
 | Mac App Store | 업로드된 빌드: 0.6.0 (3) · 0.6.1 (4) · 0.7.1 (5) · 0.7.2 (6) · 0.7.3 (7, 새 아이콘 — `winit` 의 `_CGSSetWindowBackgroundBlurRadius` 비공개 API 참조로 2.5.1 자동 거절). #27 에서 해당 심볼을 제거했으므로 **app-store 워크플로를 다시 실행해 새 빌드를 올려 재제출** 해야 함 (4절) |
-| iOS · iPadOS (`ios/`, `crates/ios`) | SwiftUI Universal 앱 + UniFFI 브릿지 + CI(`ios.yml`) 초안 완성 (로컬 브랜치 `ios-ipados-app`). macOS Xcode 실기기 · 시뮬레이터 확인 전 |
+| iOS · iPadOS (`ios/`, `crates/ios`) | SwiftUI Universal 앱 + UniFFI 브릿지 + 2차 아키텍처 하드닝 + CI(`ios.yml`) 완료 (로컬 브랜치 `ios-ipados-app`). macOS Xcode 실기기 · 시뮬레이터 확인 전 |
 | Google Play | 개인 개발자 계정이 구글 검토 중이라 앱을 만들 수 없음. 업로드 키 시크릿 · 테스터 12명 (14일 연속) 필요 |
 | 판매 사이트 (`site/`) | 코드 · 에뮬레이터 테스트 완료, **배포 전**. 앱의 *설정 → 라이선스* 칸은 사이트가 열릴 때까지 숨김 |
 | 셀렉 엔진 (`crates/cull`) | 분석 버전 4, 학습 특징 24개. BUSL 1.1, 0.7.4 의 MIT 전환일 2030-11-21 |
@@ -573,6 +573,44 @@ LOUPE(0.5.0 까지의 이름: Photo Organize)를 만들면서 받은 **요청과
   - macOS + Xcode 시뮬레이터/실기기에서 UI · USB-C SD 카드/외장 SSD · `0xdead10cc`/Jetsam Instruments 프로파일링 확인.
   - Core ML / Apple Neural Engine(ANE) 추론 백엔드 어댑터 연동(현재는 `tract-onnx` CPU + 열 예산 스레드 제한).
   - App Store Connect iOS 인증서 · 스크린샷 준비 후 `ios-app-store.yml` 배포 파이프라인 추가.
+
+### iOS · iPadOS 2차 아키텍처 하드닝 (11-21)
+
+- **요청**: `"아이패드/아이폰 버전은 나온 개선책을 적용해서 고쳐"`
+- **반영**
+  - **Rust 브릿지 (`crates/ios/src/lib.rs`)**:
+    - `OpBarrier` · RAII `OpGuard` 를 모든 DB/장시간 FFI 메서드에 적용하고, `suspend()` 가 진행 중인 작업을 최대 4초 드레인한 뒤 WAL `checkpoint_truncate()` · 커넥션 드랍을 수행하도록 수정. `learn_locked()` · `reload_locked()` 가 상주 `self.catalog` 커넥션을 재사용해 추적되지 않는 SQLite 커넥션이 `suspend()` 를 넘어 살아남는 `0xdead10cc` 누수를 봉쇄.
+    - `analyze()` 를 64장 증분 청크 단위로 개편해 청크마다 재채점·인덱스 갱신(대용량 카드 분석 중에도 B컷·A컷 후보 실시간 표시).
+    - 배치 실행 취소를 위한 `DecisionRestore` · `restore_decisions()`, 동영상 썸네일용 `video_path()`, 수동 저장소 정리용 `optimize_storage()` (`PRAGMA optimize` + WAL truncate) 추가.
+    - Rust 단위 테스트 3건 추가 (`restore_decisions_supports_batch_undo`, `suspend_drains_inflight_ops_and_truncates_wal`, `concurrent_readers_and_mutations_preserve_snapshot_invariants`).
+  - **Swift 서비스 · 생명주기 (`ios/Loupe/Services/`, `ios/Loupe/App/LoupeApp.swift`)**:
+    - `BackgroundTaskGuard.swift` 신설: `UIApplication.beginBackgroundTask` 안전 래퍼(`suspend` · 가져오기 · 내보내기 보호)와 레퍼런스 카운팅 `IdleTimerManager`(가져오기·내보내기 중 자동 잠금 차단).
+    - `LoupeApp.swift`: 백그라운드 전환 시 분석 취소로 `analysisProgress == nil` 이 되어 `BGProcessingTask` 가 예약되지 않던 버그를 `hasPendingBackgroundAnalysis` 보존으로 수정하고, `TaskCompletionGate` 로 만료 핸들러와의 이중 완료 경합 차단.
+    - `ImagePipeline.swift`: `Data(contentsOf:options:.mappedIfSafe)` 제로카피 mmap 슬라이스(`FileHandle` 폴백 포함), `ThumbnailCoalescer`(waiter `Set<UUID>` 기반 중복 썸네일 요청 병합), `DecodeLimiter`(최대 4 동시 디코드), `previewKeysByPhotoID` 정밀 무효화(이웃 프리페치 캐시 보존), `AVAssetImageGenerator` 동영상 썸네일 지원.
+  - **도메인 코디네이터 분리 · 배치 Undo (`ios/Loupe/Store/`)**:
+    - `LibraryStore` 에서 `ImportCoordinator` · `ExportCoordinator` · `AnalysisCoordinator` 를 분리해 God Object 비대화를 해소하고 `ImportSheetView` · `ExportSheetView` 가 각 코디네이터만 직접 참조하게 결합도 축소.
+    - 최대 20단계 직렬화 Undo 스택(`undoLastDecision`, `lastMutationTask` FIFO 직렬화, 미로드 배치 ID 사전 조회, 삭제 시 스택 정리) 추가.
+  - **UI · UX 및 빌드 스크립트 (`ios/Loupe/Views/`, `ios/Config/`, `ios/Scripts/`)**:
+    - `FilmstripBarView.swift`: 사진 아래에만 배치하는 컴팩트 스크롤 필름스트립(높이 480pt 미만 가로 화면에서는 자동 숨김, 사진 중앙 가림 0).
+    - `HardwareKeyHandler.swift` · `ViewerView.swift` · `LibraryGridView.swift`: `⌘Z` 단축키 및 사진 아래 띠의 `"되돌리기"` 버튼 + 상단 실행 취소 아이콘 추가.
+    - `ZoomablePhotoView.swift`: 1배율 좌우/상하 스와이프 시 감쇠된 인터랙티브 드래그 피드백 추가.
+    - `SettingsSheetView.swift`: 발열·메모리 기반 분석 스레드 예산 표시 및 `"카탈로그 최적화 (WAL 정리)"` 액션 추가.
+    - `LaunchBackground.colorset` (`Info.plist`): 앱 실행 시 주황색(`AccentColor`) 플래시 대신 크림(`#FDF6EC`) · 코코아(`#29201A`)로 자연스럽게 이어지도록 수정.
+    - `ios/Scripts/build-rust-ios.sh`: macOS 기본 Bash 3.2 `set -u` 에서 `--debug` 빌드 시 빈 배열 확장(`unbound variable`)으로 깨지던 문제 수정.
+    - `ios/LoupeTests/`: Undo, 백그라운드 분석 예약 플래그 유지, Import/Export 코디네이터·자동잠금 가드, 정밀 캐시 무효화, 동시 썸네일 요청 병합, mmap 슬라이스, `optimizeStorage` 테스트 추가.
+- **결정과 이유**
+  - 일괄 `"N장 모두 거절"` 직후 실수 복구가 안 되면 사진가의 신뢰를 잃지만, 사진 중앙에 모달이나 토스트를 띄우지 않는 원칙(3절)을 지키기 위해 `⌘Z` 와 하단 띠의 `"되돌리기"` 버튼으로 설계했습니다.
+  - 미로드된 페이지의 사진까지 일괄 변경될 수 있으므로 `photosBatch` 로 누락된 이전 상태를 먼저 읽어 `UndoEntry` 를 완성한 뒤 쓰기를 실행하고, `lastMutationTask` 로 직렬화해 빠른 키 입력(`X` 직후 `⌘Z`)에서도 순서 역전이 나지 않게 했습니다.
+  - `FilmstripBarView` 는 그리드와 `ThumbnailCoalescer` 를 공유해 추가 FFI 디코딩을 일으키지 않으며, `ForEach(ids, id: \.self)` 로 O(N) 배열 복사를 피했습니다.
+- **확인**
+  - `cargo fmt --all -- --check`, `cargo clippy -p photoorg-ios --all-targets --no-deps -- -D warnings` (경고 0), `cargo test -p photoorg-ios -p photoorg-core -p photoorg-cull` (70건 통과: core 38 · cull 27 · ios 5, 실패 0).
+  - `uniffi-bindgen` 으로 신규 API (`DecisionRestore`, `restoreDecisions`, `videoPath`, `optimizeStorage`) Swift 바인딩 실제 생성 및 `RustPhotoEngine.swift` 시그니처 일치 검증.
+  - 31개 Swift 파일 정적 감사(36개 프로토콜 시그니처·매개변수 라벨 일치, `store`/`importer`/`exporter`/`analyzer` 멤버·`@Bindable` 바인딩 일치, import·괄호 균형, 프로덕션 FFI unwrap/panic 0, 네트워크 코드 0, `Info.plist`·Asset JSON·`bash -n`) 통과.
+  - 이 환경(Linux)에서는 macOS Xcode 빌드, `LoupeTests` 시뮬레이터 실행, 실제 iPhone/iPad UI·발열·USB-C SSD 연결 및 Instruments 프로파일링을 직접 확인하지 못했습니다.
+- **남은 점**
+  - macOS + Xcode 시뮬레이터/실기기에서 `LoupeTests` 실행, UI 레이아웃, USB-C SD 카드/외장 SSD, Instruments 프로파일링 확인.
+  - Core ML / Apple Neural Engine(ANE) 추론 백엔드 연동 및 App Store Connect iOS 배포 파이프라인 추가.
+
 
 
 

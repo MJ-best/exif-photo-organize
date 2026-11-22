@@ -51,6 +51,19 @@ struct ViewerView: View {
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
 
+                    // Compact scrollable filmstrip strictly BELOW photo (hidden in ultra-short landscape)
+                    if session.ids.count > 1 && geo.size.height >= 480 {
+                        FilmstripBarView(
+                            ids: session.ids,
+                            currentIndex: session.index,
+                            summaries: store.summaries,
+                            reloadToken: store.imageReloadToken,
+                            pipeline: store.images
+                        ) { nextIndex in
+                            store.viewerMoved(to: nextIndex, previewEdge: previewEdge)
+                        }
+                    }
+
                     // Bottom notification & quick-cull strip (strictly BELOW photo, never covering it)
                     bottomStrip(isWide: isWide, previewEdge: previewEdge)
                 }
@@ -80,9 +93,8 @@ struct ViewerView: View {
             }
             .background(palette.viewer)
             .onAppear {
-                if let id = currentID {
+                if currentID != nil {
                     store.images.prefetchNeighbors(ids: session.ids, around: session.index, maxEdge: previewEdge)
-                    _ = id
                 }
             }
             .sheet(isPresented: $phoneInspectorPresented) {
@@ -155,6 +167,19 @@ struct ViewerView: View {
 
             // Fixed right-side tools laid out first in priority
             HStack(spacing: 8) {
+                if store.canUndo {
+                    Button {
+                        LoupeHaptics.selection()
+                        store.undoLastDecision()
+                    } label: {
+                        Image(systemName: "arrow.uturn.backward")
+                            .foregroundStyle(palette.text)
+                    }
+                    .buttonStyle(.bordered)
+                    .tint(palette.control)
+                    .accessibilityLabel("실행 취소")
+                }
+
                 Button {
                     toggleCenterZoom()
                 } label: {
@@ -210,15 +235,27 @@ struct ViewerView: View {
                 .tint(palette.control)
 
                 if let toast = store.toast {
-                    Text(toast.text)
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.white)
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 5)
-                        .background(toastColor(toast.tone), in: Capsule())
-                        .transition(.opacity)
+                    HStack(spacing: 8) {
+                        Text(toast.text)
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.white)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 5)
+                            .background(toastColor(toast.tone), in: Capsule())
+
+                        if toast.undoAvailable && store.canUndo {
+                            Button("되돌리기") {
+                                LoupeHaptics.selection()
+                                store.undoLastDecision()
+                            }
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(palette.accent)
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    .transition(.opacity)
                 } else if !isWide, let summary = detail?.summary {
                     HStack(spacing: 8) {
                         Button {
@@ -241,7 +278,7 @@ struct ViewerView: View {
                         }
                     }
                 } else {
-                    Text("위로 밀어 픽 · 아래로 밀어 거절 · 두 번 탭 확대")
+                    Text("위로 밀어 픽 · 아래로 밀어 거절 · 두 번 탭 확대 · ⌘Z 되돌리기")
                         .font(.caption)
                         .foregroundStyle(palette.text3)
                         .lineLimit(1)
@@ -288,6 +325,10 @@ struct ViewerView: View {
                 onPrevious: { step(-1, edge: previewEdge) },
                 onNext: { step(1, edge: previewEdge) },
                 onSpace: { handleSpaceShortcut(edge: previewEdge) },
+                onUndo: {
+                    LoupeHaptics.selection()
+                    store.undoLastDecision()
+                },
                 onDelete: {
                     if let id = currentID { store.askDelete(ids: [id]) }
                 },

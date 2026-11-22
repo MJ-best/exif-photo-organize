@@ -4,7 +4,7 @@ import UniformTypeIdentifiers
 
 /// Sheet for scanning and checksum-verified importing from an SD card, USB-C drive, or Files folder.
 struct ImportSheetView: View {
-    @Bindable var store: LibraryStore
+    @Bindable var importer: ImportCoordinator
     @State private var folderPickerPresented = false
     @Environment(\.loupePalette) private var palette
     @Environment(\.dismiss) private var dismiss
@@ -12,7 +12,7 @@ struct ImportSheetView: View {
     var body: some View {
         NavigationStack {
             VStack(spacing: 18) {
-                switch store.importPhase {
+                switch importer.phase {
                 case .idle:
                     idleContent
                 case .scanning(let label):
@@ -65,7 +65,7 @@ struct ImportSheetView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    if case .copying = store.importPhase {
+                    if case .copying = importer.phase {
                         EmptyView()
                     } else {
                         Button("닫기") { dismiss() }
@@ -74,7 +74,7 @@ struct ImportSheetView: View {
             }
             .sheet(isPresented: $folderPickerPresented) {
                 FolderDocumentPicker { url in
-                    store.scanCardFolder(url: url, includeVideos: true)
+                    importer.scanCardFolder(url: url, includeVideos: true)
                 }
             }
         }
@@ -133,7 +133,7 @@ struct ImportSheetView: View {
 
             Toggle("동영상 함께 가져오기", isOn: Binding(
                 get: { includeVideos },
-                set: { store.setImportIncludeVideos($0) }
+                set: { importer.setIncludeVideos($0) }
             ))
             .tint(palette.accent)
 
@@ -146,7 +146,7 @@ struct ImportSheetView: View {
             Spacer()
 
             Button {
-                store.startImport()
+                importer.startImport()
             } label: {
                 Text(info.newPhotos > 0 ? "새 사진 \(LoupeFormat.count(info.newPhotos))장 가져오기" : "모두 이미 가져온 사진입니다")
                     .frame(maxWidth: .infinity)
@@ -179,7 +179,7 @@ struct ImportSheetView: View {
                     .truncationMode(.middle)
             }
             Button("중지", role: .destructive) {
-                store.cancelImport()
+                importer.cancel()
             }
             .buttonStyle(.bordered)
             .padding(.top, 8)

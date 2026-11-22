@@ -20,7 +20,11 @@ actor MockPhotoEngine: PhotoEngineProtocol {
     var resumeCallCount: Int = 0
     var releaseModelsCallCount: Int = 0
     var learnCallCount: Int = 0
+    var optimizeCallCount: Int = 0
+    var restoreCallCount: Int = 0
+    var thumbnailFetchCount: Int = 0
     var lastAnalyzeThreadBudget: Int = 0
+    var analyzeStepDelayNanoseconds: UInt64 = 0
     var injectedError: LoupeError?
 
     init(rootPath: String = "/tmp/loupe-mock", sampleCount: Int = 18) {
@@ -101,6 +105,10 @@ actor MockPhotoEngine: PhotoEngineProtocol {
         pendingCount = count
     }
 
+    func setAnalyzeStepDelay(_ ns: UInt64) {
+        analyzeStepDelayNanoseconds = ns
+    }
+
     private func guardReady() throws {
         if let err = injectedError { throw err }
         if suspendedState { throw LoupeError.librarySuspended }
@@ -119,6 +127,11 @@ actor MockPhotoEngine: PhotoEngineProtocol {
 
     func releaseMLModels() async {
         releaseModelsCallCount += 1
+    }
+
+    func optimizeStorage() async throws {
+        try guardReady()
+        optimizeCallCount += 1
     }
 
     func snapshot(view: LoupeViewFilter) async throws -> LoupeSnapshot {
@@ -149,7 +162,13 @@ actor MockPhotoEngine: PhotoEngineProtocol {
     func thumbnailData(id: Int64) async throws -> Data? {
         try guardReady()
         guard items[id] != nil else { return nil }
+        thumbnailFetchCount += 1
         return sampleJpegData
+    }
+
+    func videoPath(id: Int64) async throws -> String? {
+        try guardReady()
+        return nil
     }
 
     func previewSource(id: Int64, maxEdge: Int) async throws -> LoupePreviewSource {
@@ -173,6 +192,17 @@ actor MockPhotoEngine: PhotoEngineProtocol {
         let normalized = flag > 0 ? 1 : (flag < 0 ? -1 : 0)
         for id in ids {
             items[id]?.summary.flag = normalized
+        }
+        revisionCounter += 1
+        return revisionCounter
+    }
+
+    func restoreDecisions(items restores: [LoupeDecisionRestore]) async throws -> Int64 {
+        try guardReady()
+        restoreCallCount += 1
+        for item in restores {
+            items[item.id]?.summary.rating = max(0, min(5, item.rating))
+            items[item.id]?.summary.flag = item.flag > 0 ? 1 : (item.flag < 0 ? -1 : 0)
         }
         revisionCounter += 1
         return revisionCounter
@@ -289,20 +319,39 @@ actor MockPhotoEngine: PhotoEngineProtocol {
         return pendingCount
     }
 
+    private var analysisCancelled: Bool = false
+
     func analyze(
         maxThreads: Int,
         onProgress: @Sendable @escaping (Int, Int) -> Void
     ) async throws -> Int {
         try guardReady()
+        analysisCancelled = false
         lastAnalyzeThreadBudget = maxThreads
         let total = pendingCount
+        if analyzeStepDelayNanoseconds > 0 && total > 0 {
+            var completed = 0
+            for step in 1...total {
+                try? await Task.sleep(nanoseconds: analyzeStepDelayNanoseconds)
+                if analysisCancelled || suspendedState || Task.isCancelled {
+                    break
+                }
+                completed = step
+                pendingCount = max(0, total - completed)
+                onProgress(completed, total)
+            }
+            revisionCounter += 1
+            return completed
+        }
         onProgress(total, total)
         pendingCount = 0
         revisionCounter += 1
         return total
     }
 
-    func cancelAnalysis() async {}
+    func cancelAnalysis() async {
+        analysisCancelled = true
+    }
 
     func learn() async throws -> LoupeLearnStatus {
         try guardReady()

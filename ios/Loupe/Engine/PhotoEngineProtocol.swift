@@ -312,6 +312,12 @@ struct LoupeDeleteResult: Equatable, Sendable {
     let firstError: String?
 }
 
+struct LoupeDecisionRestore: Equatable, Sendable {
+    let id: Int64
+    let rating: Int
+    let flag: Int
+}
+
 /// Abstract engine interface enabling 100% deterministic unit testing and SwiftUI previews without
 /// touching disk or SQLite.
 protocol PhotoEngineProtocol: Sendable {
@@ -320,16 +326,19 @@ protocol PhotoEngineProtocol: Sendable {
     func suspend() async throws
     func resume() async throws
     func releaseMLModels() async
+    func optimizeStorage() async throws
 
     func snapshot(view: LoupeViewFilter) async throws -> LoupeSnapshot
     func photosBatch(ids: [Int64]) async throws -> [LoupePhotoSummary]
     func photoDetail(id: Int64) async throws -> LoupePhotoDetail?
 
     func thumbnailData(id: Int64) async throws -> Data?
+    func videoPath(id: Int64) async throws -> String?
     func previewSource(id: Int64, maxEdge: Int) async throws -> LoupePreviewSource
 
     func setRating(ids: [Int64], rating: Int) async throws -> Int64
     func setFlag(ids: [Int64], flag: Int) async throws -> Int64
+    func restoreDecisions(items: [LoupeDecisionRestore]) async throws -> Int64
 
     func threshold() async -> Int
     func setThreshold(_ percent: Int) async

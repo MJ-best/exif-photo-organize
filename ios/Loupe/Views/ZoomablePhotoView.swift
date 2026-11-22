@@ -22,6 +22,7 @@ struct ZoomablePhotoView: View {
     @State private var thumbFallback: UIImage?
     @GestureState private var gestureScale: CGFloat = 1.0
     @GestureState private var dragDelta: CGSize = .zero
+    @GestureState private var swipePreviewOffset: CGSize = .zero
     @Environment(\.loupePalette) private var palette
 
     var body: some View {
@@ -29,13 +30,15 @@ struct ZoomablePhotoView: View {
             let activeImage = image ?? thumbFallback
             let fitted = fittedSize(for: activeImage?.size, in: geo.size)
             let effectiveScale = max(1.0, min(6.0, scale * gestureScale))
-            let effectiveOffset = clampedOffset(
-                CGSize(width: offset.width + (scale > 1.01 ? dragDelta.width : 0),
-                       height: offset.height + (scale > 1.01 ? dragDelta.height : 0)),
-                fitted: fitted,
-                container: geo.size,
-                scale: effectiveScale
-            )
+            let effectiveOffset: CGSize = scale > 1.01
+                ? clampedOffset(
+                    CGSize(width: offset.width + dragDelta.width,
+                           height: offset.height + dragDelta.height),
+                    fitted: fitted,
+                    container: geo.size,
+                    scale: effectiveScale
+                )
+                : swipePreviewOffset
 
             ZStack {
                 palette.viewer
@@ -55,6 +58,7 @@ struct ZoomablePhotoView: View {
                     .scaleEffect(effectiveScale)
                     .offset(effectiveOffset)
                     .animation(.interactiveSpring(response: 0.22, dampingFraction: 0.86), value: scale)
+                    .animation(.interactiveSpring(response: 0.2, dampingFraction: 0.88), value: swipePreviewOffset == .zero)
                 } else {
                     ProgressView()
                         .tint(palette.accent)
@@ -90,10 +94,23 @@ struct ZoomablePhotoView: View {
                     }
             )
             .simultaneousGesture(
-                DragGesture(minimumDistance: 16)
+                DragGesture(minimumDistance: 14)
                     .updating($dragDelta) { value, state, _ in
                         if scale > 1.01 {
                             state = value.translation
+                        }
+                    }
+                    .updating($swipePreviewOffset) { value, state, _ in
+                        guard scale <= 1.01 else {
+                            state = .zero
+                            return
+                        }
+                        let dx = value.translation.width
+                        let dy = value.translation.height
+                        if abs(dx) >= abs(dy) {
+                            state = CGSize(width: max(-120, min(120, dx * 0.45)), height: 0)
+                        } else {
+                            state = CGSize(width: 0, height: max(-64, min(64, dy * 0.28)))
                         }
                     }
                     .onEnded { value in

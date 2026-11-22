@@ -77,6 +77,25 @@ struct BottomToast: Equatable, Identifiable, Sendable {
     let id = UUID()
     let text: String
     let tone: Tone
+    let undoAvailable: Bool
+
+    init(text: String, tone: Tone, undoAvailable: Bool = false) {
+        self.text = text
+        self.tone = tone
+        self.undoAvailable = undoAvailable
+    }
+}
+
+struct UndoEntry: Equatable, Identifiable, Sendable {
+    let id: UUID
+    let label: String
+    var priorDecisions: [LoupeDecisionRestore]
+
+    init(id: UUID = UUID(), label: String, priorDecisions: [LoupeDecisionRestore]) {
+        self.id = id
+        self.label = label
+        self.priorDecisions = priorDecisions
+    }
 }
 
 struct AnalysisProgress: Equatable, Sendable {

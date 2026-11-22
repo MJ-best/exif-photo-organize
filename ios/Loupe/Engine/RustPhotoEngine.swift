@@ -43,6 +43,10 @@ final class RustPhotoEngine: PhotoEngineProtocol, @unchecked Sendable {
         await run(on: heavyQueue) { releaseMlModels() }
     }
 
+    func optimizeStorage() async throws {
+        try await runThrowing(on: heavyQueue) { try self.lib.optimizeStorage() }
+    }
+
     // MARK: - Snapshots & Windowed Paging
 
     func snapshot(view: LoupeViewFilter) async throws -> LoupeSnapshot {
@@ -122,6 +126,10 @@ final class RustPhotoEngine: PhotoEngineProtocol, @unchecked Sendable {
         try await runThrowing(on: fastQueue) { try self.lib.thumbnail(id: id) }
     }
 
+    func videoPath(id: Int64) async throws -> String? {
+        try await runThrowing(on: fastQueue) { try self.lib.videoPath(id: id) }
+    }
+
     func previewSource(id: Int64, maxEdge: Int) async throws -> LoupePreviewSource {
         let desc = try await runThrowing(on: fastQueue) {
             try self.lib.previewDescriptor(id: id, maxEdge: Int32(maxEdge))
@@ -142,6 +150,11 @@ final class RustPhotoEngine: PhotoEngineProtocol, @unchecked Sendable {
 
     func setFlag(ids: [Int64], flag: Int) async throws -> Int64 {
         try await runThrowing(on: fastQueue) { try self.lib.setFlag(ids: ids, flag: Int32(flag)) }
+    }
+
+    func restoreDecisions(items: [LoupeDecisionRestore]) async throws -> Int64 {
+        let ffiItems = items.map { DecisionRestore(id: $0.id, rating: Int32($0.rating), flag: Int32($0.flag)) }
+        return try await runThrowing(on: fastQueue) { try self.lib.restoreDecisions(items: ffiItems) }
     }
 
     func threshold() async -> Int {

@@ -11,6 +11,9 @@ struct RootView: View {
     @Environment(\.loupePalette) private var palette
 
     var body: some View {
+        @Bindable var importer = store.importer
+        @Bindable var exporter = store.exporter
+
         ZStack {
             if sizeClass == .regular {
                 NavigationSplitView {
@@ -34,11 +37,11 @@ struct RootView: View {
             }
         }
         .tint(palette.accent)
-        .sheet(isPresented: $store.importSheetPresented) {
-            ImportSheetView(store: store)
+        .sheet(isPresented: $importer.sheetPresented) {
+            ImportSheetView(importer: store.importer)
         }
-        .sheet(isPresented: $store.exportSheetPresented) {
-            ExportSheetView(store: store)
+        .sheet(isPresented: $exporter.sheetPresented) {
+            ExportSheetView(exporter: store.exporter)
         }
         .sheet(isPresented: $store.settingsSheetPresented) {
             SettingsSheetView(store: store)
