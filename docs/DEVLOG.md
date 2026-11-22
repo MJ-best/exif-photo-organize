@@ -635,6 +635,12 @@ LOUPE(0.5.0 까지의 이름: Photo Organize)를 만들면서 받은 **요청과
   - PR #31 머지 후 사용자가 **Actions → `ios-app-store` → Run workflow** (`upload: true`, `bundle_id: io.github.mj-best.loupe`) 실행.
   - App Store Connect 기존 Mac LOUPE 앱(`io.github.mj-best.loupe`)에서 **+ iOS 앱** 추가 후 TestFlight 실기기 검증 및 심사 제출.
 
+### CI: GitHub Actions Node.js 24 네이티브 액션 업그레이드 (11-22)
+
+- **요청**: GitHub Actions `Node.js 20 is deprecated` 경고(`actions/checkout@v4`, `actions/upload-artifact@v4`) 제거.
+- **반영**: `.github/workflows/` 5개 파일 전체를 `actions/checkout@v7`, `actions/upload-artifact@v7`, `actions/setup-java@v6`, `gradle/actions/setup-gradle@v5`(오픈소스 MIT 유지)로 업그레이드.
+- **확인**: 모든 액션의 `action.yml` `using: node24` 확인, 5개 워크플로 YAML 검증 및 PR CI 통과 확인.
+
 
 
 
