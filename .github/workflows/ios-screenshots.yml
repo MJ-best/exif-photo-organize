@@ -62,6 +62,7 @@ jobs:
         if: always()
         with:
           name: ios-screenshots
+          retention-days: 1
           path: docs/ios-app-store/screenshots/
 
       - name: Commit the screenshots to this branch

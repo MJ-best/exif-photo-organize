@@ -92,7 +92,9 @@ jobs:
             scripts/macos-appstore.sh
           fi
       - uses: actions/upload-artifact@v7
+        # Dry-run packages on PRs are unsigned and cannot be uploaded; only retain signed runs briefly.
+        if: github.event_name != 'pull_request'
         with:
-          # A dry run's package is not signed by Apple and cannot be uploaded.
-          name: ${{ github.event_name == 'pull_request' && 'loupe-appstore-dry-run' || 'loupe-appstore' }}
+          name: loupe-appstore
+          retention-days: 3
           path: dist-appstore/*.pkg

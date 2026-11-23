@@ -679,3 +679,19 @@ LOUPE(0.5.0 까지의 이름: Photo Organize)를 만들면서 받은 **요청과
 - **남은 점**
   - 견본이 5장뿐이라 그리드가 비어 보이고, B컷 후보 화면은 찍지 못했습니다. 사진을 더 받으면 `sample-card/` 에 넣고 다시 찍습니다.
   - 공개 저장소에 사용자 사진 5장(사람 없음, GPS 없음)이 들어갑니다.
+
+### CI: GitHub Actions 아티팩트 정리 · 보관 기간 단축 (11-23)
+
+- **요청**: "git action 월 사용량을 다 써서 그냥 이 PC에서 해줘" → 공개 저장소라 실행 시간(분)은 무료이지만 Actions 아티팩트 저장 용량(무료 한도 500 MB)이 298개 · 20.63 GB까지 쌓여 있던 것을 확인. "(1) 과거 Actions 아티팩트를 일괄 정리하고, (2) 워크플로우들에 retention-days: 1~3을 설정해서 앞으로도 무료 한도 안에서 Actions를 다시 쓰실 수 있게 해".
+- **반영**
+  - 만료 전 Actions 아티팩트 298개(20.63 GB) 전량 삭제 (GitHub Releases 배포 파일은 별도 저장소라 영향 없음).
+  - `.github/workflows/build.yml`: 릴리스는 같은 잡에서 GitHub Releases로 직접 올라가므로, macOS·Linux·Windows 아티팩트(합 266 MB/회)는 수동 실행(`workflow_dispatch`)에만 업로드하고 `retention-days: 3` 지정.
+  - `.github/workflows/android.yml`: `photo-organize-android`(128 MB)는 PR 제외(`main` · 수동 실행만) + `retention-days: 1`, `android-screenshots`(3 MB)는 `retention-days: 1`.
+  - `.github/workflows/app-store.yml` · `.github/workflows/ios-app-store.yml`: PR dry-run 미서명 패키지 업로드 생략, 수동 실행 서명 산출물만 `retention-days: 3`.
+  - `.github/workflows/ios-screenshots.yml`: `ios-screenshots`(5 MB)에 `retention-days: 1`.
+- **결정과 이유**
+  - 기본 90일 보관 + PR/push마다 397~490 MB 업로드 구조에서는 하루에 PR 1개 열고 머지하는 것만으로 500 MB 한도를 넘었습니다. PR에서는 경량 스크린샷(합 ~8 MB)만 남기고 대용량 바이너리는 필요 이벤트에만 1~3일 보관하도록 줄였습니다.
+- **확인**
+  - GitHub API로 잔여 아티팩트 `0개(0 MB)` 확인.
+  - 6개 워크플로 YAML 파싱 검증.
+
