@@ -128,8 +128,12 @@ jobs:
           size_mb=$(( $(du -sm dmg | cut -f1) * 12 / 10 + 20 ))
           hdiutil create -volname "LOUPE" -srcfolder dmg -size "${size_mb}m" -ov -format UDZO photo-organize-macos-universal.dmg
       - uses: actions/upload-artifact@v7
+        # Releases publish directly to GitHub Releases; only keep short-lived artifacts on manual runs
+        # so the repository stays well within GitHub Free's 500 MB Actions storage limit.
+        if: github.event_name == 'workflow_dispatch'
         with:
           name: photo-organize-macos-universal
+          retention-days: 3
           path: |
             photo-organize-macos-universal.dmg
             photo-organize-macos-universal.zip
@@ -176,8 +180,11 @@ jobs:
           mkdir dist && cp target/release/photo-organize target/release/photoorg dist/
           tar -czf "photo-organize-${{ matrix.name }}.tar.gz" -C dist .
       - uses: actions/upload-artifact@v7
+        # Releases publish directly to GitHub Releases; only keep short-lived artifacts on manual runs.
+        if: github.event_name == 'workflow_dispatch'
         with:
           name: photo-organize-${{ matrix.name }}
+          retention-days: 3
           path: photo-organize-${{ matrix.name }}.*
       - name: Release
         if: needs.plan.outputs.tag != ''

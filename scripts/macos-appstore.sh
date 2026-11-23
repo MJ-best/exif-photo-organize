@@ -79,6 +79,8 @@ pb "Add :DTCompiler string com.apple.compilers.llvm.clang.1_0"
 pb "Add :BuildMachineOSBuild string $(sw_vers -buildVersion)"
 echo "== built with Xcode $XCODE_VERSION ($XCODE_BUILD), macOS SDK $SDK_VERSION ($SDK_BUILD)"
 if [[ -n "${PROFILE:-}" ]]; then cp "$PROFILE" "$APP/Contents/embedded.provisionprofile"; fi
+# Browser-downloaded profiles carry com.apple.quarantine, which App Store Connect rejects (ITMS-91109).
+xattr -cr "$APP"
 
 # 3. Sign for the App Store, sandboxed.
 sed -e "s/__TEAM_ID__/$TEAM_ID/g" -e "s/__BUNDLE_ID__/$BUNDLE_ID/g" \

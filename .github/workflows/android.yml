@@ -63,8 +63,11 @@ jobs:
         run: |
           ./gradlew --no-daemon :app:bundleRelease :app:assembleDebug ${VERSION_CODE:+-PversionCode=$VERSION_CODE}
       - uses: actions/upload-artifact@v7
+        # Keep Play bundle / APK on main and manual runs only (128 MB/run) to stay within the 500 MB storage cap.
+        if: github.event_name != 'pull_request'
         with:
           name: photo-organize-android
+          retention-days: 1
           path: |
             android/app/build/outputs/bundle/release/*.aab
             android/app/build/outputs/apk/debug/*.apk
@@ -72,4 +75,5 @@ jobs:
         if: always()
         with:
           name: android-screenshots
+          retention-days: 1
           path: android/app/build/outputs/roborazzi/
