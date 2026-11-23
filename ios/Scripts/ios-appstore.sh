@@ -107,6 +107,7 @@ else
     PROFILES_DIR="$HOME/Library/MobileDevice/Provisioning Profiles"
     mkdir -p "$PROFILES_DIR"
     cp "$PROFILE" "$PROFILES_DIR/${PROFILE_UUID}.mobileprovision"
+    xattr -c "$PROFILES_DIR/${PROFILE_UUID}.mobileprovision" 2>/dev/null || true
     echo "==> Installed provisioning profile: $PROFILE_NAME ($PROFILE_UUID)"
 
     APP_IDENTITY="${APP_IDENTITY:-Apple Distribution}"

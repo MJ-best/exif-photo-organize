@@ -689,9 +689,10 @@ LOUPE(0.5.0 까지의 이름: Photo Organize)를 만들면서 받은 **요청과
   - `.github/workflows/android.yml`: `photo-organize-android`(128 MB)는 PR 제외(`main` · 수동 실행만) + `retention-days: 1`, `android-screenshots`(3 MB)는 `retention-days: 1`.
   - `.github/workflows/app-store.yml` · `.github/workflows/ios-app-store.yml`: PR dry-run 미서명 패키지 업로드 생략, 수동 실행 서명 산출물만 `retention-days: 3`.
   - `.github/workflows/ios-screenshots.yml`: `ios-screenshots`(5 MB)에 `retention-days: 1`.
+  - `scripts/macos-appstore.sh` · `ios/Scripts/ios-appstore.sh`: Mac 로컬 빌드 시 브라우저로 받은 `.provisionprofile` / `.mobileprovision`에 붙는 `com.apple.quarantine` 확장 속성이 앱 번들에 그대로 복사돼 Transporter 업로드가 거절(ITMS-91109)되는 문제를 막도록 서명 직전 `xattr -cr` / `xattr -c` 추가.
 - **결정과 이유**
   - 기본 90일 보관 + PR/push마다 397~490 MB 업로드 구조에서는 하루에 PR 1개 열고 머지하는 것만으로 500 MB 한도를 넘었습니다. PR에서는 경량 스크린샷(합 ~8 MB)만 남기고 대용량 바이너리는 필요 이벤트에만 1~3일 보관하도록 줄였습니다.
 - **확인**
   - GitHub API로 잔여 아티팩트 `0개(0 MB)` 확인.
-  - 6개 워크플로 YAML 파싱 검증.
+  - 6개 워크플로 YAML 파싱 및 패키징 스크립트(`bash -n`) 검증.
 
