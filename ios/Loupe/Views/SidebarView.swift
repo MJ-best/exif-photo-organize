@@ -31,6 +31,12 @@ struct SidebarView: View {
                         .foregroundStyle(palette.accent)
                 }
                 Button {
+                    store.guideSheetPresented = true
+                } label: {
+                    Label("사용 가이드 · 조작법", systemImage: "questionmark.circle")
+                        .foregroundStyle(palette.text)
+                }
+                Button {
                     store.refreshTrashBytes()
                     store.settingsSheetPresented = true
                 } label: {
@@ -47,7 +53,7 @@ struct SidebarView: View {
             VStack(alignment: .leading, spacing: 4) {
                 Divider().overlay(palette.separator)
                 HStack(spacing: 6) {
-                    Image(systemName: store.isExternalLibrary ? "externaldrive.fill" : "ipad")
+                    Image(systemName: store.isSampleMode ? "sparkles" : (store.isExternalLibrary ? "externaldrive.fill" : "ipad"))
                         .font(.caption)
                         .foregroundStyle(palette.accent)
                     Text(store.libraryDisplayName)

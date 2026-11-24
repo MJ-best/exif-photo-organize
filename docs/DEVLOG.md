@@ -696,3 +696,23 @@ LOUPE(0.5.0 까지의 이름: Photo Organize)를 만들면서 받은 **요청과
   - GitHub API로 잔여 아티팩트 `0개(0 MB)` 확인.
   - 6개 워크플로 YAML 파싱 및 패키징 스크립트(`bash -n`) 검증.
 
+### iOS · iPadOS: 사용자 흐름 재설계 · 첫 실행 온보딩 · 견본 체험 모드 (11-24)
+
+- **요청 · 피드백**
+  - 실기기 스크린샷(`IMG_6055.png`, iPhone 빈 라이브러리 화면)과 함께 "사용자 입장에선 이게 뭘하라는건지 어려워. 사용자 입장에서 흐름을 디자인해줘. 설명이나 튜토리얼도 필요해보여".
+  - 이전 검토에서 사진 앱(갤러리)을 SSD로 쓰는 방안과 iCloud Drive 방안을 차례로 검토한 뒤, 사용자가 핵심 멘탈 모델을 확정: "아이폰, 아이패드는 기본개념을 SD카드에서 LOUPE 앱공간으로 가져오는걸로 하고 … 일단은 icloud는 없어도 될꺼같아" → 내장 공간(`파일 앱 → 나의 기기 → LOUPE`)과 외장 SSD 2가지에 집중.
+  - 스크린샷에서 확인된 문제: (1) 사진 0장인데 상단 전문 용어 필터 칩 7개가 먼저 노출됨, (2) 390pt 아이폰 폭에서 주황 버튼이 2줄로 깨지며 옆 버튼과 높이가 어긋남, (3) `외장 SSD 라이브러리 열기`가 폴더 선택기 대신 설정 시트로 우회됨, (4) 가져오기 시 저장 도착지와 `DCIM` 선택법 안내 부족, (5) SD 카드 없을 때 체험 불가, (6) 뷰어 제스처 안내 및 `픽`/`별점` 탭 직접 내보내기 버튼 부재.
+- **반영**
+  - `OnboardingView.swift`: 최초 실행 3장 웰컴 온보딩(① 3단계 흐름 요약 → ② 이 기기 vs 외장 SSD 앱 공간 선택 → ③ 위로 밀기 픽 / 아래로 밀기 거절 / 두 번 탭 확대 인터랙티브 제스처 미리보기). 건너뛰기 가능, 이미 사진이 있는 기존 사용자와 디버그 스크린샷 실행(`ScreenshotScene`)에서는 자동 생략.
+  - `LibraryGridView.swift`: 사진 0장일 때 상단 필터 칩 7개 숨김, 현재 저장 공간 칩 + 3단계 미니 가이드 + 세로 풀폭 버튼(`SD 카드 · 폴더에서 가져오기` / `외장 SSD 라이브러리 바로 열기` / `견본 사진 5장으로 체험해 보기`), 분석 완료 후 `B컷부터 보기` 안내 띠, `픽` · `별점` 탭 상단에 `N장 내보내기…` 버튼 추가, 상단 `?` 가이드 버튼 추가.
+  - `ImportSheetView.swift`: 출발(SD 카드) → 도착(LOUPE 앱 공간 + 여유 용량 + 변경 버튼) 요약 카드와 파일 앱 `DCIM` 폴더 선택 단계 가이드 추가.
+  - `ViewerView.swift`: 첫 진입 1회만 **사진 아래 하단 띠**에 제스처 팁 표시(3절 *사진을 가리지 말 것* 준수, 첫 제스처 수행 또는 확인 탭 시 영구 숨김). iPad 상단 바에 `?` 가이드 버튼 추가.
+  - `GuideSheetView.swift` · `SidebarView.swift` · `SettingsSheetView.swift`: 저장 위치 · `DCIM` 가져오기 · 터치/iPad 키보드 단축키 · 용어 사전 · 웰컴 가이드 다시 보기 · 견본 체험 제어.
+  - `BookmarkStore.swift` · `LibraryStore.swift` · `ios/Loupe/Resources/SampleCard/` · `ios/project.yml`: `docs/screenshots/sample-card/` 사진 5장(2.1 MB, GPS·인물 없음)을 번들하고 `Caches/LOUPE-Sample` 격리 라이브러리에서 실제 Rust 엔진으로 체험하도록 구현(체험 중 SD 카드 가져오기 시 먼저 체험을 종료해 실제 사진이 임시 폴더에 들어가지 않게 보호).
+- **결정과 이유**
+  - 견본 사진 체험은 사용자 실제 `Documents/LOUPE`나 외장 SSD를 오염시키지 않도록 `Caches/LOUPE-Sample`에 완전 격리하고, 체험 종료 시 디렉터리째 삭제하도록 설계했습니다.
+  - 시트 전환(`GuideSheet`/`ImportSheet`/`SettingsSheet` → `FolderDocumentPicker` 또는 `OnboardingView`) 시 UIKit의 동시 프레젠테이션 누락을 막도록 `LibraryStore`에 짧은 전환 대기 헬퍼를 두었습니다.
+- **확인**
+  - `LibraryStoreTests.swift`에 온보딩 표시/억제 · 뷰어 제스처 팁 영구 저장 · 격리 견본 체험 진입/종료 · 체험 중 가져오기 보호 단위 테스트 5건 추가.
+  - macOS CI(`ios.yml` · `ios-app-store.yml`)에서 XcodeGen + Swift 컴파일 + `LoupeTests` 전체 통과 확인 예정.
+  - 실기기 iPhone/iPad 터치 감각과 실제 USB-C SD 카드 리더 연동은 TestFlight 배포 후 확인 필요.

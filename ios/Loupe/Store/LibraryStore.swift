@@ -21,11 +21,17 @@ import SwiftUI
 @MainActor
 @Observable
 final class LibraryStore {
+    static let onboardingCompletedKey = "loupe.onboarding_completed"
+    static let viewerGestureTipSeenKey = "loupe.viewer_gesture_tip_seen"
+
     // MARK: - Observable State
     private(set) var isReady: Bool = false
     private(set) var isSuspended: Bool = false
     private(set) var isExternalLibrary: Bool = false
+    private(set) var isSampleMode: Bool = false
+    private(set) var isLoadingSampleMode: Bool = false
     private(set) var libraryDisplayName: String = "나의 기기 · LOUPE"
+    private(set) var freeCapacityBytes: Int64 = -1
 
     private(set) var activeView: LoupeViewFilter = .all
     private(set) var visibleIDs: [Int64] = []
@@ -51,7 +57,13 @@ final class LibraryStore {
     var showCompositionOverlay: Bool = false
     var showInspector: Bool = true
 
+    var onboardingPresented: Bool = false
+    var guideSheetPresented: Bool = false
+    var externalLibraryPickerPresented: Bool = false
     var settingsSheetPresented: Bool = false
+    private(set) var hasDismissedViewerGestureTip: Bool = false
+    private(set) var hasDismissedAnalysisNextStep: Bool = false
+
     var deleteConfirmation: DeleteConfirmation?
     var recoveryAlert: RecoveryAlert?
     private(set) var toast: BottomToast?
@@ -68,6 +80,8 @@ final class LibraryStore {
     var hasPendingBackgroundAnalysis: Bool { analyzer.hasPendingBackgroundAnalysis }
 
     private let bookmarkStore: BookmarkStore
+    private let defaults: UserDefaults
+    private let suppressAutoOnboarding: Bool
     private let engineFactory: @Sendable (String) throws -> any PhotoEngineProtocol
     private let engineBox: EngineWeakBox
     private let refBox: StoreRefBox
@@ -90,20 +104,26 @@ final class LibraryStore {
     init(
         engine: (any PhotoEngineProtocol)? = nil,
         bookmarkStore: BookmarkStore = BookmarkStore(),
+        userDefaults: UserDefaults? = nil,
+        suppressAutoOnboarding: Bool = false,
         thermalMonitor: ThermalBudgetMonitor? = nil,
         idleTimer: IdleTimerManager? = nil,
         learnDebounceNanoseconds: UInt64 = 1_200_000_000,
         engineFactory: @escaping @Sendable (String) throws -> any PhotoEngineProtocol
     ) {
+        let resolvedDefaults = userDefaults ?? .standard
         self.engine = engine
         self.bookmarkStore = bookmarkStore
+        self.defaults = resolvedDefaults
+        self.suppressAutoOnboarding = suppressAutoOnboarding
         self.learnDebounceNanoseconds = learnDebounceNanoseconds
         self.engineFactory = engineFactory
 
-        let savedThreshold = UserDefaults.standard.integer(forKey: "loupe.threshold")
+        let savedThreshold = resolvedDefaults.integer(forKey: "loupe.threshold")
         self.threshold = savedThreshold >= 30 ? savedThreshold : 60
-        let savedKeepPct = UserDefaults.standard.integer(forKey: "loupe.keep_pct")
+        let savedKeepPct = resolvedDefaults.integer(forKey: "loupe.keep_pct")
         self.keepPct = savedKeepPct >= 5 ? savedKeepPct : 15
+        self.hasDismissedViewerGestureTip = resolvedDefaults.bool(forKey: Self.viewerGestureTipSeenKey)
 
         let resolvedThermal = thermalMonitor ?? ThermalBudgetMonitor()
         let resolvedIdle = idleTimer ?? .shared
@@ -120,6 +140,8 @@ final class LibraryStore {
             engineProvider: { storeBox.store?.engine },
             onImportCompleted: {
                 guard let store = storeBox.store else { return }
+                store.hasDismissedAnalysisNextStep = false
+                store.refreshFreeCapacity()
                 await store.refreshSnapshot(force: true)
                 store.analyzer.startIfNeeded()
             },
@@ -156,15 +178,21 @@ final class LibraryStore {
 
     func bootstrap() async {
         if let existing = engine {
-            await configureAndLoad(engine: existing, external: false, name: "LOUPE")
+            await configureAndLoad(engine: existing, external: false, name: "LOUPE", sampleMode: false)
+            evaluateFirstRunOnboarding()
             return
         }
 
+        await openRealLibrary()
+        evaluateFirstRunOnboarding()
+    }
+
+    private func openRealLibrary() async {
         if let external = bookmarkStore.resolveExternalLibrary() {
             do {
                 let opened = try engineFactory(external.url.path)
                 activeLibraryAccess = external
-                await configureAndLoad(engine: opened, external: true, name: external.url.lastPathComponent)
+                await configureAndLoad(engine: opened, external: true, name: external.url.lastPathComponent, sampleMode: false)
                 return
             } catch {
                 LoupeLog.lifecycle.warning("External library unavailable, falling back to on-device: \(error.localizedDescription)")
@@ -175,7 +203,7 @@ final class LibraryStore {
             let localURL = try bookmarkStore.defaultLibraryURL()
             let opened = try engineFactory(localURL.path)
             activeLibraryAccess = nil
-            await configureAndLoad(engine: opened, external: false, name: "나의 기기 · LOUPE")
+            await configureAndLoad(engine: opened, external: false, name: "이 기기 · LOUPE", sampleMode: false)
         } catch {
             presentError(Self.mapError(error))
         }
@@ -186,9 +214,12 @@ final class LibraryStore {
             try bookmarkStore.saveExternalLibrary(url)
             let access = SecurityScopedAccess(url: url)
             await suspendForSwitch()
+            if isSampleMode {
+                bookmarkStore.clearSampleLibrary()
+            }
             let opened = try engineFactory(url.path)
             activeLibraryAccess = access
-            await configureAndLoad(engine: opened, external: true, name: url.lastPathComponent)
+            await configureAndLoad(engine: opened, external: true, name: url.lastPathComponent, sampleMode: false)
             showToast("'\(url.lastPathComponent)' 라이브러리를 열었습니다", tone: .positive)
         } catch {
             presentError(Self.mapError(error))
@@ -199,14 +230,168 @@ final class LibraryStore {
         do {
             bookmarkStore.clearExternalLibrary()
             await suspendForSwitch()
+            if isSampleMode {
+                bookmarkStore.clearSampleLibrary()
+            }
             let localURL = try bookmarkStore.defaultLibraryURL()
             let opened = try engineFactory(localURL.path)
             activeLibraryAccess = nil
-            await configureAndLoad(engine: opened, external: false, name: "나의 기기 · LOUPE")
-            showToast("기기 내장 라이브러리로 전환했습니다", tone: .neutral)
+            await configureAndLoad(engine: opened, external: false, name: "이 기기 · LOUPE", sampleMode: false)
+            showToast("이 기기(LOUPE 폴더)로 전환했습니다", tone: .neutral)
         } catch {
             presentError(Self.mapError(error))
         }
+    }
+
+    /// Launches an isolated 5-photo sample library in `Caches/LOUPE-Sample` so first-time users
+    /// without an SD card reader can try AI B-cut/A-cut culling and swipe gestures safely without
+    /// touching their real library.
+    func enterSampleMode(sampleDirectory: URL? = nil) async {
+        guard !isLoadingSampleMode else { return }
+        guard let sampleURL = sampleDirectory ?? Self.bundledSampleCardURL() else {
+            presentError(.notFound("견본 사진 폴더를 찾을 수 없습니다"))
+            return
+        }
+
+        isLoadingSampleMode = true
+        defer { isLoadingSampleMode = false }
+
+        completeOnboarding()
+        guideSheetPresented = false
+        settingsSheetPresented = false
+
+        do {
+            let sampleLibURL = try bookmarkStore.sampleLibraryURL(reset: true)
+            await suspendForSwitch()
+            activeLibraryAccess = nil
+
+            let sampleEngine = try engineFactory(sampleLibURL.path)
+            _ = try await sampleEngine.scanDirectory(path: sampleURL.path, label: "견본 사진", includeVideos: false)
+            _ = try await sampleEngine.importScanned(availableBytes: -1) { _ in }
+
+            activeView = .all
+            hasDismissedAnalysisNextStep = false
+            await configureAndLoad(engine: sampleEngine, external: false, name: "견본 사진 체험", sampleMode: true)
+            showToast("견본 사진으로 체험을 시작합니다", tone: .accent)
+        } catch {
+            bookmarkStore.clearSampleLibrary()
+            presentError(Self.mapError(error))
+            await openRealLibrary()
+        }
+    }
+
+    /// Leaves the isolated sample library, deletes temporary sample files, and restores the real
+    /// library (on-device or external SSD).
+    func exitSampleMode(openImportAfter: Bool = false) async {
+        guard isSampleMode else {
+            if openImportAfter {
+                refreshFreeCapacity()
+                importer.open()
+            }
+            return
+        }
+        await suspendForSwitch()
+        bookmarkStore.clearSampleLibrary()
+        isSampleMode = false
+        activeView = .all
+        await openRealLibrary()
+        if openImportAfter {
+            refreshFreeCapacity()
+            importer.open()
+        } else {
+            showToast("체험을 끝내고 내 라이브러리로 돌아왔습니다", tone: .neutral)
+        }
+    }
+
+    private static func bundledSampleCardURL() -> URL? {
+        if let folder = Bundle.main.url(forResource: "SampleCard", withExtension: nil) {
+            return folder
+        }
+        if let fallback = Bundle.main.resourceURL?.appendingPathComponent("SampleCard", isDirectory: true),
+           FileManager.default.fileExists(atPath: fallback.path) {
+            return fallback
+        }
+        return nil
+    }
+
+    // MARK: - Onboarding & Guided Experience
+
+    private func evaluateFirstRunOnboarding() {
+        let isScreenshotRun: Bool = {
+            #if DEBUG
+            return ScreenshotScene.current != nil
+            #else
+            return false
+            #endif
+        }()
+        guard !suppressAutoOnboarding, !isScreenshotRun else { return }
+        if counts.all == 0 && !defaults.bool(forKey: Self.onboardingCompletedKey) {
+            onboardingPresented = true
+        }
+    }
+
+    func completeOnboarding() {
+        defaults.set(true, forKey: Self.onboardingCompletedKey)
+        onboardingPresented = false
+    }
+
+    func completeOnboardingIfNeeded() {
+        if !defaults.bool(forKey: Self.onboardingCompletedKey) {
+            defaults.set(true, forKey: Self.onboardingCompletedKey)
+        }
+        onboardingPresented = false
+    }
+
+    func presentOnboardingReplay() {
+        guideSheetPresented = false
+        settingsSheetPresented = false
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: 350_000_000)
+            self?.onboardingPresented = true
+        }
+    }
+
+    /// Dismisses any currently presented sheet before opening `FolderDocumentPicker` so UIKit
+    /// never drops the presentation during a sheet dismissal transition.
+    func openExternalLibraryPickerAfterSheetDismiss() {
+        let hadSheet = importer.sheetPresented || guideSheetPresented || settingsSheetPresented
+        importer.sheetPresented = false
+        guideSheetPresented = false
+        settingsSheetPresented = false
+        if hadSheet {
+            Task { @MainActor [weak self] in
+                try? await Task.sleep(nanoseconds: 350_000_000)
+                self?.externalLibraryPickerPresented = true
+            }
+        } else {
+            externalLibraryPickerPresented = true
+        }
+    }
+
+    func dismissViewerGestureTip() {
+        hasDismissedViewerGestureTip = true
+        defaults.set(true, forKey: Self.viewerGestureTipSeenKey)
+    }
+
+    func dismissAnalysisNextStep() {
+        hasDismissedAnalysisNextStep = true
+    }
+
+    #if DEBUG
+    /// Suppresses first-run onboarding and gesture coach strips during automated App Store screenshot runs.
+    func suppressGuidesForScreenshots() {
+        onboardingPresented = false
+        hasDismissedViewerGestureTip = true
+        hasDismissedAnalysisNextStep = true
+    }
+    #endif
+
+    func refreshFreeCapacity() {
+        guard let engine else {
+            freeCapacityBytes = -1
+            return
+        }
+        freeCapacityBytes = BookmarkStore.availableCapacityBytes(at: URL(fileURLWithPath: engine.rootPath))
     }
 
     /// Called when SwiftUI `scenePhase` enters `.background` or `.active`.
@@ -236,6 +421,7 @@ final class LibraryStore {
             do {
                 try await engine.resume()
                 isSuspended = false
+                refreshFreeCapacity()
                 await refreshSnapshot(force: true)
                 analyzer.startIfNeeded()
             } catch {
@@ -296,14 +482,16 @@ final class LibraryStore {
         appliedRevision = 0
     }
 
-    private func configureAndLoad(engine: any PhotoEngineProtocol, external: Bool, name: String) async {
+    private func configureAndLoad(engine: any PhotoEngineProtocol, external: Bool, name: String, sampleMode: Bool) async {
         self.engine = engine
         self.engineBox.set(engine)
         self.isExternalLibrary = external
+        self.isSampleMode = sampleMode
         self.libraryDisplayName = name
         self.isSuspended = false
+        self.freeCapacityBytes = BookmarkStore.availableCapacityBytes(at: URL(fileURLWithPath: engine.rootPath))
 
-        let savedOff = (UserDefaults.standard.object(forKey: "loupe.disabled_rules") as? NSNumber)?.int64Value ?? 0
+        let savedOff = (defaults.object(forKey: "loupe.disabled_rules") as? NSNumber)?.int64Value ?? 0
         await engine.setThreshold(threshold)
         await engine.setKeepPct(keepPct)
         await engine.setDisabledRules(savedOff)
@@ -675,7 +863,7 @@ final class LibraryStore {
     func updateThreshold(_ value: Int) {
         let clamped = max(30, min(90, value))
         threshold = clamped
-        UserDefaults.standard.set(clamped, forKey: "loupe.threshold")
+        defaults.set(clamped, forKey: "loupe.threshold")
         Task { [weak self] in
             await self?.engine?.setThreshold(clamped)
             await self?.refreshSnapshot(force: true)
@@ -685,7 +873,7 @@ final class LibraryStore {
     func updateKeepPct(_ value: Int) {
         let clamped = max(5, min(50, value))
         keepPct = clamped
-        UserDefaults.standard.set(clamped, forKey: "loupe.keep_pct")
+        defaults.set(clamped, forKey: "loupe.keep_pct")
         Task { [weak self] in
             await self?.engine?.setKeepPct(clamped)
             await self?.refreshSnapshot(force: true)
@@ -697,7 +885,7 @@ final class LibraryStore {
         Task { [weak self] in
             guard let self else { return }
             let next = (await engine.disabledRules()) ^ bit
-            UserDefaults.standard.set(NSNumber(value: next), forKey: "loupe.disabled_rules")
+            self.defaults.set(NSNumber(value: next), forKey: "loupe.disabled_rules")
             await engine.setDisabledRules(next)
             self.rules = await engine.rules()
             _ = try? await engine.learn()
@@ -750,6 +938,13 @@ final class LibraryStore {
     }
 
     func openImport() {
+        if isSampleMode {
+            Task { [weak self] in
+                await self?.exitSampleMode(openImportAfter: true)
+            }
+            return
+        }
+        refreshFreeCapacity()
         importer.open()
     }
 
@@ -846,7 +1041,9 @@ final class LibraryStore {
             Task { [weak self] in
                 await self?.handleScenePhase(.active)
             }
-        case .pickLibraryFolder, .openSettingsToEmptyTrash:
+        case .pickLibraryFolder:
+            externalLibraryPickerPresented = true
+        case .openSettingsToEmptyTrash:
             settingsSheetPresented = true
         case .startAnalysis:
             analyzer.startIfNeeded()

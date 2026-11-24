@@ -64,6 +64,11 @@ struct ViewerView: View {
                         }
                     }
 
+                    // First-time gesture coach strip strictly BELOW photo (never covers photo — DEVLOG §3)
+                    if !store.hasDismissedViewerGestureTip {
+                        viewerGestureCoachStrip
+                    }
+
                     // Bottom notification & quick-cull strip (strictly BELOW photo, never covering it)
                     bottomStrip(isWide: isWide, previewEdge: previewEdge)
                 }
@@ -206,6 +211,18 @@ struct ViewerView: View {
                 .tint(palette.control)
                 .accessibilityLabel("구도 표시")
 
+                if isWide {
+                    Button {
+                        store.guideSheetPresented = true
+                    } label: {
+                        Image(systemName: "questionmark.circle")
+                            .foregroundStyle(palette.text)
+                    }
+                    .buttonStyle(.bordered)
+                    .tint(palette.control)
+                    .accessibilityLabel("사용 가이드")
+                }
+
                 Button {
                     if isWide {
                         withAnimation(.easeInOut(duration: 0.18)) { store.showInspector.toggle() }
@@ -225,6 +242,33 @@ struct ViewerView: View {
         .padding(.vertical, 8)
         .background(palette.toolbar)
         .overlay(alignment: .bottom) { Divider().overlay(palette.separator) }
+    }
+
+    private var viewerGestureCoachStrip: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "hand.draw")
+                .font(.caption)
+                .foregroundStyle(palette.accent)
+            Text("↑ 위로 밀어 픽 · ↓ 아래로 밀어 거절 · 두 번 탭해 확대")
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(palette.text)
+                .lineLimit(1)
+                .minimumScaleFactor(0.85)
+            Spacer(minLength: 4)
+            Button("확인") {
+                withAnimation(.easeOut(duration: 0.18)) {
+                    store.dismissViewerGestureTip()
+                }
+            }
+            .font(.caption2.weight(.bold))
+            .foregroundStyle(palette.accent)
+            .buttonStyle(.plain)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
+        .background(palette.selected.opacity(0.65))
+        .overlay(alignment: .top) { Divider().overlay(palette.separator) }
+        .transition(.opacity)
     }
 
     private func bottomStrip(isWide: Bool, previewEdge: Int) -> some View {
@@ -357,6 +401,9 @@ struct ViewerView: View {
     }
 
     private func toggleCenterZoom() {
+        if !store.hasDismissedViewerGestureTip {
+            store.dismissViewerGestureTip()
+        }
         LoupeHaptics.selection()
         withAnimation(.easeInOut(duration: 0.18)) {
             if scale > 1.05 {
@@ -383,6 +430,9 @@ struct ViewerView: View {
 
     private func toggleFlag(_ target: Int) {
         guard let id = currentID else { return }
+        if !store.hasDismissedViewerGestureTip {
+            store.dismissViewerGestureTip()
+        }
         LoupeHaptics.impact()
         let currentFlag = detail?.summary.flag ?? store.summaries[id]?.flag ?? 0
         let next = (currentFlag == target) ? 0 : target

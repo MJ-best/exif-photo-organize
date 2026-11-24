@@ -35,6 +35,11 @@ targets:
     platform: iOS
     sources:
       - path: Loupe
+        excludes:
+          - "Resources/SampleCard"
+          - "Resources/SampleCard/**"
+      - path: Loupe/Resources/SampleCard
+        type: folder
       - path: Generated/photoorg_ios.swift
         optional: true
     settings:

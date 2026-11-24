@@ -43,6 +43,39 @@ final class BookmarkStore: Sendable {
         return dir
     }
 
+    /// Isolated temporary library directory (`Caches/LOUPE-Sample`) for the 5-photo tryout mode
+    /// so sample photos never mix into the user's real on-device or external SSD library.
+    func sampleLibraryURL(reset: Bool = false) throws -> URL {
+        let caches = try FileManager.default.url(
+            for: .cachesDirectory,
+            in: .userDomainMask,
+            appropriateFor: nil,
+            create: true
+        )
+        let dir = caches.appendingPathComponent("LOUPE-Sample", isDirectory: true)
+        if reset && FileManager.default.fileExists(atPath: dir.path) {
+            try? FileManager.default.removeItem(at: dir)
+        }
+        if !FileManager.default.fileExists(atPath: dir.path) {
+            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        }
+        return dir
+    }
+
+    /// Removes the isolated sample tryout library completely on exit.
+    func clearSampleLibrary() {
+        guard let caches = try? FileManager.default.url(
+            for: .cachesDirectory,
+            in: .userDomainMask,
+            appropriateFor: nil,
+            create: false
+        ) else { return }
+        let dir = caches.appendingPathComponent("LOUPE-Sample", isDirectory: true)
+        if FileManager.default.fileExists(atPath: dir.path) {
+            try? FileManager.default.removeItem(at: dir)
+        }
+    }
+
     /// Marks `url` as excluded from iCloud Backup (App Store Guideline 2.23 compliance).
     func markExcludedFromBackup(_ url: URL) {
         var target = url
