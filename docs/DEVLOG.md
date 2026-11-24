@@ -22,14 +22,14 @@ LOUPE(0.5.0 까지의 이름: Photo Organize)를 만들면서 받은 **요청과
 
 ---
 
-## 1. 지금 상태 (2026-11-21)
+## 1. 지금 상태 (2026-11-24)
 
 | 항목 | 상태 |
 |---|---|
-| 최신 버전 | **0.7.4** — main, GitHub 릴리스 (맥 유니버설 dmg · zip, Windows zip, Linux tar.gz) |
+| 최신 버전 | **0.7.5** (워크스페이스 · iOS 업데이트 준비) / 데스크톱 GitHub 릴리스 **0.7.4** |
 | 데스크톱 배포 | GitHub 릴리스. 맥은 Apple 공증 전이라 **터미널 한 줄 설치 · 업데이트** 를 안내함 (릴리스 노트마다 들어 있음) |
-| Mac App Store | 업로드된 빌드: 0.6.0 (3) · 0.6.1 (4) · 0.7.1 (5) · 0.7.2 (6) · 0.7.3 (7, 새 아이콘 — `winit` 의 `_CGSSetWindowBackgroundBlurRadius` 비공개 API 참조로 2.5.1 자동 거절). #27 에서 해당 심볼을 제거했으므로 **app-store 워크플로를 다시 실행해 새 빌드를 올려 재제출** 해야 함 (4절) |
-| iOS · iPadOS (`ios/`, `crates/ios`) | SwiftUI Universal 앱 + UniFFI 브릿지 + 2차 아키텍처 하드닝 + CI(`ios.yml`) 완료. 11-22 iOS 26.5 시뮬레이터(아이폰 17 Pro Max · 아이패드 Pro 13")에서 실제 사진으로 화면을 띄워 스토어 스크린샷 11장(`docs/ios-app-store/screenshots/`). 실기기 확인 전 |
+| Mac App Store | 0.7.3 (7) 이후 #27(비공개 API 제거) · #30(0.7.4) 반영. 로컬 Mac 빌드 `0.7.4 (10)` 패키징 완료 |
+| iOS · iPadOS (`ios/`, `crates/ios`) | **`0.7.4 (빌드 6)` App Store 심사 승인 완료**. #35에서 첫 실행 3단계 온보딩 · 빈 화면 재설계 · 견본 사진 5장 체험 모드 반영 후 **`0.7.5`** 로 버전 상향 |
 | Google Play | 개인 개발자 계정이 구글 검토 중이라 앱을 만들 수 없음. 업로드 키 시크릿 · 테스터 12명 (14일 연속) 필요 |
 | 판매 사이트 (`site/`) | 코드 · 에뮬레이터 테스트 완료, **배포 전**. 앱의 *설정 → 라이선스* 칸은 사이트가 열릴 때까지 숨김 |
 | 셀렉 엔진 (`crates/cull`) | 분석 버전 4, 학습 특징 24개. BUSL 1.1, 0.7.4 의 MIT 전환일 2030-11-21 |
@@ -716,3 +716,8 @@ LOUPE(0.5.0 까지의 이름: Photo Organize)를 만들면서 받은 **요청과
   - `LibraryStoreTests.swift`에 온보딩 표시/억제 · 뷰어 제스처 팁 영구 저장 · 격리 견본 체험 진입/종료 · 체험 중 가져오기 보호 단위 테스트 5건 추가.
   - macOS CI(`ios.yml` · `ios-app-store.yml`)에서 XcodeGen + Swift 컴파일 + `LoupeTests` 전체 통과 확인 예정.
   - 실기기 iPhone/iPad 터치 감각과 실제 USB-C SD 카드 리더 연동은 TestFlight 배포 후 확인 필요.
+
+### 버전 상향: 0.7.5 (iOS App Store 업데이트 제출 준비, 11-24)
+
+- **요청**: `ios-app-store #10` 업로드 검증에서 `90186` / `90062` 오류(`0.7.4`가 이미 App Store 심사 승인되어 트레인이 닫힘) 발생 → 새 빌드 제출을 위해 버전 상향 요청.
+- **반영**: `Cargo.toml`, `Cargo.lock`, `ios/project.yml`을 `0.7.5`로 상향 (데스크톱 코드는 변경이 없어 GitHub 데스크톱 릴리스 노트는 생성하지 않음).
