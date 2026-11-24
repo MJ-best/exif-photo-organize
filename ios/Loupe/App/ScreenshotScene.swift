@@ -44,6 +44,7 @@ extension LibraryStore {
     /// Opens the screen asked for with `-LoupeScene` (nothing without it).
     func openScreenshotScene() async {
         guard let scene = ScreenshotScene.current else { return }
+        suppressGuidesForScreenshots()
         switch scene {
         case .library:
             break

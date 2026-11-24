@@ -4,13 +4,24 @@ import XCTest
 
 @MainActor
 final class LibraryStoreTests: XCTestCase {
+    private func makeIsolatedDefaults() -> UserDefaults {
+        let suite = "loupe.tests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defaults.removePersistentDomain(forName: suite)
+        return defaults
+    }
+
     private func makeStore(
         sampleCount: Int = 12,
+        userDefaults: UserDefaults? = nil,
+        suppressAutoOnboarding: Bool = true,
         idleTimer: IdleTimerManager? = nil
     ) -> (LibraryStore, MockPhotoEngine) {
         let mock = MockPhotoEngine(sampleCount: sampleCount)
         let store = LibraryStore(
             engine: mock,
+            userDefaults: userDefaults ?? makeIsolatedDefaults(),
+            suppressAutoOnboarding: suppressAutoOnboarding,
             idleTimer: idleTimer ?? IdleTimerManager(applyDisabled: { _ in }),
             learnDebounceNanoseconds: 20_000_000,
             engineFactory: { _ in mock }
@@ -241,5 +252,110 @@ final class LibraryStoreTests: XCTestCase {
         XCTAssertTrue(store.isReady)
         XCTAssertTrue(store.visibleIDs.isEmpty)
         XCTAssertEqual(store.counts, .zero)
+    }
+
+    func testFirstRunOnboardingPresentedOnlyForEmptyUnseenLibrary() async {
+        let defaults = makeIsolatedDefaults()
+        let (store, _) = makeStore(
+            sampleCount: 0,
+            userDefaults: defaults,
+            suppressAutoOnboarding: false
+        )
+        await store.bootstrap()
+
+        XCTAssertTrue(store.onboardingPresented)
+
+        store.completeOnboarding()
+        XCTAssertFalse(store.onboardingPresented)
+        XCTAssertTrue(defaults.bool(forKey: LibraryStore.onboardingCompletedKey))
+
+        let (secondStore, _) = makeStore(
+            sampleCount: 0,
+            userDefaults: defaults,
+            suppressAutoOnboarding: false
+        )
+        await secondStore.bootstrap()
+        XCTAssertFalse(secondStore.onboardingPresented)
+    }
+
+    func testOnboardingSuppressedWhenLibraryAlreadyHasPhotos() async {
+        let defaults = makeIsolatedDefaults()
+        let (store, _) = makeStore(
+            sampleCount: 5,
+            userDefaults: defaults,
+            suppressAutoOnboarding: false
+        )
+        await store.bootstrap()
+
+        XCTAssertFalse(store.onboardingPresented)
+    }
+
+    func testViewerGestureTipDismissesAndPersists() async {
+        let defaults = makeIsolatedDefaults()
+        let (store, _) = makeStore(sampleCount: 3, userDefaults: defaults)
+        await store.bootstrap()
+
+        XCTAssertFalse(store.hasDismissedViewerGestureTip)
+        store.dismissViewerGestureTip()
+        XCTAssertTrue(store.hasDismissedViewerGestureTip)
+        XCTAssertTrue(defaults.bool(forKey: LibraryStore.viewerGestureTipSeenKey))
+
+        let (secondStore, _) = makeStore(sampleCount: 3, userDefaults: defaults)
+        XCTAssertTrue(secondStore.hasDismissedViewerGestureTip)
+    }
+
+    func testSampleModeEntersIsolatedLibraryAndExitsCleanly() async {
+        let defaults = makeIsolatedDefaults()
+        let store = LibraryStore(
+            engine: MockPhotoEngine(sampleCount: 0),
+            userDefaults: defaults,
+            suppressAutoOnboarding: false,
+            idleTimer: IdleTimerManager(applyDisabled: { _ in }),
+            learnDebounceNanoseconds: 20_000_000,
+            engineFactory: { path in
+                MockPhotoEngine(sampleCount: path.contains("LOUPE-Sample") ? 5 : 0)
+            }
+        )
+        await store.bootstrap()
+        XCTAssertTrue(store.onboardingPresented)
+        XCTAssertFalse(store.isSampleMode)
+
+        let dummySampleDir = FileManager.default.temporaryDirectory
+        await store.enterSampleMode(sampleDirectory: dummySampleDir)
+
+        XCTAssertTrue(store.isSampleMode)
+        XCTAssertFalse(store.onboardingPresented)
+        XCTAssertEqual(store.counts.all, 5)
+        XCTAssertEqual(store.libraryDisplayName, "견본 사진 체험")
+
+        await store.exitSampleMode()
+
+        XCTAssertFalse(store.isSampleMode)
+        XCTAssertEqual(store.counts.all, 0)
+        XCTAssertEqual(store.libraryDisplayName, "이 기기 · LOUPE")
+    }
+
+    func testOpenImportDuringSampleModeExitsSampleModeFirst() async {
+        let defaults = makeIsolatedDefaults()
+        let store = LibraryStore(
+            engine: MockPhotoEngine(sampleCount: 0),
+            userDefaults: defaults,
+            suppressAutoOnboarding: true,
+            idleTimer: IdleTimerManager(applyDisabled: { _ in }),
+            learnDebounceNanoseconds: 20_000_000,
+            engineFactory: { path in
+                MockPhotoEngine(sampleCount: path.contains("LOUPE-Sample") ? 5 : 0)
+            }
+        )
+        await store.bootstrap()
+
+        await store.enterSampleMode(sampleDirectory: FileManager.default.temporaryDirectory)
+        XCTAssertTrue(store.isSampleMode)
+
+        store.openImport()
+        try? await Task.sleep(nanoseconds: 120_000_000)
+
+        XCTAssertFalse(store.isSampleMode)
+        XCTAssertTrue(store.importer.sheetPresented)
     }
 }

@@ -14,12 +14,18 @@ struct LibraryGridView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            if sizeClass == .compact {
+            if sizeClass == .compact && store.counts.all > 0 {
                 compactFilterRibbon
+            }
+
+            if store.isSampleMode {
+                sampleModeBanner
             }
 
             if let progress = store.analyzer.progress {
                 analysisBanner(progress)
+            } else if shouldShowAnalysisNextStep {
+                analysisNextStepBanner
             }
 
             contextualBar
@@ -64,7 +70,7 @@ struct LibraryGridView: View {
             bottomBar
         }
         .background(palette.content)
-        .navigationTitle(store.activeView.title)
+        .navigationTitle(store.counts.all == 0 ? "LOUPE" : store.activeView.title)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItemGroup(placement: .topBarTrailing) {
@@ -86,12 +92,20 @@ struct LibraryGridView: View {
                         }
                     }
                 }
+
                 Button {
                     store.openImport()
                 } label: {
                     Image(systemName: "square.and.arrow.down")
                 }
                 .accessibilityLabel("SD 카드 / 폴더 가져오기")
+
+                Button {
+                    store.guideSheetPresented = true
+                } label: {
+                    Image(systemName: "questionmark.circle")
+                }
+                .accessibilityLabel("사용 가이드")
 
                 if sizeClass == .compact {
                     Button {
@@ -104,6 +118,82 @@ struct LibraryGridView: View {
                 }
             }
         }
+    }
+
+    private var shouldShowAnalysisNextStep: Bool {
+        store.activeView == .all
+            && !store.hasDismissedAnalysisNextStep
+            && store.counts.analysed > 0
+            && (store.counts.candidates > 0 || store.counts.keepers > 0)
+    }
+
+    private var sampleModeBanner: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "sparkles")
+                .foregroundStyle(palette.accent)
+            Text("견본 사진 체험 중")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(palette.text)
+                .lineLimit(1)
+            Spacer()
+            Button("체험 끝내기") {
+                Task { await store.exitSampleMode() }
+            }
+            .font(.caption.weight(.semibold))
+            .buttonStyle(.bordered)
+            .controlSize(.mini)
+            .tint(palette.accent)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
+        .background(palette.selected.opacity(0.65))
+        .overlay(alignment: .bottom) { Divider().overlay(palette.separator) }
+    }
+
+    private var analysisNextStepBanner: some View {
+        let hasCandidates = store.counts.candidates > 0
+        let summaryText: String = {
+            if store.counts.candidates > 0 && store.counts.keepers > 0 {
+                return "분석 완료 · B컷 후보 \(store.counts.candidates)장 · A컷 후보 \(store.counts.keepers)장"
+            } else if store.counts.candidates > 0 {
+                return "분석 완료 · B컷 후보 \(store.counts.candidates)장 찾음"
+            } else {
+                return "분석 완료 · A컷 후보 \(store.counts.keepers)장 찾음"
+            }
+        }()
+
+        return HStack(spacing: 8) {
+            Image(systemName: "wand.and.stars")
+                .font(.caption)
+                .foregroundStyle(palette.accent)
+            Text(summaryText)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(palette.text)
+                .lineLimit(1)
+            Spacer(minLength: 4)
+            Button(hasCandidates ? "B컷부터 보기" : "A컷부터 보기") {
+                store.dismissAnalysisNextStep()
+                store.selectView(hasCandidates ? .candidates : .keepers)
+            }
+            .font(.caption.weight(.semibold))
+            .buttonStyle(.borderedProminent)
+            .controlSize(.mini)
+            .tint(palette.accent)
+
+            Button {
+                store.dismissAnalysisNextStep()
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(palette.text3)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("안내 닫기")
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 7)
+        .background(palette.selected.opacity(0.45))
+        .overlay(alignment: .bottom) { Divider().overlay(palette.separator) }
     }
 
     private var compactFilterRibbon: some View {
@@ -250,6 +340,48 @@ struct LibraryGridView: View {
             .background(palette.toolbar)
             .overlay(alignment: .bottom) { Divider().overlay(palette.separator) }
 
+        case .picked where !store.visibleIDs.isEmpty:
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("픽한 A컷 \(store.visibleIDs.count)장")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(palette.text)
+                    Text("사진 앱 · AirDrop · 파일 · Lightroom 전송")
+                        .font(.caption2)
+                        .foregroundStyle(palette.text2)
+                        .lineLimit(1)
+                }
+                Spacer()
+                Button("\(store.visibleIDs.count)장 내보내기…") {
+                    store.openExport(for: store.visibleIDs)
+                }
+                .font(.caption.weight(.semibold))
+                .buttonStyle(.borderedProminent)
+                .tint(palette.accent)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(palette.toolbar)
+            .overlay(alignment: .bottom) { Divider().overlay(palette.separator) }
+
+        case .rated where !store.visibleIDs.isEmpty:
+            HStack {
+                Text("별점 준 사진 \(store.visibleIDs.count)장")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(palette.text)
+                Spacer()
+                Button("\(store.visibleIDs.count)장 내보내기…") {
+                    store.openExport(for: store.visibleIDs)
+                }
+                .font(.caption.weight(.semibold))
+                .buttonStyle(.borderedProminent)
+                .tint(palette.accent)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(palette.toolbar)
+            .overlay(alignment: .bottom) { Divider().overlay(palette.separator) }
+
         case .rejected where !store.visibleIDs.isEmpty:
             HStack {
                 Text("거절한 사진 \(store.visibleIDs.count)장")
@@ -349,44 +481,183 @@ struct LibraryGridView: View {
     }
 
     private var emptyState: some View {
+        ScrollView {
+            if store.counts.all == 0 {
+                emptyLibraryWelcome
+            } else {
+                emptyFilteredView
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private var emptyLibraryWelcome: some View {
+        VStack(spacing: 16) {
+            // Current LOUPE library space pill
+            Button {
+                store.refreshTrashBytes()
+                store.settingsSheetPresented = true
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: store.isExternalLibrary ? "externaldrive.fill" : "iphone")
+                        .font(.caption)
+                        .foregroundStyle(palette.accent)
+                    Text("저장 공간:")
+                        .font(.caption)
+                        .foregroundStyle(palette.text2)
+                    Text(store.libraryDisplayName)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(palette.text)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                    Text("변경")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(palette.accent)
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 7)
+                .background(palette.panel, in: Capsule())
+                .overlay(Capsule().stroke(palette.separator, lineWidth: 1))
+            }
+            .buttonStyle(.plain)
+            .padding(.top, 8)
+
+            Image("Mascot")
+                .resizable()
+                .scaledToFit()
+                .frame(width: 88, height: 88)
+
+            VStack(spacing: 6) {
+                Text("첫 사진을 가져와 보세요")
+                    .font(.title3.weight(.bold))
+                    .foregroundStyle(palette.text)
+                    .multilineTextAlignment(.center)
+                Text("SD 카드에서 LOUPE 공간으로 복사하면 날짜 정리와 AI B컷 · A컷 분석이 자동으로 시작됩니다.")
+                    .font(.subheadline)
+                    .foregroundStyle(palette.text2)
+                    .multilineTextAlignment(.center)
+            }
+
+            // 3-step visual mini guide
+            VStack(alignment: .leading, spacing: 10) {
+                emptyStepRow("1", "USB-C 카드 리더로 SD 카드 연결")
+                emptyStepRow("2", "파일 앱에서 카드 → DCIM 폴더 선택")
+                emptyStepRow("3", "AI가 찾은 B컷 후보 거르고 A컷 내보내기")
+            }
+            .padding(14)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(palette.panel, in: RoundedRectangle(cornerRadius: 16))
+            .overlay(RoundedRectangle(cornerRadius: 16).stroke(palette.separator, lineWidth: 1))
+
+            // Full-width stacked buttons (never wrap unevenly on compact iPhones)
+            VStack(spacing: 10) {
+                Button {
+                    store.openImport()
+                } label: {
+                    Text("SD 카드 · 폴더에서 가져오기")
+                        .font(.body.weight(.semibold))
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 4)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(palette.accent)
+                .controlSize(.large)
+
+                Button {
+                    store.externalLibraryPickerPresented = true
+                } label: {
+                    Text("외장 SSD 라이브러리 바로 열기")
+                        .font(.subheadline.weight(.semibold))
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 3)
+                }
+                .buttonStyle(.bordered)
+                .tint(palette.text)
+                .controlSize(.large)
+
+                Button {
+                    Task { await store.enterSampleMode() }
+                } label: {
+                    if store.isLoadingSampleMode {
+                        HStack(spacing: 8) {
+                            ProgressView().controlSize(.small)
+                            Text("견본 사진 불러오는 중…")
+                        }
+                        .font(.subheadline.weight(.semibold))
+                    } else {
+                        Text("SD 카드가 없나요? 견본 사진 5장으로 체험해 보기")
+                            .font(.subheadline.weight(.semibold))
+                    }
+                }
+                .foregroundStyle(palette.accent)
+                .disabled(store.isLoadingSampleMode)
+                .padding(.top, 4)
+            }
+        }
+        .frame(maxWidth: 420)
+        .padding(.horizontal, 20)
+        .padding(.vertical, 16)
+        .frame(maxWidth: .infinity)
+    }
+
+    private func emptyStepRow(_ num: String, _ text: String) -> some View {
+        HStack(spacing: 10) {
+            Text(num)
+                .font(.caption2.weight(.bold))
+                .foregroundStyle(palette.accent)
+                .frame(width: 22, height: 22)
+                .background(palette.selected, in: Circle())
+            Text(text)
+                .font(.caption.weight(.medium))
+                .foregroundStyle(palette.text)
+            Spacer(minLength: 0)
+        }
+    }
+
+    private var emptyFilteredView: some View {
         VStack(spacing: 14) {
             Image("Mascot")
                 .resizable()
                 .scaledToFit()
-                .frame(width: 112, height: 112)
-            Text(store.counts.all == 0 ? "SD 카드나 외장 SSD를 연결해 보세요" : "이 보기에 해당하는 사진이 없습니다")
+                .frame(width: 84, height: 84)
+            Text("'\(store.activeView.title)'에 해당하는 사진이 없습니다")
                 .font(.headline)
                 .foregroundStyle(palette.text)
                 .multilineTextAlignment(.center)
-            Text(
-                store.counts.all == 0
-                    ? "USB-C 카드 리더로 사진을 가져오면 EXIF 날짜별로 정리되고, 셀렉 도우미가 기기 안에서 B컷과 A컷을 찾아 줍니다."
-                    : "다른 필터를 선택하거나 새 사진을 가져올 수 있습니다."
-            )
-            .font(.subheadline)
-            .foregroundStyle(palette.text2)
-            .multilineTextAlignment(.center)
-            .frame(maxWidth: 360)
+            Text(emptyFilterHint)
+                .font(.subheadline)
+                .foregroundStyle(palette.text2)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: 340)
 
-            HStack(spacing: 10) {
-                Button("SD 카드 · 폴더 가져오기") {
-                    store.openImport()
-                }
-                .buttonStyle(.borderedProminent)
-                .tint(palette.accent)
-
-                if store.counts.all == 0 {
-                    Button("외장 SSD 라이브러리 열기") {
-                        store.settingsSheetPresented = true
-                    }
-                    .buttonStyle(.bordered)
-                    .tint(palette.text2)
-                }
+            Button("전체 사진으로 돌아가기") {
+                store.selectView(.all)
             }
+            .buttonStyle(.borderedProminent)
+            .tint(palette.accent)
             .padding(.top, 4)
         }
-        .padding(24)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding(32)
+        .frame(maxWidth: .infinity)
+    }
+
+    private var emptyFilterHint: String {
+        switch store.activeView {
+        case .candidates:
+            return "현재 B컷 기준(\(store.threshold)%)에 해당하는 사진이 없습니다. 위 슬라이더를 낮추면 더 엄격하게 찾아볼 수 있습니다."
+        case .keepers:
+            return "분석이 끝나면 선명도와 구도가 좋은 상위 사진이 여기에 자동으로 모입니다."
+        case .picked:
+            return "사진을 열어 위로 밀거나 깃발 버튼을 누르면 남길 A컷으로 모입니다."
+        case .rejected:
+            return "사진을 열어 아래로 밀거나 X 버튼으로 거절한 사진이 여기에 모입니다."
+        case .rated:
+            return "사진 보기에서 별점(★)을 준 사진이 여기에 모입니다."
+        case .undecided:
+            return "모든 사진의 분류를 마쳤습니다."
+        case .all:
+            return "새 사진을 가져올 수 있습니다."
+        }
     }
 
     private func toastColor(_ tone: BottomToast.Tone) -> Color {

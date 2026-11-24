@@ -38,13 +38,34 @@ struct RootView: View {
         }
         .tint(palette.accent)
         .sheet(isPresented: $importer.sheetPresented) {
-            ImportSheetView(importer: store.importer)
+            ImportSheetView(
+                importer: store.importer,
+                destinationName: store.libraryDisplayName,
+                isExternalLibrary: store.isExternalLibrary,
+                freeCapacityBytes: store.freeCapacityBytes,
+                onChangeDestination: {
+                    store.openExternalLibraryPickerAfterSheetDismiss()
+                }
+            )
         }
         .sheet(isPresented: $exporter.sheetPresented) {
             ExportSheetView(exporter: store.exporter)
         }
         .sheet(isPresented: $store.settingsSheetPresented) {
             SettingsSheetView(store: store)
+        }
+        .sheet(isPresented: $store.guideSheetPresented) {
+            GuideSheetView(store: store)
+        }
+        .sheet(isPresented: $store.externalLibraryPickerPresented) {
+            FolderDocumentPicker { url in
+                Task { await store.switchToExternalLibrary(url: url) }
+            }
+        }
+        .sheet(isPresented: $store.onboardingPresented, onDismiss: {
+            store.completeOnboardingIfNeeded()
+        }) {
+            OnboardingView(store: store)
         }
         .confirmationDialog(
             "휴지통으로 옮길까요?",

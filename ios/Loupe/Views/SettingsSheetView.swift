@@ -110,6 +110,34 @@ struct SettingsSheetView: View {
                     Text("거절 후 휴지통으로 옮긴 사진은 비우기 전까지 보관되며, 비워도 셀렉 도우미 학습 기록은 남습니다. 외장 SSD를 분리하기 전에 WAL 정리를 실행하면 다른 기기에서도 안전하게 바로 열 수 있습니다.")
                 }
 
+                Section("도움말 · 체험") {
+                    Button("사용 가이드 · 제스처 보기") {
+                        dismiss()
+                        Task { @MainActor in
+                            try? await Task.sleep(nanoseconds: 350_000_000)
+                            store.guideSheetPresented = true
+                        }
+                    }
+                    .foregroundStyle(palette.accent)
+
+                    Button("처음 웰컴 가이드 다시 보기") {
+                        store.presentOnboardingReplay()
+                    }
+
+                    if store.isSampleMode {
+                        Button("견본 체험 끝내고 내 라이브러리로 돌아가기", role: .destructive) {
+                            dismiss()
+                            Task { await store.exitSampleMode() }
+                        }
+                    } else {
+                        Button("견본 사진 5장으로 체험해 보기") {
+                            dismiss()
+                            Task { await store.enterSampleMode() }
+                        }
+                        .disabled(store.isLoadingSampleMode)
+                    }
+                }
+
                 Section("개인정보 · 보안") {
                     Label("모든 사진과 AI 모델은 기기 안에서만 동작합니다 (네트워크 전송 0)", systemImage: "lock.shield")
                         .font(.caption)
